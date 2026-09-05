@@ -1,0 +1,1 @@
+export { createMockMusicSourceAdapter } from './mockAdapter'

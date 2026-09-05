@@ -1,0 +1,59 @@
+@import 'tailwindcss';
+
+:root {
+  color-scheme: light dark;
+  --font-sans: 'DM Sans', 'Segoe UI', sans-serif;
+  --font-display: 'Syne', 'Segoe UI', sans-serif;
+  --color-bg: #f3f5f7;
+  --color-fg: #14212b;
+  --color-muted: #5b6b76;
+  --color-border: #d7dee3;
+  --color-nav: #eef2f4;
+  --color-surface: #ffffff;
+  --color-surface-hover: #e8eef2;
+  --color-accent: #0f766e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #0c1216;
+    --color-fg: #eef3f6;
+    --color-muted: #9aadb8;
+    --color-border: #243039;
+    --color-nav: #121a20;
+    --color-surface: #182229;
+    --color-surface-hover: #223039;
+    --color-accent: #2dd4bf;
+  }
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 500px at 10% -10%, rgba(15, 118, 110, 0.12), transparent 55%),
+    radial-gradient(900px 400px at 100% 0%, rgba(180, 83, 9, 0.08), transparent 50%),
+    var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background:
+      radial-gradient(1200px 500px at 10% -10%, rgba(45, 212, 191, 0.08), transparent 55%),
+      radial-gradient(900px 400px at 100% 0%, rgba(180, 83, 9, 0.06), transparent 50%),
+      var(--color-bg);
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
