@@ -1,6 +1,9 @@
+import type { SwipeAction } from './swipe'
+
 export type SwipeDirection = 'left' | 'right' | 'up' | 'down'
 
-/** Семантические действия. Направления к ним привязываются через gestureConfig. */
-export type GestureAction = 'categorize' | 'like' | 'skip' | 'previous'
+/** @deprecated Используйте SwipeAction — направление ≠ действие. */
+export type GestureAction = SwipeAction
 
-export type GestureConfig = Record<SwipeDirection, GestureAction>
+/** Привязка направления жеста к семантическому действию. */
+export type GestureConfig = Record<SwipeDirection, SwipeAction>

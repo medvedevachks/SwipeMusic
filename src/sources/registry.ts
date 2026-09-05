@@ -15,18 +15,21 @@ export class MusicSourceNotActiveError extends Error {
 }
 
 /**
- * Реестр адаптеров. Приложение работает только через него,
- * а не через конкретные Spotify/Yandex/Local реализации.
+ * Реестр адаптеров с поддержкой нескольких одновременно активных источников.
+ * Приложение работает только через него, а не через конкретные реализации.
  */
 export class MusicSourceRegistry {
   private readonly adapters = new Map<string, MusicSourceAdapter>()
-  private activeId: string | null = null
+  private readonly activeIds = new Set<string>()
+  /** Primary — для обратной совместимости getActive() / setActive(). */
+  private primaryId: string | null = null
 
   register(adapter: MusicSourceAdapter): void {
     this.adapters.set(adapter.id, adapter)
 
-    if (!this.activeId) {
-      this.activeId = adapter.id
+    if (!this.primaryId) {
+      this.primaryId = adapter.id
+      this.activeIds.add(adapter.id)
     }
   }
 
@@ -34,9 +37,16 @@ export class MusicSourceRegistry {
     const adapter = this.adapters.get(id)
     void adapter?.dispose?.()
     this.adapters.delete(id)
+    this.activeIds.delete(id)
 
-    if (this.activeId === id) {
-      this.activeId = this.adapters.keys().next().value ?? null
+    if (this.primaryId === id) {
+      this.primaryId = this.activeIds.values().next().value
+        ?? this.adapters.keys().next().value
+        ?? null
+
+      if (this.primaryId) {
+        this.activeIds.add(this.primaryId)
+      }
     }
   }
 
@@ -56,22 +66,56 @@ export class MusicSourceRegistry {
     return [...this.adapters.values()]
   }
 
-  setActive(id: string): void {
+  /** Включить источник в multi-active ленту. */
+  activate(id: string): void {
     if (!this.adapters.has(id)) {
       throw new MusicSourceNotFoundError(id)
     }
-    this.activeId = id
+    this.activeIds.add(id)
+    if (!this.primaryId) {
+      this.primaryId = id
+    }
+  }
+
+  /** Исключить источник из multi-active ленты. */
+  deactivate(id: string): void {
+    this.activeIds.delete(id)
+
+    if (this.primaryId === id) {
+      this.primaryId = this.activeIds.values().next().value ?? null
+    }
+  }
+
+  isActive(id: string): boolean {
+    return this.activeIds.has(id)
+  }
+
+  getActiveIds(): string[] {
+    return [...this.activeIds]
+  }
+
+  listActive(): MusicSourceAdapter[] {
+    return this.getActiveIds().map((id) => this.get(id))
+  }
+
+  /**
+   * Активирует источник и делает его primary.
+   * Сохраняет обратную совместимость с single-active API.
+   */
+  setActive(id: string): void {
+    this.activate(id)
+    this.primaryId = id
   }
 
   getActiveId(): string | null {
-    return this.activeId
+    return this.primaryId
   }
 
   getActive(): MusicSourceAdapter {
-    if (!this.activeId) {
+    if (!this.primaryId) {
       throw new MusicSourceNotActiveError()
     }
-    return this.get(this.activeId)
+    return this.get(this.primaryId)
   }
 }
 

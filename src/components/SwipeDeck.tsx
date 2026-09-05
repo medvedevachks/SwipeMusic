@@ -4,10 +4,15 @@ import { useDrag } from '@use-gesture/react'
 import {
   defaultGestureConfig,
   gestureActionLabels,
-  getActionForDirection,
   getDirectionFromMovement,
 } from '../config/gestureConfig'
-import type { GestureAction, GestureConfig, SwipeDirection } from '../types/gesture'
+import {
+  resolveSwipeAction,
+  SWIPE_FLY_DISTANCE,
+  SWIPE_THRESHOLD,
+} from '../services/swipeEngine'
+import type { GestureConfig, SwipeDirection } from '../types/gesture'
+import type { SwipeAction } from '../types/swipe'
 import type { Track } from '../types/track'
 import SwipeCard from './SwipeCard'
 
@@ -24,19 +29,16 @@ type SwipeDeckProps = {
   onPrevious?: (track: Track) => void
 }
 
-const THRESHOLD = 110
-const FLY = 560
-
 function flyTarget(direction: SwipeDirection) {
   switch (direction) {
     case 'right':
-      return { x: FLY, y: 36, rot: 26 }
+      return { x: SWIPE_FLY_DISTANCE, y: 36, rot: 26 }
     case 'left':
-      return { x: -FLY, y: 36, rot: -26 }
+      return { x: -SWIPE_FLY_DISTANCE, y: 36, rot: -26 }
     case 'up':
-      return { x: 0, y: -FLY, rot: -6 }
+      return { x: 0, y: -SWIPE_FLY_DISTANCE, rot: -6 }
     case 'down':
-      return { x: 0, y: FLY, rot: 6 }
+      return { x: 0, y: SWIPE_FLY_DISTANCE, rot: 6 }
   }
 }
 
@@ -60,7 +62,7 @@ export default function SwipeDeck({
   onPrevious,
 }: SwipeDeckProps) {
   const [index, setIndex] = useState(0)
-  const [hintAction, setHintAction] = useState<GestureAction | null>(null)
+  const [hintAction, setHintAction] = useState<SwipeAction | null>(null)
   const lockedRef = useRef(false)
   const awaitingCategoryRef = useRef(false)
   const pendingTrackRef = useRef<Track | null>(null)
@@ -138,7 +140,7 @@ export default function SwipeDeck({
       rot: 0,
       scale: 1,
       opacity: 1,
-      from: { x: FLY * 0.35, y: 20, rot: 12, scale: 0.96, opacity: 0 },
+      from: { x: SWIPE_FLY_DISTANCE * 0.35, y: 20, rot: 12, scale: 0.96, opacity: 0 },
       config: { tension: 280, friction: 22 },
     })
   }, [frontApi])
@@ -164,7 +166,7 @@ export default function SwipeDeck({
   }, [categoryCancelKey, restoreCurrent])
 
   const finishAction = useCallback(
-    (action: GestureAction, track: Track, direction: SwipeDirection) => {
+    (action: SwipeAction, track: Track) => {
       if (action === 'categorize') {
         awaitingCategoryRef.current = true
         pendingTrackRef.current = track
@@ -191,10 +193,7 @@ export default function SwipeDeck({
           return
         }
         goPrevious()
-        return
       }
-
-      void direction
     },
     [goNext, goPrevious, index, onCategorize, onLike, onPrevious, onSkip, restoreCurrent],
   )
@@ -205,23 +204,27 @@ export default function SwipeDeck({
         return
       }
 
-      const direction = getDirectionFromMovement(mx, my, THRESHOLD)
-      const action = direction
-        ? getActionForDirection(direction, gestureConfig)
+      const direction = getDirectionFromMovement(mx, my, SWIPE_THRESHOLD)
+      const decision = direction
+        ? resolveSwipeAction({
+            track: current,
+            direction,
+            gestureConfig,
+            deckIndex: index,
+          })
         : null
-      setHintAction(active ? action : null)
+      setHintAction(active ? (decision?.action ?? null) : null)
 
       const flick = Math.hypot(vx, vy) > 0.5
       const shouldFly =
         !active &&
-        direction !== null &&
-        action !== null &&
-        (Math.abs(mx) > THRESHOLD ||
-          Math.abs(my) > THRESHOLD ||
+        decision !== null &&
+        (Math.abs(mx) > SWIPE_THRESHOLD ||
+          Math.abs(my) > SWIPE_THRESHOLD ||
           (flick && (Math.abs(mx) > 50 || Math.abs(my) > 50)))
 
-      if (shouldFly && direction && action) {
-        if (action === 'previous' && index <= 0) {
+      if (shouldFly && decision) {
+        if (decision.action === 'previous' && !decision.canGoPrevious) {
           void frontApi.start({
             x: 0,
             y: 0,
@@ -234,7 +237,7 @@ export default function SwipeDeck({
         }
 
         lockedRef.current = true
-        const target = flyTarget(direction)
+        const target = flyTarget(decision.direction)
         cancel()
 
         void frontApi.start({
@@ -243,11 +246,11 @@ export default function SwipeDeck({
           scale: 1.04,
           config: { tension: 170, friction: 16, clamp: true },
           onRest: () => {
-            finishAction(action, current, direction)
+            finishAction(decision.action, decision.track)
           },
         })
 
-        if (action !== 'categorize' && action !== 'previous') {
+        if (decision.action !== 'categorize' && decision.action !== 'previous') {
           void backApi.start({
             y: 0,
             scale: 1,

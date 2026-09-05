@@ -8,12 +8,22 @@ export type CategoryIconId =
   | 'music'
   | 'star'
 
+/**
+ * Полноценная сущность категории.
+ * Поля расширяемы; UI может использовать только name/icon/color.
+ */
 export type Category = {
   id: string
   name: string
-  color: string
   icon: CategoryIconId
+  color: string
+  description: string
   createdAt: string
+  updatedAt: string
+  sortOrder: number
+  favorite: boolean
+  /** Системные пресеты нельзя удалять без явного решения продукта. */
+  system: boolean
 }
 
 export type TrackAssignment = {

@@ -1,6 +1,7 @@
-import type { GestureAction, GestureConfig, SwipeDirection } from '../types/gesture'
+import type { GestureConfig, SwipeDirection } from '../types/gesture'
+import type { SwipeAction } from '../types/swipe'
 
-/** Дефолтная раскладка жестов — можно менять без правки SwipeDeck. */
+/** Дефолтная раскладка жестов — направление ≠ действие. */
 export const defaultGestureConfig: GestureConfig = {
   right: 'categorize',
   left: 'like',
@@ -8,7 +9,7 @@ export const defaultGestureConfig: GestureConfig = {
   down: 'previous',
 }
 
-export const gestureActionLabels: Record<GestureAction, string> = {
+export const gestureActionLabels: Record<SwipeAction, string> = {
   categorize: 'Категория',
   like: 'Лайк',
   skip: 'Дальше',
@@ -36,6 +37,6 @@ export function getDirectionFromMovement(
 export function getActionForDirection(
   direction: SwipeDirection,
   config: GestureConfig = defaultGestureConfig,
-): GestureAction {
+): SwipeAction {
   return config[direction]
 }

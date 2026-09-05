@@ -1,19 +1,11 @@
 import type { Track } from '../types/track'
+import type {
+  MusicSource,
+  MusicSourceCapability,
+  MusicSourceKind,
+} from '../types/musicSource'
 
-/** Тип поставщика — влияет на UI/настройки, не на бизнес-логику свайпов. */
-export type MusicSourceKind =
-  | 'mock'
-  | 'official-api'
-  | 'local-folder'
-  | 'web'
-
-export type MusicSourceCapability =
-  | 'browse'
-  | 'search'
-  | 'library'
-  | 'recommendations'
-  | 'preview'
-  | 'auth'
+export type { MusicSource, MusicSourceCapability, MusicSourceKind }
 
 export type FetchTracksParams = {
   limit?: number
@@ -27,9 +19,5 @@ export type FetchTracksResult = {
   nextCursor?: string | null
 }
 
-export type MusicSourceDescriptor = {
-  id: string
-  label: string
-  kind: MusicSourceKind
-  capabilities: readonly MusicSourceCapability[]
-}
+/** @deprecated Используйте MusicSource из `src/types/musicSource`. */
+export type MusicSourceDescriptor = MusicSource

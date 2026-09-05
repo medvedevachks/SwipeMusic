@@ -11,10 +11,13 @@ export function createTrack(input: {
   title: string
   artist: string
   album?: string
+  genre?: string
+  year?: number
   durationMs?: number
   coverUrl?: string | null
   coverColor?: string
   previewUrl?: string | null
+  tags?: string[]
 }): Track {
   return {
     id: createTrackId(input.sourceId, input.externalId),
@@ -23,9 +26,12 @@ export function createTrack(input: {
     title: input.title,
     artist: input.artist,
     album: input.album,
+    genre: input.genre,
+    year: input.year,
     durationMs: input.durationMs,
     coverUrl: input.coverUrl ?? null,
     coverColor: input.coverColor,
     previewUrl: input.previewUrl ?? null,
+    tags: input.tags,
   }
 }

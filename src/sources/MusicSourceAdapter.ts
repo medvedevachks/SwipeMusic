@@ -2,15 +2,15 @@ import type {
   FetchTracksParams,
   FetchTracksResult,
   MusicSourceCapability,
-  MusicSourceDescriptor,
   MusicSourceKind,
 } from './types'
+import type { MusicSource } from '../types/musicSource'
 
 /**
  * Единый контракт любого источника музыки.
  * Новые поставщики подключаются адаптером — без правок SwipeDeck / store.
  */
-export interface MusicSourceAdapter extends MusicSourceDescriptor {
+export interface MusicSourceAdapter extends MusicSource {
   readonly id: string
   readonly label: string
   readonly kind: MusicSourceKind

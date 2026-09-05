@@ -1,7 +1,7 @@
 import { animated } from '@react-spring/web'
 import type { SpringValue } from '@react-spring/web'
 import { gestureActionLabels } from '../config/gestureConfig'
-import type { GestureAction } from '../types/gesture'
+import type { SwipeAction } from '../types/swipe'
 import type { Track } from '../types/track'
 
 type SwipeCardProps = {
@@ -13,11 +13,11 @@ type SwipeCardProps = {
   opacity?: SpringValue<number>
   bind?: () => Record<string, unknown>
   interactive?: boolean
-  hintAction?: GestureAction | null
+  hintAction?: SwipeAction | null
   zIndex?: number
 }
 
-const hintStyles: Record<GestureAction, string> = {
+const hintStyles: Record<SwipeAction, string> = {
   categorize: 'border-teal-500 text-teal-700 bg-teal-500/15',
   like: 'border-rose-500 text-rose-600 bg-rose-500/15',
   skip: 'border-sky-500 text-sky-700 bg-sky-500/15',

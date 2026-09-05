@@ -1,13 +1,19 @@
-import type { GestureAction, GestureConfig, SwipeDirection } from './gesture'
+import type { SwipeDirection } from './gesture'
+import type { Track } from './track'
 
-/** @deprecated Используйте GestureAction / gestureConfig */
-export type SwipeAction = GestureAction
+/**
+ * Семантическое действие свайпа.
+ * Направление жеста ≠ действие: маппинг задаётся через GestureConfig.
+ */
+export type SwipeAction = 'categorize' | 'like' | 'skip' | 'previous'
 
-/** @deprecated */
+/** Результат решения swipe engine по одному жесту. */
 export type SwipeDecision = {
-  trackId: string
-  action: GestureAction
-  direction?: SwipeDirection
+  track: Track
+  action: SwipeAction
+  direction: SwipeDirection
+  /** UI должен дождаться выбора категории перед переходом дальше. */
+  requiresCategorySelection: boolean
+  /** Можно ли выполнить previous при текущем состоянии колоды. */
+  canGoPrevious: boolean
 }
-
-export type { GestureAction, GestureConfig, SwipeDirection }
