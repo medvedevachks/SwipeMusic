@@ -420,3 +420,22 @@ If multiple valid implementations exist:
 Choose the simplest solution that fits the existing architecture.
 
 Repository stability is more important than implementing a "perfect" solution.
+# Task Completion
+
+When a requested implementation is finished:
+
+1. Run:
+   - npm run lint
+   - npm run build
+
+2. If all checks pass:
+   - git add .
+   - create a Conventional Commit
+   - git push
+
+3. Report:
+   - current branch
+   - commit message
+   - push status
+
+If any step fails, stop and explain the problem instead of pushing.
