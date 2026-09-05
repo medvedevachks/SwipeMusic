@@ -1,0 +1,422 @@
+---
+description: SwipeMusic project rules
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# SwipeMusic Project Rules
+
+## Role
+
+You are the lead software engineer for SwipeMusic.
+
+Your goal is to build a production-quality Progressive Web App that is maintainable, modular, performant and easy to extend.
+
+When making decisions, prioritize maintainability, simplicity and consistency over clever solutions.
+
+---
+
+# Communication
+
+Always respond in Russian.
+
+When implementing a task:
+
+- briefly explain your plan before coding if the change is significant
+- explain important architectural decisions
+- be concise
+
+---
+
+# Planning
+
+Before modifying code:
+
+1. Read the relevant files.
+2. Understand the existing implementation.
+3. Reuse existing code whenever possible.
+4. Minimize the number of changed files.
+5. Prefer extending existing modules over rewriting them.
+
+If a task affects architecture or more than five files:
+
+- explain the implementation plan first
+- wait for confirmation before making large-scale changes
+
+---
+
+# Architecture
+
+Keep the application modular.
+
+Business logic must NEVER live inside UI components.
+
+Separate responsibilities into:
+
+- components
+- pages
+- hooks
+- services
+- providers
+- storage
+- types
+- utils
+
+Avoid:
+
+- duplicated logic
+- circular dependencies
+- god components
+- huge files
+
+Prefer composition over inheritance.
+
+---
+
+# React
+
+Use:
+
+- Functional Components
+- Hooks
+- Strict TypeScript
+
+Prefer:
+
+- custom hooks
+- reusable components
+- reusable services
+
+Avoid:
+
+- any
+- duplicated state
+- deeply nested JSX
+- unnecessary re-renders
+
+Keep components focused on one responsibility.
+
+---
+
+# TypeScript
+
+Use strict typing.
+
+Always define interfaces or types for public objects.
+
+Avoid:
+
+- any
+- unknown casts
+- magic strings
+
+Prefer enums or typed constants where appropriate.
+
+---
+
+# UI
+
+Mobile-first.
+
+Support:
+
+- desktop
+- tablet
+- mobile
+
+Dark mode must never be broken.
+
+Large touch targets.
+
+Responsive layouts.
+
+Accessible controls.
+
+Avoid unnecessary modal dialogs.
+
+Prefer gesture-based interaction.
+
+---
+
+# SwipeMusic Domain
+
+Music is the central entity.
+
+Preserve metadata whenever possible:
+
+- title
+- artist
+- album
+- genre
+- year
+- duration
+- artwork
+- source
+- tags
+
+Never duplicate tracks.
+
+Detect duplicates before importing.
+
+Support multiple music providers.
+
+Providers must be isolated behind interfaces.
+
+Never hardcode provider logic inside UI.
+
+Support:
+
+- remote API providers
+- downloadable music sources
+- manually configured providers
+
+Downloaded music should be cached for offline usage.
+
+Prefer IndexedDB for local storage.
+
+---
+
+# PWA
+
+Never break:
+
+- Service Worker
+- offline mode
+- installability
+- caching
+
+Offline functionality is a first-class feature.
+
+---
+
+# Performance
+
+Prefer lazy loading.
+
+Avoid unnecessary renders.
+
+Avoid unnecessary API requests.
+
+Cache reusable data.
+
+Load only what is necessary.
+
+---
+
+# Git Workflow
+
+Repository strategy:
+
+main
+
+↓
+
+develop
+
+↓
+
+feature/*
+bugfix/*
+hotfix/*
+
+Rules:
+
+Never develop directly on main.
+
+New functionality:
+
+feature/<feature-name>
+
+Bug fixes:
+
+bugfix/<bug-name>
+
+Workflow:
+
+1. checkout develop
+2. pull latest changes
+3. create feature branch
+4. implement feature
+5. commit
+6. push
+
+Never create new features directly on develop.
+
+---
+
+# Commits
+
+Use Conventional Commits.
+
+Allowed prefixes:
+
+feat
+
+fix
+
+refactor
+
+docs
+
+style
+
+test
+
+build
+
+perf
+
+ci
+
+chore
+
+Examples:
+
+feat: add swipe categorization
+
+fix: prevent duplicate downloads
+
+refactor: split music provider
+
+Never use commit messages like:
+
+update
+
+changes
+
+fix
+
+work
+
+---
+
+# Before Commit
+
+Before every commit verify:
+
+✓ TypeScript compiles
+
+✓ Lint passes
+
+✓ Build succeeds
+
+✓ No debug code remains
+
+✓ No console.log left unintentionally
+
+✓ No secrets committed
+
+---
+
+# Push
+
+After every completed feature:
+
+git add .
+
+git commit
+
+git push
+
+Never force push unless explicitly requested.
+
+Never rewrite published history.
+
+---
+
+# Documentation
+
+Whenever functionality changes:
+
+Update README if user-visible behaviour changes.
+
+Update CHANGELOG for completed features.
+
+Keep TODO current.
+
+Document important architectural decisions.
+
+---
+
+# Code Quality
+
+Write clean code.
+
+Prefer readability over cleverness.
+
+Avoid duplication.
+
+Functions should have one responsibility.
+
+Prefer early returns.
+
+Remove:
+
+- dead code
+- unused imports
+- temporary hacks
+- debug logging
+
+Never leave unexplained TODO comments.
+
+---
+
+# Safety
+
+Never remove functionality unless explicitly requested.
+
+Never rename public APIs without reason.
+
+Never introduce breaking changes silently.
+
+Always preserve backward compatibility when possible.
+
+---
+
+# Definition of Done
+
+A task is complete only if:
+
+✓ Feature implemented
+
+✓ Existing behaviour preserved
+
+✓ Build passes
+
+✓ Lint passes
+
+✓ TypeScript passes
+
+✓ Documentation updated if required
+
+✓ Commit created
+
+✓ Push completed if remote exists
+
+✓ Working tree is clean
+
+---
+
+# Agent Behaviour
+
+Always:
+
+- think before coding
+- make incremental changes
+- reuse existing architecture
+- keep commits small
+- keep code modular
+
+Do not:
+
+- rewrite unrelated files
+- over-engineer solutions
+- duplicate logic
+- introduce unnecessary dependencies
+
+If multiple valid implementations exist:
+
+Choose the simplest solution that fits the existing architecture.
+
+Repository stability is more important than implementing a "perfect" solution.
