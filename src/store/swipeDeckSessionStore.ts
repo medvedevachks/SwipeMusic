@@ -10,8 +10,14 @@ type SwipeDeckSessionState = {
   tracks: Track[] | null
   searchQuery: string | null
 
-  /** Результаты поиска становятся новой колодой; selected — первым. */
+  /** Результаты поиска / библиотеки становятся новой колодой; selected — первым. */
   applySearchDeck: (tracks: Track[], options?: {
+    selectedTrackId?: string
+    query?: string
+  }) => void
+
+  /** Alias: выборка из Library → Swipe Session. */
+  applyLibraryDeck: (tracks: Track[], options?: {
     selectedTrackId?: string
     query?: string
   }) => void
@@ -19,12 +25,11 @@ type SwipeDeckSessionState = {
   resetToCatalog: () => void
 }
 
-export const useSwipeDeckSessionStore = create<SwipeDeckSessionState>((set) => ({
-  mode: 'catalog',
-  tracks: null,
-  searchQuery: null,
-
-  applySearchDeck: (tracks, options = {}) => {
+export const useSwipeDeckSessionStore = create<SwipeDeckSessionState>((set) => {
+  const applySearchDeck: SwipeDeckSessionState['applySearchDeck'] = (
+    tracks,
+    options = {},
+  ) => {
     if (tracks.length === 0) {
       return
     }
@@ -43,13 +48,20 @@ export const useSwipeDeckSessionStore = create<SwipeDeckSessionState>((set) => (
       tracks: ordered,
       searchQuery: options.query ?? null,
     })
-  },
+  }
 
-  resetToCatalog: () => {
-    set({
-      mode: 'catalog',
-      tracks: null,
-      searchQuery: null,
-    })
-  },
-}))
+  return {
+    mode: 'catalog',
+    tracks: null,
+    searchQuery: null,
+    applySearchDeck,
+    applyLibraryDeck: applySearchDeck,
+    resetToCatalog: () => {
+      set({
+        mode: 'catalog',
+        tracks: null,
+        searchQuery: null,
+      })
+    },
+  }
+})

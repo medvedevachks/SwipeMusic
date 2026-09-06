@@ -142,6 +142,13 @@ export {
   FileSystemMusicAdapter,
   createLocalFolderAdapter,
   createLocalFolderAdapterStub,
+  getFileSystemMusicAdapter,
+  LOCAL_AUDIO_EXTENSIONS,
+} from './adapters/local-folder'
+export type {
+  LocalAccessState,
+  LocalLibraryStats,
+  LocalScanProgress,
 } from './adapters/local-folder'
 export {
   MyMusicSiteAdapter,
@@ -160,3 +167,5 @@ export {
 } from './scraping'
 
 export type { Track }
+
+export { resolvePlaybackUrl } from './resolvePlaybackUrl'

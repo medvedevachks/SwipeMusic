@@ -3,9 +3,19 @@ import type { SpringValue } from '@react-spring/web'
 import { gestureActionLabels } from '../config/gestureConfig'
 import type { SwipeAction } from '../types/swipe'
 import type { Track } from '../types/track'
+import { formatPlaybackTime } from '../utils/formatTime'
+
+type PlaybackOverlay = {
+  currentTime: number
+  duration: number
+  canSeek: boolean
+  onSeek: (timeSeconds: number) => void
+  error?: string | null
+}
 
 type SwipeCardProps = {
   track: Track
+  sourceLabel: string
   x: SpringValue<number>
   y: SpringValue<number>
   rot: SpringValue<number>
@@ -15,6 +25,8 @@ type SwipeCardProps = {
   interactive?: boolean
   hintAction?: SwipeAction | null
   zIndex?: number
+  /** Прогресс и seek — только у активной (передней) карточки. */
+  playback?: PlaybackOverlay | null
 }
 
 const hintStyles: Record<SwipeAction, string> = {
@@ -26,6 +38,7 @@ const hintStyles: Record<SwipeAction, string> = {
 
 export default function SwipeCard({
   track,
+  sourceLabel,
   x,
   y,
   rot,
@@ -35,7 +48,10 @@ export default function SwipeCard({
   interactive = false,
   hintAction = null,
   zIndex = 1,
+  playback = null,
 }: SwipeCardProps) {
+  const progressMax = playback && playback.duration > 0 ? playback.duration : 0
+
   return (
     <animated.article
       {...(interactive && bind ? bind() : {})}
@@ -56,7 +72,9 @@ export default function SwipeCard({
           className="relative min-h-0 flex-1 bg-[var(--color-accent)]"
           style={{
             backgroundColor: track.coverColor ?? undefined,
-            backgroundImage: track.coverUrl ? `url(${track.coverUrl})` : undefined,
+            backgroundImage: track.coverUrl
+              ? `url(${track.coverUrl})`
+              : undefined,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
           }}
@@ -73,13 +91,48 @@ export default function SwipeCard({
           )}
         </div>
 
-        <div className="space-y-1 px-5 py-4">
-          <h2 className="truncate text-xl font-semibold tracking-tight text-[var(--color-fg)]">
-            {track.title}
-          </h2>
-          <p className="truncate text-sm text-[var(--color-muted)]">
-            {track.artist}
-          </p>
+        <div className="space-y-3 px-5 py-4">
+          <div className="space-y-1">
+            <h2 className="truncate text-xl font-semibold tracking-tight text-[var(--color-fg)]">
+              {track.title}
+            </h2>
+            <p className="truncate text-sm text-[var(--color-muted)]">
+              {track.artist}
+            </p>
+            <p className="truncate text-xs font-medium uppercase tracking-wide text-[var(--color-accent)]">
+              {sourceLabel}
+            </p>
+          </div>
+
+          {playback ? (
+            <div
+              className="space-y-1.5 touch-auto"
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <input
+                type="range"
+                min={0}
+                max={progressMax || 1}
+                step={0.1}
+                value={Math.min(playback.currentTime, progressMax || 1)}
+                disabled={!playback.canSeek || progressMax <= 0}
+                onChange={(event) =>
+                  playback.onSeek(Number(event.target.value))
+                }
+                className="w-full accent-[var(--color-accent)]"
+                aria-label="Позиция воспроизведения"
+              />
+              <div className="flex justify-between text-xs text-[var(--color-muted)]">
+                <span>{formatPlaybackTime(playback.currentTime)}</span>
+                <span>{formatPlaybackTime(playback.duration)}</span>
+              </div>
+              {playback.error ? (
+                <p className="text-xs text-rose-600" role="alert">
+                  {playback.error}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
     </animated.article>

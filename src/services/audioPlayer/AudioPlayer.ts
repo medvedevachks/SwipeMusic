@@ -1,10 +1,28 @@
 import type { PlayerState } from '../../types/player'
 import { initialPlayerState } from '../../types/player'
 import type { Track } from '../../types/track'
+import { resolvePlaybackUrl } from '../../sources/resolvePlaybackUrl'
 import { HtmlAudioPlayerAdapter } from './HtmlAudioPlayerAdapter'
 import type { PlayerAdapter } from './PlayerAdapter'
 
 type StateListener = (state: PlayerState) => void
+
+/** Браузерный autoplay-block — не показываем пользователю как ошибку UI. */
+function isAutoplayBlockedError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  const name = error.name
+  const message = error.message.toLowerCase()
+
+  return (
+    name === 'NotAllowedError' ||
+    message.includes("user didn't interact") ||
+    message.includes('play() failed because the user') ||
+    message.includes('notallowederror')
+  )
+}
 
 /**
  * Независимый от React сервис воспроизведения.
@@ -36,7 +54,11 @@ export class AudioPlayer {
             ...timePatch,
             playing: false,
             paused: true,
-            error: event.error ?? 'Playback error',
+            error: isAutoplayBlockedError(
+              new Error(event.error ?? 'Playback error'),
+            )
+              ? null
+              : (event.error ?? 'Playback error'),
           })
           return
         case 'ended':
@@ -82,7 +104,10 @@ export class AudioPlayer {
   }
 
   setQueue(tracks: Track[], startIndex = 0): void {
-    const queue = tracks.filter((track) => Boolean(track.previewUrl))
+    // previewUrl может появиться позже через getStream — не отбрасываем локальные треки.
+    const queue = tracks.filter(
+      (track) => Boolean(track.previewUrl) || Boolean(track.sourceId),
+    )
     const queueIndex =
       queue.length === 0
         ? -1
@@ -102,6 +127,15 @@ export class AudioPlayer {
       await this.adapter.play()
       this.patchState({ error: null })
     } catch (error) {
+      if (isAutoplayBlockedError(error)) {
+        this.patchState({
+          playing: false,
+          paused: true,
+          error: null,
+        })
+        throw error
+      }
+
       this.patchState({
         playing: false,
         paused: true,
@@ -112,7 +146,23 @@ export class AudioPlayer {
   }
 
   async playTrack(track: Track): Promise<void> {
-    if (!track.previewUrl) {
+    let playbackUrl: string | null
+    try {
+      playbackUrl = await resolvePlaybackUrl(track)
+    } catch (error) {
+      this.patchState({
+        currentTrack: track,
+        playing: false,
+        paused: true,
+        error:
+          error instanceof Error
+            ? error.message
+            : 'Failed to resolve playback URL',
+      })
+      return
+    }
+
+    if (!playbackUrl) {
       this.patchState({
         currentTrack: track,
         playing: false,
@@ -122,15 +172,23 @@ export class AudioPlayer {
       return
     }
 
+    const trackWithUrl: Track = { ...track, previewUrl: playbackUrl }
     const existingIndex = this.state.queue.findIndex((item) => item.id === track.id)
     this.patchState({
-      currentTrack: track,
+      currentTrack: trackWithUrl,
       queueIndex: existingIndex >= 0 ? existingIndex : this.state.queueIndex,
       currentTime: 0,
+      duration: 0,
       error: null,
     })
 
-    await this.play(track.previewUrl)
+    if (existingIndex >= 0) {
+      const queue = [...this.state.queue]
+      queue[existingIndex] = trackWithUrl
+      this.patchState({ queue })
+    }
+
+    await this.play(playbackUrl)
   }
 
   pause(): void {
@@ -139,14 +197,19 @@ export class AudioPlayer {
 
   async resume(): Promise<void> {
     const track = this.state.currentTrack
-    if (!track?.previewUrl) {
+    if (!track) {
       return
     }
 
     if (this.adapter.getDuration() > 0 || this.adapter.getCurrentTime() > 0) {
       try {
         await this.adapter.play()
+        this.patchState({ error: null })
       } catch (error) {
+        if (isAutoplayBlockedError(error)) {
+          this.patchState({ error: null })
+          return
+        }
         this.patchState({
           error: error instanceof Error ? error.message : 'Failed to resume',
         })

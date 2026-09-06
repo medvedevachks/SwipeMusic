@@ -1,3 +1,4 @@
+import { LocalMusicPanel } from '../components/LocalMusicPanel'
 import { sourceTypeLabel } from '../sources'
 import { useSourceManagerStore } from '../store/sourceManagerStore'
 import type { SourceType } from '../types/source'
@@ -18,9 +19,12 @@ export default function Sources() {
           Источники
         </h1>
         <p className="text-sm text-[var(--color-muted)]">
-          API · Scraper · Local Files. Реальное подключение — позже.
+          API · Scraper · Local Files. Локальная библиотека — полноценный
+          источник.
         </p>
       </div>
+
+      <LocalMusicPanel />
 
       <div className="flex flex-wrap gap-2">
         <button

@@ -57,7 +57,7 @@ const DEFAULT_CONFIGS: SourceConfig[] = [
   },
   {
     id: 'local-folder',
-    name: 'Local Files',
+    name: 'Local Music',
     type: 'filesystem',
     enabled: false,
     priority: 50,

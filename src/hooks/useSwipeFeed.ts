@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { fetchSwipeFeed } from '../services/trackFeed'
 import { bootstrapMusicSources } from '../sources'
+import { useLocalMusicStore } from '../store/localMusicStore'
+import { useSourceManagerStore } from '../store/sourceManagerStore'
 import { useSwipeDeckSessionStore } from '../store/swipeDeckSessionStore'
 import type { Track } from '../types/track'
 
@@ -20,6 +22,15 @@ export function useSwipeFeed(): UseSwipeFeedResult {
   const sessionMode = useSwipeDeckSessionStore((state) => state.mode)
   const sessionTracks = useSwipeDeckSessionStore((state) => state.tracks)
   const searchQuery = useSwipeDeckSessionStore((state) => state.searchQuery)
+  const enabledSourceKey = useSourceManagerStore((state) =>
+    state.sources
+      .filter((source) => source.enabled)
+      .map((source) => source.id)
+      .join(','),
+  )
+  const libraryGeneration = useLocalMusicStore(
+    (state) => state.libraryGeneration,
+  )
 
   const [catalogTracks, setCatalogTracks] = useState<Track[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -51,7 +62,7 @@ export function useSwipeFeed(): UseSwipeFeedResult {
     return () => {
       cancelled = true
     }
-  }, [sessionMode])
+  }, [sessionMode, enabledSourceKey, libraryGeneration])
 
   if (sessionMode === 'search' && sessionTracks) {
     return {

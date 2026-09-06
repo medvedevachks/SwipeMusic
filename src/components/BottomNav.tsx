@@ -2,7 +2,6 @@ import { NavLink } from 'react-router-dom'
 import {
   HomeIcon,
   LibraryIcon,
-  PlayerIcon,
   ProfileIcon,
   SearchIcon,
 } from './icons'
@@ -15,8 +14,7 @@ const navItems: {
 }[] = [
   { to: '/', label: 'Главная', Icon: HomeIcon, end: true },
   { to: '/search', label: 'Поиск', Icon: SearchIcon },
-  { to: '/library', label: 'Медиатека', Icon: LibraryIcon },
-  { to: '/player', label: 'Плеер', Icon: PlayerIcon },
+  { to: '/library', label: 'Библиотека', Icon: LibraryIcon },
   { to: '/profile', label: 'Профиль', Icon: ProfileIcon },
 ]
 

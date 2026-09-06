@@ -7,6 +7,19 @@ export type {
   CollectionTrackData,
   CollectionUserActionType,
 } from './collectionUser'
+export type {
+  LibraryNode,
+  LibraryNodeType,
+  LibraryProvider,
+  LibraryProviderCapability,
+  LibraryProviderFactory,
+} from './libraryProvider'
+export type { LibraryEntry, TrackMeta } from './trackMeta'
+export {
+  defaultTrackMeta,
+  extractFolderPath,
+  trackMetaFromCollection,
+} from './trackMeta'
 export type { GestureAction, GestureConfig, SwipeDirection } from './gesture'
 export type { HistoryEntry } from './history'
 export type {
