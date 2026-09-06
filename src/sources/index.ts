@@ -6,43 +6,35 @@ import {
 } from './registry'
 import type { FetchTracksParams, FetchTracksResult } from './types'
 import type { Track } from '../types/track'
-import { normalizeSourceType } from '../types/source'
+import {
+  bootstrapProviderPlugins,
+  pluginFromAdapter,
+  registerPlugin,
+} from '../sdk'
 
 let bootstrapped = false
 
-/** Регистрирует встроенные адаптеры через SourceManager / SourceRegistry. */
+/**
+ * Регистрирует встроенные адаптеры через SourceManager + Provider Plugin SDK.
+ */
 export function bootstrapMusicSources(): void {
   if (bootstrapped) {
     return
   }
 
   sourceManager.bootstrap()
+  bootstrapProviderPlugins()
   bootstrapped = true
 }
 
 /**
  * Подключение источника одной строкой:
  * registerMusicSource(new ZaycevAdapter())
- * Без правок UI / Swipe / Search / Player.
+ * Работает через PluginRegistry (plugin-first).
  */
 export function registerMusicSource(adapter: MusicSourceAdapter): void {
   bootstrapMusicSources()
-
-  const known = sourceManager.listSources().some((source) => source.id === adapter.id)
-  if (known) {
-    sourceRegistry.register(adapter)
-    return
-  }
-
-  sourceManager.addSource(
-    {
-      id: adapter.id,
-      name: adapter.label,
-      type: normalizeSourceType(adapter.type),
-      enabled: false,
-    },
-    adapter,
-  )
+  registerPlugin(pluginFromAdapter(adapter))
 }
 
 export function setActiveMusicSource(sourceId: string): void {

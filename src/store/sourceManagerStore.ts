@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { pluginRegistry } from '../sdk'
 import {
   bootstrapMusicSources,
   sourceManager,
@@ -19,6 +20,7 @@ bootstrapMusicSources()
 
 export const useSourceManagerStore = create<SourceManagerStore>((set) => {
   sourceManager.subscribe((sources) => {
+    pluginRegistry.syncEnabledFromSourceManager()
     set({ sources })
   })
 
@@ -37,12 +39,20 @@ export const useSourceManagerStore = create<SourceManagerStore>((set) => {
     },
 
     enableSource: (id) => {
-      sourceManager.enableSource(id)
+      if (pluginRegistry.has(id)) {
+        pluginRegistry.enable(id)
+      } else {
+        sourceManager.enableSource(id)
+      }
       set({ sources: sourceManager.listSources() })
     },
 
     disableSource: (id) => {
-      sourceManager.disableSource(id)
+      if (pluginRegistry.has(id)) {
+        pluginRegistry.disable(id)
+      } else {
+        sourceManager.disableSource(id)
+      }
       set({ sources: sourceManager.listSources() })
     },
 
