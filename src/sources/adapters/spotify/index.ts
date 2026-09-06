@@ -1,12 +1,12 @@
-import { createUnimplementedSourceAdapter } from '../createUnimplementedSourceAdapter'
+import { ApiMusicAdapter } from '../ApiMusicAdapter'
 import type { MusicSourceAdapter } from '../../MusicSourceAdapter'
 
 /** Заготовка Spotify Web API / Playback. */
+export class SpotifyAdapter extends ApiMusicAdapter {
+  readonly id = 'spotify'
+  readonly label = 'Spotify'
+}
+
 export function createSpotifyAdapter(): MusicSourceAdapter {
-  return createUnimplementedSourceAdapter({
-    id: 'spotify',
-    label: 'Spotify',
-    kind: 'official-api',
-    capabilities: ['browse', 'search', 'library', 'recommendations', 'preview', 'auth'],
-  })
+  return new SpotifyAdapter()
 }

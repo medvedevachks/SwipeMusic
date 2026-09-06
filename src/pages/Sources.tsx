@@ -2,13 +2,7 @@ import { sourceTypeLabel } from '../sources'
 import { useSourceManagerStore } from '../store/sourceManagerStore'
 import type { SourceType } from '../types/source'
 
-const ADDABLE_TYPES: SourceType[] = [
-  'api',
-  'html-parser',
-  'rss',
-  'local-folder',
-  'custom',
-]
+const ADDABLE_TYPES: SourceType[] = ['api', 'scraper', 'filesystem']
 
 export default function Sources() {
   const sources = useSourceManagerStore((state) => state.sources)
@@ -24,7 +18,7 @@ export default function Sources() {
           Источники
         </h1>
         <p className="text-sm text-[var(--color-muted)]">
-          Управление источниками музыки. Реальное подключение API — позже.
+          API · Scraper · Local Files. Реальное подключение — позже.
         </p>
       </div>
 

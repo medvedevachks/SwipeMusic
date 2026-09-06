@@ -1,4 +1,5 @@
-import type { CreateSourceInput, SourceConfig, SourceType } from '../types/source'
+import type { CreateSourceInput, SourceConfig } from '../types/source'
+import { normalizeSourceType, sourceTypeLabel } from '../types/source'
 import type { Track } from '../types/track'
 import { createId } from '../utils/id'
 import { createCustomWebsiteAdapter } from './adapters/web'
@@ -17,7 +18,7 @@ const DEFAULT_CONFIGS: SourceConfig[] = [
   {
     id: 'mock',
     name: 'Demo library',
-    type: 'custom',
+    type: 'api',
     enabled: true,
     priority: 0,
     settings: { demo: true },
@@ -49,15 +50,15 @@ const DEFAULT_CONFIGS: SourceConfig[] = [
   {
     id: 'zaycev',
     name: 'Zaycev.net',
-    type: 'html-parser',
+    type: 'scraper',
     enabled: false,
     priority: 40,
     settings: {},
   },
   {
     id: 'local-folder',
-    name: 'Локальная папка',
-    type: 'local-folder',
+    name: 'Local Files',
+    type: 'filesystem',
     enabled: false,
     priority: 50,
     settings: {},
@@ -65,7 +66,7 @@ const DEFAULT_CONFIGS: SourceConfig[] = [
   {
     id: 'custom-website',
     name: 'Custom website',
-    type: 'custom',
+    type: 'scraper',
     enabled: false,
     priority: 60,
     settings: {},
@@ -122,7 +123,7 @@ export class SourceManager {
     const config: SourceConfig = {
       id,
       name: input.name.trim() || 'Новый источник',
-      type: input.type,
+      type: normalizeSourceType(input.type),
       enabled: input.enabled ?? false,
       priority: input.priority ?? this.nextPriority(),
       settings: { ...(input.settings ?? {}) },
@@ -289,17 +290,4 @@ export class SourceManager {
 
 export const sourceManager = new SourceManager()
 
-export function sourceTypeLabel(type: SourceType): string {
-  switch (type) {
-    case 'api':
-      return 'API'
-    case 'html-parser':
-      return 'HTML parser'
-    case 'rss':
-      return 'RSS'
-    case 'local-folder':
-      return 'Local folder'
-    case 'custom':
-      return 'Custom'
-  }
-}
+export { normalizeSourceType, sourceTypeLabel }

@@ -22,7 +22,15 @@ export type {
   RuleConditionField,
   RuleOperator,
 } from './rule'
-export type { CreateSourceInput, SourceConfig, SourceSettings, SourceType } from './source'
+export type {
+  CreateSourceInput,
+  LegacySourceType,
+  SourceConfig,
+  SourceSettings,
+  SourceType,
+  SourceTypeInput,
+} from './source'
+export { normalizeSourceType, sourceTypeLabel } from './source'
 export type { SearchEngineState, SearchEngineStatus } from './search'
 export type { SwipeAction, SwipeDecision } from './swipe'
 export type { Track, TrackSection, TrackSeed } from './track'

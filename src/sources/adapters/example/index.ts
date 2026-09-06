@@ -3,24 +3,21 @@ import type { MusicSourceAdapter } from '../../MusicSourceAdapter'
 import type { Track } from '../../../types/track'
 import type { HtmlFetcher } from '../../scraping'
 
-/**
- * Заготовка адаптера Zaycev.net.
- * Без реального парсинга / cheerio / сетевых запросов к сайту.
- */
-export class ZaycevAdapter extends ScraperMusicAdapter {
-  readonly id = 'zaycev'
-  readonly label = 'Zaycev.net'
+/** Пример scraper-адаптера для шаблона подключения нового сайта. */
+export class ExampleAdapter extends ScraperMusicAdapter {
+  readonly id = 'example-site'
+  readonly label = 'Example Site'
 
   constructor(fetcher?: HtmlFetcher) {
     super(fetcher)
   }
 
   protected buildSearchUrl(query: string): string {
-    return `https://zaycev.example/search?q=${encodeURIComponent(query)}`
+    return `https://example.invalid/search?q=${encodeURIComponent(query)}`
   }
 
   protected buildTrackUrl(trackId: string): string {
-    return `https://zaycev.example/track/${encodeURIComponent(trackId)}`
+    return `https://example.invalid/tracks/${encodeURIComponent(trackId)}`
   }
 
   protected parseSearch(_html: string, _query: string): Track[] {
@@ -32,7 +29,7 @@ export class ZaycevAdapter extends ScraperMusicAdapter {
   }
 
   protected parseStream(_html: string, _track: Track): string {
-    throw new Error('[zaycev] parseStream is not implemented')
+    throw new Error('[example-site] parseStream is not implemented')
   }
 
   protected parseCover(_html: string, _track: Track): string | undefined {
@@ -40,6 +37,6 @@ export class ZaycevAdapter extends ScraperMusicAdapter {
   }
 }
 
-export function createZaycevAdapter(): MusicSourceAdapter {
-  return new ZaycevAdapter()
+export function createExampleAdapter(): MusicSourceAdapter {
+  return new ExampleAdapter()
 }

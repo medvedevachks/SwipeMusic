@@ -1,12 +1,12 @@
-import { createUnimplementedSourceAdapter } from '../createUnimplementedSourceAdapter'
+import { ApiMusicAdapter } from '../ApiMusicAdapter'
 import type { MusicSourceAdapter } from '../../MusicSourceAdapter'
 
 /** Заготовка Яндекс Музыки. */
+export class YandexMusicAdapter extends ApiMusicAdapter {
+  readonly id = 'yandex-music'
+  readonly label = 'Яндекс Музыка'
+}
+
 export function createYandexMusicAdapter(): MusicSourceAdapter {
-  return createUnimplementedSourceAdapter({
-    id: 'yandex-music',
-    label: 'Яндекс Музыка',
-    kind: 'official-api',
-    capabilities: ['browse', 'search', 'library', 'recommendations', 'preview', 'auth'],
-  })
+  return new YandexMusicAdapter()
 }

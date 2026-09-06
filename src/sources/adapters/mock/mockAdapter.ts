@@ -35,8 +35,12 @@ export function createMockMusicSourceAdapter(): MusicSourceAdapter {
   return {
     id: SOURCE_ID,
     label: 'Demo library',
+    type: 'api',
     kind: 'mock',
     capabilities: ['browse', 'recommendations', 'search'],
+    supportsSearch: true,
+    supportsStreaming: true,
+    supportsPagination: false,
 
     async initialize() {},
 
@@ -73,6 +77,17 @@ export function createMockMusicSourceAdapter(): MusicSourceAdapter {
           (track) => track.id === trackId || track.externalId === trackId,
         ) ?? null
       )
+    },
+
+    async getStream(track) {
+      if (track.previewUrl) {
+        return track.previewUrl
+      }
+      throw new Error('[mock] Track has no preview URL')
+    },
+
+    async getCover(track) {
+      return track.coverUrl ?? undefined
     },
 
     async dispose() {

@@ -11,6 +11,7 @@ export function createOfficialApiAdapterStub(options: {
   return createUnimplementedSourceAdapter({
     id: options.id,
     label: options.label,
+    type: 'api',
     kind: 'official-api',
     capabilities: [
       'browse',
@@ -20,5 +21,8 @@ export function createOfficialApiAdapterStub(options: {
       'preview',
       'auth',
     ],
+    supportsSearch: true,
+    supportsStreaming: true,
+    supportsPagination: true,
   })
 }
