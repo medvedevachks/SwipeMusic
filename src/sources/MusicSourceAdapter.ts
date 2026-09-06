@@ -1,3 +1,5 @@
+﻿import type { Track } from '../types/track'
+import type { PlaybackCandidate } from '../services/playbackResolver'
 import type {
   FetchTracksParams,
   FetchTracksResult,
@@ -6,7 +8,6 @@ import type {
 } from './types'
 import type { MusicSource } from '../types/musicSource'
 import type { SourceType } from '../types/source'
-import type { Track } from '../types/track'
 
 /** Результат поиска — тот же контракт, что и лента Track[]. */
 export type SearchResult = FetchTracksResult
@@ -14,8 +15,6 @@ export type SearchResult = FetchTracksResult
 /**
  * Единый контракт любого источника музыки.
  * UI / Swipe / Search / Player не знают конкретных Spotify/Zaycev/FS.
- *
- * Существующие методы (initialize, fetchTracks, …) сохранены для совместимости.
  */
 export interface MusicSourceAdapter extends MusicSource {
   readonly id: string
@@ -28,31 +27,21 @@ export interface MusicSourceAdapter extends MusicSource {
   readonly supportsStreaming: boolean
   readonly supportsPagination: boolean
 
-  /** Подготовка адаптера (auth, FS handles и т.п.). */
   initialize(): void | Promise<void>
-
-  /** Готов ли источник к выдаче треков. */
   isAvailable(): boolean | Promise<boolean>
-
-  /** Лента / коллекция в каноническом формате Track. */
   fetchTracks(params?: FetchTracksParams): Promise<FetchTracksResult>
-
-  /** Поиск по источнику. */
   search(
     query: string,
     params?: Omit<FetchTracksParams, 'query'>,
   ): Promise<SearchResult>
-
-  /** Один трек по внешнему или каноническому id. */
   getTrack(trackId: string): Promise<Track | null>
-
-  /** URL потока / превью для плеера. */
   getStream(track: Track): Promise<string>
-
-  /** URL обложки (если есть). */
+  /**
+   * Кандидаты для PlaybackResolver (local / stream / preview / remote).
+   * Без метода — Resolver использует fallback через getStream.
+   */
+  getPlaybackCandidates?(track: Track): Promise<PlaybackCandidate[]>
   getCover(track: Track): Promise<string | undefined>
-
-  /** Освобождение ресурсов. */
   dispose(): void | Promise<void>
 }
 

@@ -1,3 +1,5 @@
+import { getMediaIndex } from '../../services/mediaIndex'
+import { syncAdapterToMediaIndex } from '../../services/mediaIndex'
 import type { MusicSourceAdapter } from '../../sources/MusicSourceAdapter'
 import type { Track } from '../../types/track'
 import type { LibraryNode, LibraryProvider } from '../../types/libraryProvider'
@@ -41,15 +43,13 @@ function childFolders(parentPath: string, allFolders: string[]): string[] {
 }
 
 /**
- * LibraryProvider для источника с иерархией путей (обычно filesystem).
- * UI не знает, что это Local Files — только folder-узлы.
+ * Дерево папок из MediaIndex (без прямого чтения Provider при каждом открытии).
  */
 export class HierarchicalPathLibraryProvider implements LibraryProvider {
   readonly id: string
   readonly label: string
   readonly capabilities = ['tree', 'search', 'refresh'] as const
 
-  private cache: Track[] | null = null
   private readonly adapter: MusicSourceAdapter
 
   constructor(adapter: MusicSourceAdapter) {
@@ -59,26 +59,18 @@ export class HierarchicalPathLibraryProvider implements LibraryProvider {
   }
 
   async refresh(): Promise<void> {
-    this.cache = null
-    await this.loadTracks()
+    await syncAdapterToMediaIndex(this.adapter)
   }
 
   private async loadTracks(): Promise<Track[]> {
-    if (this.cache) {
-      return this.cache
+    const index = getMediaIndex()
+    await index.whenReady()
+    let tracks = index.listTracks(this.id)
+    if (tracks.length === 0) {
+      await syncAdapterToMediaIndex(this.adapter)
+      tracks = index.listTracks(this.id)
     }
-    try {
-      const available = await this.adapter.isAvailable()
-      if (!available) {
-        this.cache = []
-        return this.cache
-      }
-      const result = await this.adapter.fetchTracks()
-      this.cache = result.tracks
-    } catch {
-      this.cache = []
-    }
-    return this.cache
+    return tracks
   }
 
   async getRoot(): Promise<LibraryNode[]> {
@@ -96,9 +88,7 @@ export class HierarchicalPathLibraryProvider implements LibraryProvider {
 
   async getChildren(nodeId: string): Promise<LibraryNode[]> {
     const tracks = await this.loadTracks()
-    const folders = [
-      ...new Set(tracks.map((track) => folderOf(track))),
-    ]
+    const folders = [...new Set(tracks.map((track) => folderOf(track)))]
 
     const parentPath =
       nodeId === ROOT
@@ -148,21 +138,8 @@ export class HierarchicalPathLibraryProvider implements LibraryProvider {
   }
 
   async search(query: string): Promise<Track[]> {
-    const q = query.trim().toLowerCase()
-    if (!q) {
-      return []
-    }
-    const tracks = await this.loadTracks()
-    return tracks.filter((track) => {
-      const haystack = [
-        track.title,
-        track.artist,
-        track.album ?? '',
-        track.externalId,
-      ]
-        .join(' ')
-        .toLowerCase()
-      return haystack.includes(q)
-    })
+    const index = getMediaIndex()
+    await index.whenReady()
+    return index.search(query, [this.id]).map((record) => record.track)
   }
 }

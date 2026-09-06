@@ -12,15 +12,6 @@ import { usePlayerStore } from '../store/playerStore'
 import { useSwipeDeckSessionStore } from '../store/swipeDeckSessionStore'
 import type { Track } from '../types/track'
 
-function shuffleTracks(tracks: Track[]): Track[] {
-  const copy = [...tracks]
-  for (let i = copy.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[copy[i], copy[j]] = [copy[j], copy[i]]
-  }
-  return copy
-}
-
 export default function Library() {
   const navigate = useNavigate()
   const lastClickedTrackId = useRef<string | null>(null)
@@ -62,8 +53,9 @@ export default function Library() {
   const assignCategory = useCollectionEngineStore((state) => state.assignCategory)
   const playTrack = usePlayerStore((state) => state.playTrack)
   const setQueue = usePlayerStore((state) => state.setQueue)
-  const queue = usePlayerStore((state) => state.queue)
-  const queueIndex = usePlayerStore((state) => state.queueIndex)
+  const insertNext = usePlayerStore((state) => state.insertNext)
+  const appendToQueue = usePlayerStore((state) => state.appendToQueue)
+  const setShuffleMode = usePlayerStore((state) => state.setShuffleMode)
   const applyLibraryDeck = useSwipeDeckSessionStore(
     (state) => state.applyLibraryDeck,
   )
@@ -89,6 +81,13 @@ export default function Library() {
   }, [selectAllTracks])
 
   const rows = searchResults.length > 0 ? searchResults : tracks
+
+  const playFromRows = (track: Track) => {
+    const list = rows.map((row) => row.track)
+    const index = list.findIndex((item) => item.id === track.id)
+    setQueue(list, index >= 0 ? index : 0)
+    void playTrack(track)
+  }
 
   const providerLabelById = useMemo(() => {
     const map = new Map(providers.map((provider) => [provider.id, provider.label]))
@@ -136,16 +135,6 @@ export default function Library() {
     }
     useLibraryUiStore.setState({ selectedTrackIds: [...next] })
     lastClickedTrackId.current = trackId
-  }
-
-  const playNext = (track: Track) => {
-    const insertAt = Math.max(0, queueIndex + 1)
-    const nextQueue = [
-      ...queue.slice(0, insertAt),
-      track,
-      ...queue.slice(insertAt).filter((item) => item.id !== track.id),
-    ]
-    setQueue(nextQueue, queueIndex >= 0 ? queueIndex : 0)
   }
 
   return (
@@ -272,7 +261,7 @@ export default function Library() {
               onPlay={(trackId) => {
                 const row = rows.find((item) => item.track.id === trackId)
                 if (row) {
-                  void playTrack(row.track)
+                  playFromRows(row.track)
                 }
               }}
               onOpenActions={setActionTrackId}
@@ -338,19 +327,25 @@ export default function Library() {
         onClose={() => setActionTrackId(null)}
         onPlay={() => {
           if (actionRow) {
-            void playTrack(actionRow.track)
+            playFromRows(actionRow.track)
           }
         }}
         onPlayNext={() => {
           if (actionRow) {
-            playNext(actionRow.track)
+            insertNext(actionRow.track)
+          }
+        }}
+        onAddToQueue={() => {
+          if (actionRow) {
+            appendToQueue([actionRow.track])
           }
         }}
         onShuffle={() => {
-          const shuffled = shuffleTracks(rows.map((row) => row.track))
-          setQueue(shuffled, 0)
-          if (shuffled[0]) {
-            void playTrack(shuffled[0])
+          const list = rows.map((row) => row.track)
+          setQueue(list, 0)
+          setShuffleMode('ON')
+          if (list[0]) {
+            void playTrack(list[0])
           }
         }}
         onOpenInSwipes={() => {

@@ -86,6 +86,32 @@ export function createMockMusicSourceAdapter(): MusicSourceAdapter {
       throw new Error('[mock] Track has no preview URL')
     },
 
+    async getPlaybackCandidates(track) {
+      const url = track.previewUrl ?? null
+      return [
+        {
+          id: 'mock:stream',
+          providerId: SOURCE_ID,
+          type: 'stream',
+          priority: 0,
+          available: Boolean(url),
+          url,
+          label: 'Demo stream',
+          reason: url ? undefined : 'No demo URL',
+        },
+        {
+          id: 'mock:preview',
+          providerId: SOURCE_ID,
+          type: 'preview',
+          priority: 0,
+          available: Boolean(url),
+          url,
+          label: 'Demo preview',
+          reason: url ? undefined : 'No demo URL',
+        },
+      ]
+    },
+
     async getCover(track) {
       return track.coverUrl ?? undefined
     },

@@ -6,12 +6,20 @@ export default function Profile() {
       <h1 className="font-display text-2xl font-semibold tracking-tight text-[var(--color-fg)]">
         Профиль
       </h1>
-      <Link
-        to="/sources"
-        className="inline-flex rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-sm font-medium text-[var(--color-fg)] transition-colors hover:bg-[var(--color-surface-hover)]"
-      >
-        Источники музыки
-      </Link>
+      <div className="flex flex-col gap-2">
+        <Link
+          to="/queue"
+          className="inline-flex rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-sm font-medium text-[var(--color-fg)] transition-colors hover:bg-[var(--color-surface-hover)]"
+        >
+          Очередь воспроизведения
+        </Link>
+        <Link
+          to="/sources"
+          className="inline-flex rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-sm font-medium text-[var(--color-fg)] transition-colors hover:bg-[var(--color-surface-hover)]"
+        >
+          Источники музыки
+        </Link>
+      </div>
     </section>
   )
 }

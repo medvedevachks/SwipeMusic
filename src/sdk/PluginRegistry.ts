@@ -7,6 +7,7 @@ import { normalizeSourceType } from '../types/source'
 import { createProviderContext } from './createProviderContext'
 import { platformEventBus } from './EventBus'
 import type {
+  AuthenticationProvider,
   ProviderCapabilities,
   ProviderManifest,
   ProviderPlugin,
@@ -79,6 +80,9 @@ export class PluginRegistry {
       }
     }
 
+    // Auth / FS handles / OAuth redirect — для уже существующих configs addSource не вызывается.
+    void Promise.resolve(adapter.initialize())
+
     platformEventBus.emit('PluginRegistered', { pluginId: id })
   }
 
@@ -111,6 +115,19 @@ export class PluginRegistry {
   getCapabilities(id: string): ProviderCapabilities | null {
     const state = this.plugins.get(id)
     return state?.plugin.manifest.capabilities ?? null
+  }
+
+  /**
+   * AuthenticationProvider плагина (если объявлен).
+   * UI /sources использует только этот контракт — без if (spotify).
+   */
+  getAuthenticationProvider(id: string): AuthenticationProvider | null {
+    const state = this.plugins.get(id)
+    if (!state?.plugin.createAuthenticationProvider) {
+      return null
+    }
+    const ctx = createProviderContext(id)
+    return state.plugin.createAuthenticationProvider(ctx)
   }
 
   enable(id: string): void {

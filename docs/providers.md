@@ -134,8 +134,72 @@ providers/MyProvider/
 - `manifest.icon` — строковый ключ иконки для UI
 - `ctx.settings` / `ctx.storage` — настройки плагина (persist через storage)
 
+## AuthenticationProvider
+
+Опциональный контракт для `/sources`:
+
+```ts
+createAuthenticationProvider: () => ({
+  isAuthenticated: async () => boolean,
+  login: async () => void,
+  logout: async () => void,
+  getStatus?: async () => ProviderStatusDescriptor,
+  getProfile?: async () => ({ displayName, email? }) | null,
+  syncLibrary?: async () => ({ trackCount }),
+  getLastSyncedAt?: async () => string | null,
+})
+```
+
+### ProviderStatusDescriptor
+
+Провайдер отдаёт **полный** снимок для UI:
+
+```ts
+{
+  status: 'ready' | 'unauthorized' | 'not_configured' | 'syncing' | 'offline' | 'error',
+  title: string,
+  description: string,
+  severity: 'neutral' | 'info' | 'success' | 'warning' | 'error',
+  actions: [{ id: 'login' | 'logout' | 'sync' | 'reconnect_device', label, variant? }],
+  setup?: {
+    title, description,
+    steps: [{ title, description? }],
+    documentationUrl?, documentationLabel?,
+  },
+  details?: [{ label, value }],
+}
+```
+
+| `connected_premium` | полная функциональность |
+| `connected_free` | подключен, ограниченные возможности (sync disabled + hint) |
+| `disconnected` | нужна авторизация |
+| `syncing` | идёт синхронизация |
+| `not_configured` | нет конфигурации разработчика |
+| `offline` / `error` | сеть / сбой |
+
+У `ProviderStatusAction` есть опциональные `disabled` + `hint` — UI рисует
+пояснение рядом с кнопкой, не анализируя текст ошибок API.
+
+
+В **DEV** Spotify при отсутствии Client ID возвращает `setup` с инструкциями.
+В **production** — нейтральное `description` без env.
+
+## Spotify (пример)
+
+1. Создайте приложение в [Spotify Dashboard](https://developer.spotify.com/dashboard).
+2. Redirect URI: `{origin}/sources` (например `http://localhost:5173/sources`).
+3. Скопируйте `.env.example` → `.env`, задайте `VITE_SPOTIFY_CLIENT_ID`.
+4. `/sources` → Connect → sync → Library / Search / Queue / Player.
+
+Без Client ID в DEV на `/sources` показывается `setup` из дескриптора Spotify
+(не красная ошибка UI). После добавления Client ID и перезапуска — action Connect.
+
+Playback: полный трек через **Web Playback SDK** (`SpotifyPlayerAdapter`).
+Нужен Spotify Premium. После добавления scopes `streaming` /
+`user-*-playback-state` — переподключите аккаунт (Disconnect → Connect).
+
 ## Что не нужно менять
 
-SwipeEngine · Player · SearchEngine · Library UI · AudioPlayer · Collection · Track
+SwipeEngine · Player · SearchEngine · Library UI · AudioPlayer · Collection · Track · MediaIndex · PlaybackQueue
 
 Новый источник = новая папка + `registerPlugin(...)`.

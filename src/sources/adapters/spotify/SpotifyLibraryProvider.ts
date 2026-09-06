@@ -1,42 +1,48 @@
-import { getMediaIndex } from '../../services/mediaIndex'
-import { syncAdapterToMediaIndex } from '../../services/mediaIndex'
-import type { MusicSourceAdapter } from '../../sources/MusicSourceAdapter'
-import type { Track } from '../../types/track'
-import type { LibraryNode, LibraryProvider } from '../../types/libraryProvider'
+import { getMediaIndex } from '../../../services/mediaIndex'
+import type { Track } from '../../../types/track'
+import type { LibraryNode, LibraryProvider } from '../../../types/libraryProvider'
+import { getSpotifyAdapter, type SpotifyAdapter } from './SpotifyAdapter'
 
 const ROOT_ALL = 'all-tracks'
 const ROOT_ARTISTS = 'artists'
 const ROOT_ALBUMS = 'albums'
+const ROOT_PLAYLISTS = 'playlists'
+const ROOT_FAVORITES = 'favorites'
 const ARTIST_PREFIX = 'artist:'
 const ALBUM_PREFIX = 'album:'
+const PLAYLIST_PREFIX = 'playlist:'
 
 /**
- * Artists / Albums / All Tracks из MediaIndex.
- * Provider вызывается только при sync (refresh / пустой индекс).
+ * Library для Spotify: All / Artists / Albums / Playlists / Favorites.
+ * Данные только из MediaIndex (+ метаданные плейлистов из адаптера).
  */
-export class AdapterLibraryProvider implements LibraryProvider {
+export class SpotifyLibraryProvider implements LibraryProvider {
   readonly id: string
   readonly label: string
   readonly capabilities = ['tree', 'search', 'refresh'] as const
 
-  private readonly adapter: MusicSourceAdapter
+  private readonly adapter: SpotifyAdapter
 
-  constructor(adapter: MusicSourceAdapter) {
+  constructor(adapter: SpotifyAdapter = getSpotifyAdapter()) {
     this.adapter = adapter
     this.id = adapter.id
     this.label = adapter.label
   }
 
   async refresh(): Promise<void> {
-    await syncAdapterToMediaIndex(this.adapter)
+    if (this.adapter.isAvailable()) {
+      await this.adapter.syncLibrary()
+      return
+    }
+    await getMediaIndex().whenReady()
   }
 
   private async loadTracks(): Promise<Track[]> {
     const index = getMediaIndex()
     await index.whenReady()
     let tracks = index.listTracks(this.id)
-    if (tracks.length === 0) {
-      await syncAdapterToMediaIndex(this.adapter)
+    if (tracks.length === 0 && this.adapter.isAvailable()) {
+      await this.adapter.syncLibrary()
       tracks = index.listTracks(this.id)
     }
     return tracks
@@ -48,6 +54,10 @@ export class AdapterLibraryProvider implements LibraryProvider {
     const albums = new Set(
       tracks.map((track) => track.album?.trim() || 'Unknown Album'),
     )
+    const favorites = tracks.filter((track) =>
+      track.tags?.includes('favorite'),
+    )
+    const playlists = this.adapter.getPlaylists()
 
     return [
       {
@@ -69,6 +79,20 @@ export class AdapterLibraryProvider implements LibraryProvider {
         title: 'Albums',
         type: 'collection',
         count: albums.size,
+        sourceId: this.id,
+      },
+      {
+        id: ROOT_PLAYLISTS,
+        title: 'Playlists',
+        type: 'collection',
+        count: playlists.length,
+        sourceId: this.id,
+      },
+      {
+        id: ROOT_FAVORITES,
+        title: 'Favorites',
+        type: 'collection',
+        count: favorites.length,
         sourceId: this.id,
       },
     ]
@@ -112,6 +136,17 @@ export class AdapterLibraryProvider implements LibraryProvider {
         }))
     }
 
+    if (nodeId === ROOT_PLAYLISTS) {
+      return this.adapter.getPlaylists().map((playlist) => ({
+        id: `${PLAYLIST_PREFIX}${playlist.id}`,
+        parentId: ROOT_PLAYLISTS,
+        title: playlist.name,
+        type: 'playlist' as const,
+        count: playlist.trackIds.length,
+        sourceId: this.id,
+      }))
+    }
+
     return []
   }
 
@@ -120,6 +155,9 @@ export class AdapterLibraryProvider implements LibraryProvider {
 
     if (nodeId === ROOT_ALL) {
       return tracks
+    }
+    if (nodeId === ROOT_FAVORITES) {
+      return tracks.filter((track) => track.tags?.includes('favorite'))
     }
     if (nodeId.startsWith(ARTIST_PREFIX)) {
       const artist = nodeId.slice(ARTIST_PREFIX.length)
@@ -131,6 +169,21 @@ export class AdapterLibraryProvider implements LibraryProvider {
         (track) => (track.album?.trim() || 'Unknown Album') === album,
       )
     }
+    if (nodeId.startsWith(PLAYLIST_PREFIX)) {
+      const playlistId = nodeId.slice(PLAYLIST_PREFIX.length)
+      const playlist = this.adapter
+        .getPlaylists()
+        .find((item) => item.id === playlistId)
+      if (!playlist) {
+        return []
+      }
+      const idSet = new Set(playlist.trackIds)
+      return tracks.filter(
+        (track) =>
+          idSet.has(track.externalId) ||
+          track.tags?.includes(`playlist:${playlistId}`),
+      )
+    }
     return []
   }
 
@@ -139,4 +192,8 @@ export class AdapterLibraryProvider implements LibraryProvider {
     await index.whenReady()
     return index.search(query, [this.id]).map((record) => record.track)
   }
+}
+
+export function createSpotifyLibraryProvider(): LibraryProvider {
+  return new SpotifyLibraryProvider()
 }

@@ -27,6 +27,7 @@ function capabilitiesFromAdapter(
     artwork: false,
     authentication: false,
     lyrics: false,
+    previewPlayback: false,
   }
 }
 

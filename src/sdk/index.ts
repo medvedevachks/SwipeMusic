@@ -18,9 +18,17 @@ export type {
   MetadataProvider,
   ArtworkProvider,
   AuthenticationProvider,
+  ProviderStatusCode,
+  ProviderStatusSeverity,
+  ProviderSetupStep,
+  ProviderSetupDescriptor,
+  ProviderStatusActionId,
+  ProviderStatusAction,
+  ProviderStatusDetail,
+  ProviderStatusDescriptor,
   Downloader,
 } from './types'
-export { EMPTY_CAPABILITIES } from './types'
+export { EMPTY_CAPABILITIES, isProviderConnectedStatus } from './types'
 
 export {
   PluginRegistry,

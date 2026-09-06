@@ -18,6 +18,7 @@ import {
   saveLibrarySnapshot,
 } from './handleStorage'
 import { ObjectUrlCache } from './ObjectUrlCache'
+import { getMediaIndex, indexTracksForSource } from '../../../services/mediaIndex'
 import type {
   IndexedLocalFile,
   LocalAccessState,
@@ -248,6 +249,7 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
       foundTracks: 0,
     })
     await clearLocalLibraryStorage()
+    getMediaIndex().replaceSource(this.id, [])
     this.emitStats()
   }
 
@@ -294,6 +296,34 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
     const externalId = this.resolveExternalId(track)
     const url = await this.ensureObjectUrl(externalId)
     return url
+  }
+
+  async getPlaybackCandidates(track: Track) {
+    try {
+      const url = await this.getStream(track)
+      return [
+        {
+          id: `${this.id}:local`,
+          providerId: this.id,
+          type: 'local' as const,
+          priority: 0,
+          available: Boolean(url),
+          url,
+          label: 'Local file',
+        },
+      ]
+    } catch (error) {
+      return [
+        {
+          id: `${this.id}:local`,
+          providerId: this.id,
+          type: 'local' as const,
+          priority: 0,
+          available: false,
+          reason: error instanceof Error ? error.message : String(error),
+        },
+      ]
+    }
   }
 
   async getCover(_track: Track): Promise<string | undefined> {
@@ -383,6 +413,19 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
       }
       await saveLibrarySnapshot(snapshot)
       this.emitStats()
+
+      // Синхронизация в MediaIndex — Library/Search читают только оттуда.
+      const mediaFiles = result.files.map((file) => ({
+        sourceId: this.id,
+        externalId: file.relativePath,
+        path: file.relativePath,
+        fileName: file.fileName,
+      }))
+      await indexTracksForSource(
+        this.id,
+        [...this.tracksById.values()],
+        mediaFiles,
+      )
     } catch (error) {
       this.setProgress({
         phase: 'error',

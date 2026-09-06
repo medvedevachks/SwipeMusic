@@ -5,7 +5,11 @@ import type { MusicSourceAdapter } from '../../sources/MusicSourceAdapter'
 import { createCustomWebsiteAdapter } from '../../sources/adapters/web'
 import { createLocalFolderAdapter } from '../../sources/adapters/local-folder'
 import { createMockMusicSourceAdapter } from '../../sources/adapters/mock'
-import { createSpotifyAdapter } from '../../sources/adapters/spotify'
+import {
+  createSpotifyAdapter,
+  createSpotifyLibraryProvider,
+  getSpotifyAdapter,
+} from '../../sources/adapters/spotify'
 import { createVKMusicAdapter } from '../../sources/adapters/vk-music'
 import { createYandexMusicAdapter } from '../../sources/adapters/yandex-music'
 import { createZaycevAdapter } from '../../sources/adapters/zaycev'
@@ -23,6 +27,7 @@ function caps(
     artwork: false,
     authentication: false,
     lyrics: false,
+    previewPlayback: false,
     ...partial,
   }
 }
@@ -93,23 +98,33 @@ export const builtinProviderPlugins: ProviderPlugin[] = [
       search: true,
       library: true,
       streaming: true,
+      previewPlayback: true,
     }),
     factory: createMockMusicSourceAdapter,
   }),
-  definePlugin({
-    id: 'spotify',
-    name: 'Spotify',
-    defaultPriority: 10,
-    icon: 'spotify',
-    capabilities: caps({
-      search: true,
-      library: true,
-      streaming: true,
-      artwork: true,
-      authentication: true,
-    }),
-    factory: createSpotifyAdapter,
-  }),
+  {
+    manifest: {
+      id: 'spotify',
+      name: 'Spotify',
+      version: '1.0.0',
+      icon: 'spotify',
+      defaultPriority: 10,
+      defaultEnabled: false,
+      capabilities: caps({
+        search: true,
+        library: true,
+        streaming: true,
+        artwork: true,
+        authentication: true,
+        previewPlayback: true,
+      }),
+    },
+    createMusicSourceAdapter: () =>
+      resolveAdapter('spotify', createSpotifyAdapter),
+    createLibraryProvider: () => createSpotifyLibraryProvider(),
+    createAuthenticationProvider: () =>
+      getSpotifyAdapter().createAuthenticationProvider(),
+  },
   definePlugin({
     id: 'yandex-music',
     name: 'Яндекс Музыка',

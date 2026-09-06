@@ -1,4 +1,6 @@
 import { LocalMusicPanel } from '../components/LocalMusicPanel'
+import { ProviderAuthPanel } from '../components/ProviderAuthPanel'
+import { DevPlaybackPanel } from '../components/DevPlaybackPanel'
 import {
   disablePlugin,
   enablePlugin,
@@ -34,6 +36,14 @@ export default function Sources() {
     return caps?.library === true && source.type === 'filesystem'
   })
 
+  const authPlugins = sources.filter((source) => {
+    const caps = pluginRegistry.getCapabilities(source.id)
+    return (
+      caps?.authentication === true &&
+      pluginRegistry.getAuthenticationProvider(source.id) != null
+    )
+  })
+
   return (
     <section className="space-y-5 pb-4">
       <div className="space-y-1">
@@ -46,6 +56,16 @@ export default function Sources() {
       </div>
 
       {showLocalPanel ? <LocalMusicPanel /> : null}
+
+      {import.meta.env.DEV ? <DevPlaybackPanel /> : null}
+
+      {authPlugins.map((source) => (
+        <ProviderAuthPanel
+          key={source.id}
+          pluginId={source.id}
+          name={source.name}
+        />
+      ))}
 
       <div className="flex flex-wrap gap-2">
         <button

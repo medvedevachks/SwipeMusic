@@ -1,10 +1,17 @@
 import { create } from 'zustand'
 import { getAudioPlayer } from '../services/audioPlayer'
+import {
+  getPlaybackQueue,
+  type RepeatMode,
+  type ShuffleMode,
+} from '../services/playbackQueue'
 import type { PlayerState } from '../types/player'
 import { initialPlayerState } from '../types/player'
 import type { Track } from '../types/track'
 
 type PlayerStore = PlayerState & {
+  repeatMode: RepeatMode
+  shuffleMode: ShuffleMode
   play: (url: string) => Promise<void>
   playTrack: (track: Track) => Promise<void>
   pause: () => void
@@ -14,10 +21,18 @@ type PlayerStore = PlayerState & {
   next: () => Promise<void>
   previous: () => Promise<void>
   setQueue: (tracks: Track[], startIndex?: number) => void
+  appendToQueue: (tracks: Track[]) => void
+  insertNext: (track: Track) => void
+  removeFromQueue: (trackId: string) => void
+  moveInQueue: (from: number, to: number) => void
+  clearQueue: () => void
+  setRepeatMode: (mode: RepeatMode) => void
+  setShuffleMode: (mode: ShuffleMode) => void
   setVolume: (volume: number) => void
 }
 
 const audioPlayer = getAudioPlayer()
+const playbackQueue = getPlaybackQueue()
 
 export const usePlayerStore = create<PlayerStore>((set) => {
   audioPlayer.subscribe((state) => {
@@ -34,9 +49,22 @@ export const usePlayerStore = create<PlayerStore>((set) => {
     })
   })
 
+  playbackQueue.subscribe((snapshot) => {
+    set({
+      queue: snapshot.items,
+      queueIndex: snapshot.currentIndex,
+      repeatMode: snapshot.repeatMode,
+      shuffleMode: snapshot.shuffleMode,
+    })
+  })
+
+  const queueSnap = playbackQueue.getSnapshot()
+
   return {
     ...initialPlayerState,
     ...audioPlayer.getState(),
+    repeatMode: queueSnap.repeatMode,
+    shuffleMode: queueSnap.shuffleMode,
 
     play: (url) => audioPlayer.play(url),
     playTrack: (track) => audioPlayer.playTrack(track),
@@ -47,6 +75,13 @@ export const usePlayerStore = create<PlayerStore>((set) => {
     next: () => audioPlayer.next(),
     previous: () => audioPlayer.previous(),
     setQueue: (tracks, startIndex) => audioPlayer.setQueue(tracks, startIndex),
+    appendToQueue: (tracks) => audioPlayer.append(tracks),
+    insertNext: (track) => audioPlayer.insertNext(track),
+    removeFromQueue: (trackId) => playbackQueue.remove(trackId),
+    moveInQueue: (from, to) => playbackQueue.move(from, to),
+    clearQueue: () => playbackQueue.clear(),
+    setRepeatMode: (mode) => playbackQueue.setRepeatMode(mode),
+    setShuffleMode: (mode) => playbackQueue.setShuffleMode(mode),
     setVolume: (volume) => audioPlayer.setVolume(volume),
   }
 })

@@ -1,6 +1,8 @@
 import type { SearchEngineState } from '../../types/search'
 import type { Track } from '../../types/track'
 import { bootstrapMusicSources, sourceManager } from '../../sources'
+import { pluginRegistry } from '../../sdk'
+import { getMediaIndex, syncAdapterToMediaIndex } from '../mediaIndex'
 import {
   mergeAndDedupeSearchResults,
   type RankedTrack,
@@ -98,17 +100,40 @@ export class SearchEngine {
             return
           }
 
-          const result = await adapter.search(normalized, {
-            signal: controller.signal,
-          })
+          const caps = pluginRegistry.getCapabilities(config.id)
+          const useIndex = caps?.library === true
+
+          let tracks: Track[] = []
+          let nextCursor: string | null = null
+
+          if (useIndex) {
+            const index = getMediaIndex()
+            await index.whenReady()
+            let records = index.search(normalized, [config.id])
+            if (records.length === 0 && index.bySource(config.id).length === 0) {
+              await syncAdapterToMediaIndex(adapter, {
+                signal: controller.signal,
+              })
+              records = index.search(normalized, [config.id])
+            }
+            tracks = records.map((record) => record.track)
+            nextCursor = null
+          } else {
+            // Remote API / live search.
+            const result = await adapter.search(normalized, {
+              signal: controller.signal,
+            })
+            tracks = result.tracks
+            nextCursor = result.nextCursor ?? null
+          }
 
           if (controller.signal.aborted) {
             return
           }
 
-          this.sourceCursors.set(config.id, result.nextCursor ?? null)
+          this.sourceCursors.set(config.id, nextCursor)
 
-          result.tracks.forEach((track, resultIndex) => {
+          tracks.forEach((track, resultIndex) => {
             ranked.push({
               track,
               sourcePriority: config.priority,

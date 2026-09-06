@@ -15,6 +15,8 @@ export type ProviderCapabilities = {
   artwork: boolean
   authentication: boolean
   lyrics: boolean
+  /** Provider умеет отдавать preview как PlaybackCandidate. */
+  previewPlayback: boolean
 }
 
 export type ProviderManifest = {
@@ -67,10 +69,92 @@ export type ArtworkProvider = {
   getArtwork(track: Track, signal?: AbortSignal): Promise<string | undefined>
 }
 
+/** Универсальный статус подключения источника. */
+export type ProviderStatusCode =
+  | 'connected_premium'
+  | 'connected_free'
+  | 'disconnected'
+  | 'syncing'
+  | 'error'
+  | 'not_configured'
+  | 'offline'
+
+export type ProviderStatusSeverity =
+  | 'neutral'
+  | 'info'
+  | 'success'
+  | 'warning'
+  | 'error'
+
+export type ProviderSetupStep = {
+  title: string
+  description?: string
+}
+
+/** Инструкции настройки — целиком от провайдера, UI только рисует. */
+export type ProviderSetupDescriptor = {
+  title: string
+  description: string
+  steps: ProviderSetupStep[]
+  documentationUrl?: string
+  documentationLabel?: string
+}
+
+/**
+ * Действие на панели источника.
+ * UI вызывает handler по id — без знания о конкретном сервисе.
+ */
+export type ProviderStatusActionId =
+  | 'login'
+  | 'logout'
+  | 'sync'
+  | 'reconnect_device'
+
+export type ProviderStatusAction = {
+  id: ProviderStatusActionId
+  label: string
+  variant?: 'primary' | 'secondary' | 'danger'
+  disabled?: boolean
+  /** Пояснение рядом с disabled-кнопкой — текст от провайдера. */
+  hint?: string
+}
+
+export type ProviderStatusDetail = {
+  label: string
+  value: string
+}
+
+/**
+ * Полный снимок состояния для /sources.
+ * Все тексты и кнопки задаёт провайдер.
+ */
+export type ProviderStatusDescriptor = {
+  status: ProviderStatusCode
+  title: string
+  description: string
+  severity: ProviderStatusSeverity
+  actions: ProviderStatusAction[]
+  setup?: ProviderSetupDescriptor
+  details?: ProviderStatusDetail[]
+}
+
+/** Статусы, при которых источник считается подключённым. */
+export function isProviderConnectedStatus(status: ProviderStatusCode): boolean {
+  return status === 'connected_premium' || status === 'connected_free'
+}
+
 export type AuthenticationProvider = {
   isAuthenticated(): Promise<boolean>
   login(): Promise<void>
   logout(): Promise<void>
+  /**
+   * Единый статус для /sources.
+   * UI не читает env и не проверяет имя провайдера.
+   */
+  getStatus?(): Promise<ProviderStatusDescriptor>
+  getProfile?(): Promise<{ displayName: string; email?: string } | null>
+  syncLibrary?(): Promise<{ trackCount: number }>
+  getLastSyncedAt?(): Promise<string | null>
 }
 
 export type Downloader = {
@@ -102,4 +186,5 @@ export const EMPTY_CAPABILITIES: ProviderCapabilities = {
   artwork: false,
   authentication: false,
   lyrics: false,
+  previewPlayback: false,
 }

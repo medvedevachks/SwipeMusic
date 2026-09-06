@@ -8,6 +8,7 @@ type TrackActionSheetProps = {
   onClose: () => void
   onPlay: () => void
   onPlayNext: () => void
+  onAddToQueue: () => void
   onShuffle: () => void
   onOpenInSwipes: () => void
   onToggleLike: () => void
@@ -26,6 +27,7 @@ export function TrackActionSheet({
   onClose,
   onPlay,
   onPlayNext,
+  onAddToQueue,
   onShuffle,
   onOpenInSwipes,
   onToggleLike,
@@ -43,6 +45,7 @@ export function TrackActionSheet({
   const actions = [
     { label: '▶ Play', onClick: onPlay },
     { label: '⏭ Play Next', onClick: onPlayNext },
+    { label: '➕ Add to Queue', onClick: onAddToQueue },
     { label: '🔀 Shuffle', onClick: onShuffle },
     { label: '➡ Открыть в свайпах', onClick: onOpenInSwipes },
     {

@@ -1,28 +1,13 @@
 import type { Track } from '../types/track'
-import { sourceRegistry } from './registry'
+import { getPlaybackResolver } from '../services/playbackResolver'
 import { sourceManager } from './SourceManager'
 
 /**
- * Актуальный URL для плеера: через MusicSourceAdapter.getStream,
- * чтобы blob: URL локальных файлов не устаревали после revoke.
+ * Актуальный URL для плеера через PlaybackResolver.
+ * Сохранено для обратной совместимости; предпочтительно AudioPlayer.playTrack.
  */
 export async function resolvePlaybackUrl(track: Track): Promise<string | null> {
-  // listSources() гарантирует bootstrap SourceManager / registry.
   sourceManager.listSources()
-
-  if (sourceRegistry.has(track.sourceId)) {
-    try {
-      const adapter = sourceRegistry.get(track.sourceId)
-      if (adapter.supportsStreaming) {
-        const url = await adapter.getStream(track)
-        if (url) {
-          return url
-        }
-      }
-    } catch {
-      // fallback ниже
-    }
-  }
-
-  return track.previewUrl ?? null
+  const resolution = await getPlaybackResolver().resolve(track)
+  return resolution?.url ?? null
 }

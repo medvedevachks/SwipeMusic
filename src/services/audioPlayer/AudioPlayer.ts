@@ -1,9 +1,10 @@
 import type { PlayerState } from '../../types/player'
 import { initialPlayerState } from '../../types/player'
 import type { Track } from '../../types/track'
-import { resolvePlaybackUrl } from '../../sources/resolvePlaybackUrl'
-import { HtmlAudioPlayerAdapter } from './HtmlAudioPlayerAdapter'
+import { getPlaybackResolver } from '../playbackResolver'
+import { getPlaybackQueue } from '../playbackQueue'
 import type { PlayerAdapter } from './PlayerAdapter'
+import { getPlayerManager } from './PlayerManager'
 
 type StateListener = (state: PlayerState) => void
 
@@ -25,21 +26,40 @@ function isAutoplayBlockedError(error: unknown): boolean {
 }
 
 /**
- * Независимый от React сервис воспроизведения.
- * Бизнес-логика очереди и состояния; адаптер сменяем.
+ * Воспроизведение текущего трека.
+ * Порядок — только PlaybackQueue; AudioPlayer не владеет очередью.
  */
 export class AudioPlayer {
   private readonly adapter: PlayerAdapter
   private readonly listeners = new Set<StateListener>()
   private unsubscribeAdapter: (() => void) | null = null
+  private unsubscribeQueue: (() => void) | null = null
   private state: PlayerState = { ...initialPlayerState }
 
   constructor(adapter?: PlayerAdapter) {
-    this.adapter = adapter ?? new HtmlAudioPlayerAdapter()
+    this.adapter = adapter ?? getPlayerManager()
+    const queue = getPlaybackQueue()
+    const snap = queue.getSnapshot()
+
     this.state = {
       ...initialPlayerState,
       volume: this.adapter.getVolume(),
+      queue: snap.items,
+      queueIndex: snap.currentIndex,
+      currentTrack: queue.current(),
     }
+
+    this.unsubscribeQueue = queue.subscribe((snapshot) => {
+      this.patchState({
+        queue: snapshot.items,
+        queueIndex: snapshot.currentIndex,
+        currentTrack: this.state.playing || this.state.paused
+          ? this.state.currentTrack?.id === queue.current()?.id
+            ? this.state.currentTrack
+            : queue.current()
+          : queue.current() ?? this.state.currentTrack,
+      })
+    })
 
     this.unsubscribeAdapter = this.adapter.subscribe((event) => {
       const timePatch = {
@@ -67,7 +87,7 @@ export class AudioPlayer {
             playing: false,
             paused: false,
           })
-          void this.next()
+          void this.advanceFromEnded()
           return
         case 'play':
           this.patchState({
@@ -104,20 +124,21 @@ export class AudioPlayer {
   }
 
   setQueue(tracks: Track[], startIndex = 0): void {
-    // previewUrl может появиться позже через getStream — не отбрасываем локальные треки.
-    const queue = tracks.filter(
-      (track) => Boolean(track.previewUrl) || Boolean(track.sourceId),
-    )
-    const queueIndex =
-      queue.length === 0
-        ? -1
-        : Math.min(Math.max(0, startIndex), queue.length - 1)
-
+    getPlaybackQueue().setQueue(tracks, startIndex)
+    const current = getPlaybackQueue().current()
     this.patchState({
-      queue,
-      queueIndex,
-      currentTrack: queueIndex >= 0 ? queue[queueIndex] : null,
+      queue: getPlaybackQueue().getItems(),
+      queueIndex: getPlaybackQueue().getSnapshot().currentIndex,
+      currentTrack: current,
     })
+  }
+
+  append(tracks: Track[]): void {
+    getPlaybackQueue().append(tracks)
+  }
+
+  insertNext(track: Track): void {
+    getPlaybackQueue().insertNext(track)
   }
 
   /** Воспроизвести URL напрямую. */
@@ -146,9 +167,28 @@ export class AudioPlayer {
   }
 
   async playTrack(track: Track): Promise<void> {
-    let playbackUrl: string | null
+    const queue = getPlaybackQueue()
+    if (!queue.getItems().some((item) => item.id === track.id)) {
+      queue.setQueue([track], 0)
+    } else {
+      queue.focusTrack(track.id)
+    }
+
+    const resolver = getPlaybackResolver()
+    let playbackUrl: string | null = null
+
     try {
-      playbackUrl = await resolvePlaybackUrl(track)
+      const resolution = await resolver.resolve(track)
+      if (!resolution) {
+        this.patchState({
+          currentTrack: track,
+          playing: false,
+          paused: true,
+          error: resolver.buildUnavailableMessage(),
+        })
+        return
+      }
+      playbackUrl = resolution.url
     } catch (error) {
       this.patchState({
         currentTrack: track,
@@ -157,37 +197,22 @@ export class AudioPlayer {
         error:
           error instanceof Error
             ? error.message
-            : 'Failed to resolve playback URL',
-      })
-      return
-    }
-
-    if (!playbackUrl) {
-      this.patchState({
-        currentTrack: track,
-        playing: false,
-        paused: true,
-        error: 'Track has no preview URL',
+            : 'Failed to resolve playback',
       })
       return
     }
 
     const trackWithUrl: Track = { ...track, previewUrl: playbackUrl }
-    const existingIndex = this.state.queue.findIndex((item) => item.id === track.id)
     this.patchState({
       currentTrack: trackWithUrl,
-      queueIndex: existingIndex >= 0 ? existingIndex : this.state.queueIndex,
+      queue: queue.getItems(),
+      queueIndex: queue.getSnapshot().currentIndex,
       currentTime: 0,
       duration: 0,
       error: null,
     })
 
-    if (existingIndex >= 0) {
-      const queue = [...this.state.queue]
-      queue[existingIndex] = trackWithUrl
-      this.patchState({ queue })
-    }
-
+    // Маршрутизация адаптера по URL (spotify: / blob: / https:) — PlayerManager.
     await this.play(playbackUrl)
   }
 
@@ -196,7 +221,7 @@ export class AudioPlayer {
   }
 
   async resume(): Promise<void> {
-    const track = this.state.currentTrack
+    const track = this.state.currentTrack ?? getPlaybackQueue().current()
     if (!track) {
       return
     }
@@ -235,33 +260,21 @@ export class AudioPlayer {
   }
 
   async next(): Promise<void> {
-    const { queue, queueIndex } = this.state
-    if (queue.length === 0) {
-      return
-    }
-
-    const nextIndex = queueIndex + 1
-    if (nextIndex >= queue.length) {
+    const track = getPlaybackQueue().next()
+    if (!track) {
       this.stop()
       this.patchState({
-        playing: false,
-        paused: true,
         currentTrack: null,
         queueIndex: -1,
       })
       return
     }
-
-    await this.playTrack(queue[nextIndex])
+    await this.playTrack(track)
   }
 
   async previous(): Promise<void> {
-    const { queue, queueIndex, currentTime } = this.state
-    if (queue.length === 0) {
-      return
-    }
-
-    if (currentTime > 3 && queueIndex >= 0) {
+    const { currentTime } = this.state
+    if (currentTime > 3) {
       this.seek(0)
       if (!this.state.playing) {
         await this.resume()
@@ -269,8 +282,11 @@ export class AudioPlayer {
       return
     }
 
-    const prevIndex = Math.max(0, queueIndex - 1)
-    await this.playTrack(queue[prevIndex])
+    const track = getPlaybackQueue().previous()
+    if (!track) {
+      return
+    }
+    await this.playTrack(track)
   }
 
   setVolume(volume: number): void {
@@ -281,8 +297,23 @@ export class AudioPlayer {
   dispose(): void {
     this.unsubscribeAdapter?.()
     this.unsubscribeAdapter = null
+    this.unsubscribeQueue?.()
+    this.unsubscribeQueue = null
     this.adapter.dispose()
     this.listeners.clear()
+  }
+
+  private async advanceFromEnded(): Promise<void> {
+    const track = getPlaybackQueue().next({ fromEnded: true })
+    if (!track) {
+      this.stop()
+      this.patchState({
+        currentTrack: null,
+        queueIndex: -1,
+      })
+      return
+    }
+    await this.playTrack(track)
   }
 
   private patchState(partial: Partial<PlayerState>): void {
