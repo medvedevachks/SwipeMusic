@@ -1,8 +1,11 @@
 import { Outlet } from 'react-router-dom'
 import AppHeader from '../components/AppHeader'
 import BottomNav from '../components/BottomNav'
+import { usePlayerQueueBootstrap } from '../hooks/usePlayerQueueBootstrap'
 
 export default function MainLayout() {
+  usePlayerQueueBootstrap()
+
   return (
     <div className="flex min-h-svh flex-col bg-[var(--color-bg)]">
       <AppHeader />

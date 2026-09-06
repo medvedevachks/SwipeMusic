@@ -6,7 +6,29 @@ export type MockTrackSection = {
   tracks: TrackSeed[]
 }
 
-const recommended: TrackSeed[] = [
+/**
+ * Публичные демо-MP3 (SoundHelix).
+ * Циклически назначаются трекам как previewUrl.
+ */
+export const DEMO_PREVIEW_URLS = [
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-6.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-7.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
+] as const
+
+function withPreview(tracks: Omit<TrackSeed, 'previewUrl'>[]): TrackSeed[] {
+  return tracks.map((track, index) => ({
+    ...track,
+    previewUrl: DEMO_PREVIEW_URLS[index % DEMO_PREVIEW_URLS.length],
+  }))
+}
+
+const recommended = withPreview([
   {
     id: 'r1',
     title: 'Midnight Drive',
@@ -37,9 +59,9 @@ const recommended: TrackSeed[] = [
     artist: 'Field Theory',
     coverColor: '#365314',
   },
-]
+])
 
-const popular: TrackSeed[] = [
+const popular = withPreview([
   {
     id: 'p1',
     title: 'City Lights',
@@ -70,9 +92,9 @@ const popular: TrackSeed[] = [
     artist: 'Pulse Room',
     coverColor: '#134e4a',
   },
-]
+])
 
-const recentlyAdded: TrackSeed[] = [
+const recentlyAdded = withPreview([
   {
     id: 'a1',
     title: 'First Light',
@@ -103,7 +125,7 @@ const recentlyAdded: TrackSeed[] = [
     artist: 'Satellite Kids',
     coverColor: '#0e7490',
   },
-]
+])
 
 export const homeSections: MockTrackSection[] = [
   { id: 'recommended', title: 'Рекомендуемое', tracks: recommended },

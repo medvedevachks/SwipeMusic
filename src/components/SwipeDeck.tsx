@@ -27,6 +27,8 @@ type SwipeDeckProps = {
   onLike: (track: Track) => void
   onSkip?: (track: Track) => void
   onPrevious?: (track: Track) => void
+  /** Текущая карточка колоды изменилась (для AudioPlayer и др.). */
+  onCurrentTrackChange?: (track: Track | null) => void
 }
 
 function flyTarget(direction: SwipeDirection) {
@@ -60,6 +62,7 @@ export default function SwipeDeck({
   onLike,
   onSkip,
   onPrevious,
+  onCurrentTrackChange,
 }: SwipeDeckProps) {
   const [index, setIndex] = useState(0)
   const [hintAction, setHintAction] = useState<SwipeAction | null>(null)
@@ -72,6 +75,10 @@ export default function SwipeDeck({
   const current = tracks[index]
   const next = tracks[index + 1]
   const hints = useMemo(() => directionHints(gestureConfig), [gestureConfig])
+
+  useEffect(() => {
+    onCurrentTrackChange?.(current ?? null)
+  }, [current, onCurrentTrackChange])
 
   const [front, frontApi] = useSpring(() => ({
     x: 0,

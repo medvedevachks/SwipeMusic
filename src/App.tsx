@@ -5,6 +5,7 @@ import Library from './pages/Library'
 import Player from './pages/Player'
 import Profile from './pages/Profile'
 import Search from './pages/Search'
+import Sources from './pages/Sources'
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
         <Route path="library" element={<Library />} />
         <Route path="player" element={<Player />} />
         <Route path="profile" element={<Profile />} />
+        <Route path="sources" element={<Sources />} />
       </Route>
     </Routes>
   )

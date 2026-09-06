@@ -1,27 +1,42 @@
 import { useEffect, useState } from 'react'
 import { fetchSwipeFeed } from '../services/trackFeed'
 import { bootstrapMusicSources } from '../sources'
+import { useSwipeDeckSessionStore } from '../store/swipeDeckSessionStore'
 import type { Track } from '../types/track'
 
 type UseSwipeFeedResult = {
   tracks: Track[]
   isLoading: boolean
   error: string | null
+  mode: 'catalog' | 'search'
+  searchQuery: string | null
 }
 
+/**
+ * Источник колоды для Home.
+ * Если Search применил сессию — отдаём её Track[]; иначе каталог как раньше.
+ */
 export function useSwipeFeed(): UseSwipeFeedResult {
-  const [tracks, setTracks] = useState<Track[]>([])
+  const sessionMode = useSwipeDeckSessionStore((state) => state.mode)
+  const sessionTracks = useSwipeDeckSessionStore((state) => state.tracks)
+  const searchQuery = useSwipeDeckSessionStore((state) => state.searchQuery)
+
+  const [catalogTracks, setCatalogTracks] = useState<Track[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (sessionMode === 'search') {
+      return
+    }
+
     let cancelled = false
     bootstrapMusicSources()
 
     void fetchSwipeFeed()
       .then((feed) => {
         if (!cancelled) {
-          setTracks(feed)
+          setCatalogTracks(feed)
           setError(null)
           setIsLoading(false)
         }
@@ -36,7 +51,23 @@ export function useSwipeFeed(): UseSwipeFeedResult {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [sessionMode])
 
-  return { tracks, isLoading, error }
+  if (sessionMode === 'search' && sessionTracks) {
+    return {
+      tracks: sessionTracks,
+      isLoading: false,
+      error: null,
+      mode: 'search',
+      searchQuery,
+    }
+  }
+
+  return {
+    tracks: catalogTracks,
+    isLoading,
+    error,
+    mode: 'catalog',
+    searchQuery: null,
+  }
 }

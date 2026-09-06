@@ -28,4 +28,5 @@ export type TrackSeed = {
   title: string
   artist: string
   coverColor: string
+  previewUrl?: string
 }

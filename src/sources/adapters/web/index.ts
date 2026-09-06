@@ -1,28 +1,26 @@
+import { createUnimplementedSourceAdapter } from '../createUnimplementedSourceAdapter'
 import type { MusicSourceAdapter } from '../../MusicSourceAdapter'
-import type { FetchTracksResult } from '../../types'
 
-/**
- * Заготовка веб-источника (RSS, HTML-парсинг, публичные каталоги).
- */
-export function createWebSourceAdapterStub(options?: {
+/** Заготовка произвольного веб-сайта / HTML-парсера. */
+export function createCustomWebsiteAdapter(options?: {
   id?: string
   label?: string
 }): MusicSourceAdapter {
-  const id = options?.id ?? 'web'
-  const label = options?.label ?? 'Web source'
+  const id = options?.id ?? 'custom-website'
+  const label = options?.label ?? 'Custom website'
 
-  return {
+  return createUnimplementedSourceAdapter({
     id,
     label,
     kind: 'web',
     capabilities: ['browse', 'search'],
+  })
+}
 
-    isAvailable() {
-      return false
-    },
-
-    async fetchTracks(): Promise<FetchTracksResult> {
-      throw new Error(`[${id}] Web source adapter is not configured yet`)
-    },
-  }
+/** @deprecated Используйте createCustomWebsiteAdapter. */
+export function createWebSourceAdapterStub(options?: {
+  id?: string
+  label?: string
+}): MusicSourceAdapter {
+  return createCustomWebsiteAdapter(options)
 }
