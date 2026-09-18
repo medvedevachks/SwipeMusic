@@ -1,0 +1,31 @@
+# Production-ориентированный стек: nginx + backend + PostgreSQL.
+# Mailpit сюда не входит. SMTP задаётся переменными окружения.
+# Перед сервисами должен стоять HTTPS reverse proxy.
+
+services:
+  mailpit:
+    profiles: ["excluded"]
+    ports: []
+    restart: "no"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+      target: production
+    ports:
+      - "${FRONTEND_PORT:-8080}:8080"
+    environment: {}
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  backend:
+    environment:
+      NODE_ENV: production
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM}
+      SMTP_SECURE: ${SMTP_SECURE:-true}

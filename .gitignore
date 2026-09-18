@@ -12,6 +12,15 @@ dist
 dev-dist
 dist-ssr
 *.local
+.env
+.env.*
+!.env.example
+backend/dist
+coverage
+playwright-report
+test-results
+*.dump
+*.sql.gz
 
 # Editor directories and files
 .vscode/*
