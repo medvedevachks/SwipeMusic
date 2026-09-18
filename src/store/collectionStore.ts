@@ -8,6 +8,7 @@ import type {
   TrackAssignment,
 } from '../types/category'
 import type { GestureConfig } from '../types/gesture'
+import type { TrackDecision } from '../types/history'
 import { createId } from '../utils/id'
 
 type CreateCategoryInput = {
@@ -23,8 +24,11 @@ type CollectionState = {
   assignments: TrackAssignment[]
   likedTracks: LikedTrack[]
   viewedTrackIds: string[]
+  decisions: TrackDecision[]
   gestureConfig: GestureConfig
+  hydrated: boolean
 
+  hydrate: (input: Partial<CollectionState>) => void
   createCategory: (input: CreateCategoryInput) => Category
   updateCategory: (id: string, input: UpdateCategoryInput) => void
   deleteCategory: (id: string) => void
@@ -34,6 +38,7 @@ type CollectionState = {
   unlikeTrack: (trackId: string) => void
 
   pushViewedTrack: (trackId: string) => void
+  recordDecision: (trackId: string, action: TrackDecision['action']) => void
   setGestureConfig: (config: GestureConfig) => void
 }
 
@@ -42,7 +47,16 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
   assignments: [],
   likedTracks: [],
   viewedTrackIds: [],
+  decisions: [],
   gestureConfig: defaultGestureConfig,
+  hydrated: false,
+
+  hydrate: (input) => {
+    set({
+      ...input,
+      hydrated: true,
+    })
+  },
 
   createCategory: (input) => {
     const category: Category = {
@@ -110,7 +124,11 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
     set((state) => ({
       likedTracks: [
         ...state.likedTracks,
-        { trackId, createdAt: new Date().toISOString() },
+        {
+          id: createId('like'),
+          trackId,
+          createdAt: new Date().toISOString(),
+        },
       ],
     }))
   },
@@ -131,6 +149,20 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
         viewedTrackIds: [...state.viewedTrackIds, trackId],
       }
     })
+  },
+
+  recordDecision: (trackId, action) => {
+    set((state) => ({
+      decisions: [
+        ...state.decisions,
+        {
+          id: createId('dec'),
+          trackId,
+          action,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    }))
   },
 
   setGestureConfig: (config) => {

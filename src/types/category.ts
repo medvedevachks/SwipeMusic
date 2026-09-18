@@ -24,6 +24,7 @@ export type TrackAssignment = {
 }
 
 export type LikedTrack = {
+  id: string
   trackId: string
   createdAt: string
 }

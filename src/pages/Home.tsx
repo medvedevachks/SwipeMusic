@@ -15,6 +15,7 @@ export default function Home() {
   )
   const likeTrack = useCollectionStore((state) => state.likeTrack)
   const pushViewedTrack = useCollectionStore((state) => state.pushViewedTrack)
+  const recordDecision = useCollectionStore((state) => state.recordDecision)
 
   const [pendingTrack, setPendingTrack] = useState<Track | null>(null)
   const [categoryResolveKey, setCategoryResolveKey] = useState(0)
@@ -50,9 +51,11 @@ export default function Home() {
           onLike={(track) => {
             pushViewedTrack(track.id)
             likeTrack(track.id)
+            recordDecision(track.id, 'like')
           }}
           onSkip={(track) => {
             pushViewedTrack(track.id)
+            recordDecision(track.id, 'skip')
           }}
         />
       )}
@@ -72,6 +75,7 @@ export default function Home() {
           }
 
           assignTrackToCategory(pendingTrack.id, categoryId)
+          recordDecision(pendingTrack.id, 'categorize')
           setPendingTrack(null)
           setCategoryResolveKey((value) => value + 1)
         }}

@@ -1,6 +1,17 @@
 import { Link } from 'react-router-dom'
+import { useSessionStore } from '../store/sessionStore'
+
+const statusLabel = {
+  local: 'Локально',
+  syncing: 'Синхронизация',
+  cloud: 'Облако',
+  error: 'Ошибка',
+}
 
 export default function AppHeader() {
+  const user = useSessionStore((state) => state.user)
+  const syncStatus = useSessionStore((state) => state.syncStatus)
+
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--color-border)]/80 bg-[var(--color-bg)]/90 backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-2xl items-center justify-between gap-3 px-4 sm:h-16 sm:px-6">
@@ -9,25 +20,32 @@ export default function AppHeader() {
             Swipe Music
           </span>
         </Link>
-        <Link
-          to="/search"
-          className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-fg)] transition-colors hover:bg-[var(--color-surface-hover)]"
-          aria-label="Поиск"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className="h-5 w-5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
+        <div className="flex items-center gap-2">
+          {user ? (
+            <span className="hidden rounded-full border border-[var(--color-border)] px-2 py-1 text-[10px] text-[var(--color-muted)] sm:inline">
+              {statusLabel[syncStatus]}
+            </span>
+          ) : null}
+          <Link
+            to="/search"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-fg)] transition-colors hover:bg-[var(--color-surface-hover)]"
+            aria-label="Поиск"
           >
-            <circle cx="11" cy="11" r="7" />
-            <path d="m20 20-3.5-3.5" />
-          </svg>
-        </Link>
+            <svg
+              viewBox="0 0 24 24"
+              className="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+          </Link>
+        </div>
       </div>
     </header>
   )
