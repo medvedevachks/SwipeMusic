@@ -1,32 +1,64 @@
-# React + TypeScript + Vite
+# Swipe Music
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+PWA для сортировки музыки жестами. Авторизация, подтверждение почты, сброс пароля и облачная синхронизация коллекции работают через Docker Compose. Локально Node.js, PostgreSQL и SMTP **не обязательны**.
 
-Currently, two official plugins are available:
+## Требования
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Docker
+- Docker Compose v2
 
-## React Compiler
+## Быстрый старт
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+cp .env.example .env
+# задайте POSTGRES_MIGRATE_PASSWORD и BETTER_AUTH_SECRET (≥ 32 символов)
+docker compose up --build -d
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+- Приложение: http://localhost:5173
+- Письма (Mailpit): http://localhost:8025
+- API браузера: тот же origin, путь `/api`
+
+Остановка контейнеров (данные БД сохраняются):
+
+```bash
+docker compose down
+```
+
+`docker compose down -v` удаляет том PostgreSQL и **уничтожает пользовательские данные**. Это не штатная команда обновления.
+
+## Сборка и логи
+
+```bash
+docker compose build
+docker compose ps
+docker compose logs --tail=100
+```
+
+## Миграции
+
+Сервис `migrate` применяет SQL из `backend/drizzle` до старта API. Повторный запуск идемпотентен. Backend не поднимается, пока миграции не завершились успешно.
+
+## Тесты
+
+```bash
+docker compose --profile test run --rm backend-test
+docker compose --profile test run --rm frontend-test
+docker compose --profile e2e run --rm e2e
+```
+
+Backend-тесты идут в базу `swipe_music_test`, а не в рабочую `swipe_music`.
+
+## Резервное копирование
+
+См. [docs/deployment/docker.md](docs/deployment/docker.md).
+
+## Production
+
+```bash
+docker compose -f compose.yaml -f compose.prod.yaml up --build -d
+```
+
+Нужны HTTPS reverse proxy, `APP_ORIGIN` с https, production SMTP. Mailpit в публичный контур не входит. Пока SMTP не задан, реальная отправка писем не настроена.
+
+Архитектура AUTH-01: [docs/architecture/auth.md](docs/architecture/auth.md).
