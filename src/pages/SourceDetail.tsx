@@ -126,7 +126,13 @@ export default function SourceDetail() {
               type="url"
               value={pageUrl}
               onChange={(event) => setPageUrl(event.target.value)}
-              placeholder="https://zaycev.net/..."
+              placeholder={
+                source.id === 'yandex-music'
+                  ? 'https://music.yandex.ru/album/…/track/…'
+                  : source.id === 'zaycev'
+                    ? 'https://zaycev.net/...'
+                    : 'https://...'
+              }
               className="h-11 w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 text-sm"
             />
           </label>

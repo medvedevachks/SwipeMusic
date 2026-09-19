@@ -1,0 +1,1 @@
+export { createYandexMusicSourceAdapter } from './yandexMusicAdapter'

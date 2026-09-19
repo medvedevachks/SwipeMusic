@@ -13,7 +13,7 @@ export default function Player() {
       <section className="space-y-3">
         <h1 className="font-display text-2xl font-semibold tracking-tight">Плеер</h1>
         <p className="text-sm text-[var(--color-muted)]">
-          Выберите запись в медиатеке. Встроенное воспроизведение Zaycev.net не подключено.
+          Выберите запись в медиатеке. Встроенного плеера у внешних сервисов пока нет.
         </p>
         <Link className="text-sm text-[var(--color-accent)]" to="/library">
           К медиатеке
@@ -49,7 +49,7 @@ export default function Player() {
           className="h-11 w-full rounded-xl bg-[var(--color-accent)] text-sm font-medium text-white"
           onClick={() => source?.openExternal?.(track)}
         >
-          Открыть в Zaycev.net
+          Открыть в {source?.label ?? 'сервисе'}
         </button>
       ) : (
         <p className="text-sm text-[var(--color-muted)]">

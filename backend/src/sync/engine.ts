@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm'
 import type { Database } from '../db/client.ts'
-import { assertZaycevPageUrl } from '../sources/zaycevUrl.ts'
+import { assertSourcePageUrl } from '../sources/pageUrl.ts'
 import {
   categories,
   collectionItems,
@@ -148,8 +148,11 @@ async function applyOne(db: Database, userId: string, operation: SyncOperation) 
       const id = requiredString(dto.id, 'id')
       const trackId = requiredString(dto.trackId, 'trackId')
       const identity = parseTrackIdentity(trackId)
-      if (identity.sourceId === 'zaycev' && (dto.pageUrl || dto.kind === 'source_track')) {
-        assertZaycevPageUrl(dto.pageUrl ?? '')
+      if (
+        (identity.sourceId === 'zaycev' || identity.sourceId === 'yandex-music') &&
+        (dto.pageUrl || dto.kind === 'source_track')
+      ) {
+        assertSourcePageUrl(identity.sourceId, dto.pageUrl ?? '')
       }
       const [current] = await db
         .select()

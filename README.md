@@ -65,6 +65,6 @@ docker compose -f compose.yaml -f compose.prod.yaml up --build -d
 
 ## Источники музыки
 
-Зарегистрированы `mock` (демо-лента) и `zaycev` (ручные HTTPS-ссылки). Официального API Zaycev.net нет: встроенного поиска, OAuth и Play нет. Подробности: [docs/integrations/zaycev.md](docs/integrations/zaycev.md).
+Зарегистрированы `mock` (демо-лента), `zaycev` и `yandex-music` (ручные HTTPS-ссылки). Официального API Zaycev.net и Яндекс Музыки для сторонних приложений нет. Подробности: [Zaycev.net](docs/integrations/zaycev.md), [Яндекс Музыка](docs/integrations/yandex-music.md).
 
 Приложение **не является** официальным партнёром Zaycev.net.
