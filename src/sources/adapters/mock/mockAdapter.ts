@@ -10,7 +10,7 @@ export function createMockMusicSourceAdapter(): MusicSourceAdapter {
     id: SOURCE_ID,
     label: 'Demo library',
     kind: 'mock',
-    capabilities: ['browse', 'recommendations'],
+    capabilities: ['browse', 'recommendations', 'search'],
     connectionNote: 'Демо-лента для свайпов. Это не внешний музыкальный сервис.',
 
     isAvailable() {
@@ -36,6 +36,23 @@ export function createMockMusicSourceAdapter(): MusicSourceAdapter {
       const limit = params.limit ?? all.length
       return {
         tracks: all.slice(0, limit),
+        nextCursor: null,
+      }
+    },
+
+    async search(query): Promise<FetchTracksResult> {
+      const needle = query.trim().toLowerCase()
+      if (!needle) {
+        return { tracks: [], nextCursor: null }
+      }
+
+      const all = (await this.fetchTracks()).tracks
+      return {
+        tracks: all.filter(
+          (track) =>
+            track.title.toLowerCase().includes(needle) ||
+            track.artist.toLowerCase().includes(needle),
+        ),
         nextCursor: null,
       }
     },
