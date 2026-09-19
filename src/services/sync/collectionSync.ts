@@ -198,6 +198,58 @@ function bindStore() {
         clientCreatedAt: new Date().toISOString(),
       })
     },
+    upsertSourceTrack: (track) => {
+      const saved = store.upsertSourceTrack(track)
+      const snapshot = snapshotFromStore(useCollectionStore.getState())
+      const item = snapshot.items.find(
+        (row: CollectionItemDto) => row.kind === 'source_track' && row.trackId === saved.id,
+      )
+      if (item) {
+        void enqueueOperation({
+          id: createId('op'),
+          type: 'upsert_item',
+          payload: item,
+          clientCreatedAt: new Date().toISOString(),
+        })
+      }
+      return saved
+    },
+    updateSourceTrack: (trackId, input) => {
+      store.updateSourceTrack(trackId, input)
+      const snapshot = snapshotFromStore(useCollectionStore.getState())
+      const item = snapshot.items.find(
+        (row: CollectionItemDto) => row.kind === 'source_track' && row.trackId === trackId,
+      )
+      if (item) {
+        void enqueueOperation({
+          id: createId('op'),
+          type: 'upsert_item',
+          payload: { ...item, updatedAt: new Date().toISOString() },
+          clientCreatedAt: new Date().toISOString(),
+        })
+      }
+    },
+    removeSourceTrack: (trackId) => {
+      const assignments = useCollectionStore
+        .getState()
+        .assignments.filter((item) => item.trackId === trackId)
+      store.removeSourceTrack(trackId)
+      const now = new Date().toISOString()
+      void enqueueOperation({
+        id: createId('op'),
+        type: 'delete_item',
+        payload: { id: `src_${trackId}`, updatedAt: now },
+        clientCreatedAt: now,
+      })
+      for (const assignment of assignments) {
+        void enqueueOperation({
+          id: createId('op'),
+          type: 'delete_item',
+          payload: { id: assignment.id, updatedAt: now },
+          clientCreatedAt: now,
+        })
+      }
+    },
   })
 }
 

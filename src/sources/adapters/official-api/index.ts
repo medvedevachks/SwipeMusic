@@ -14,6 +14,7 @@ export function createOfficialApiAdapterStub(options: {
     label: options.label,
     kind: 'official-api',
     capabilities: ['browse', 'search', 'library', 'recommendations', 'preview', 'auth'],
+    connectionNote: 'Официальный API не настроен.',
 
     isAvailable() {
       return false
@@ -27,6 +28,10 @@ export function createOfficialApiAdapterStub(options: {
 
     async search(): Promise<FetchTracksResult> {
       throw new Error(`[${options.id}] Search is not configured yet`)
+    },
+
+    canPlay() {
+      return false
     },
   }
 }

@@ -1,4 +1,5 @@
 import { createMockMusicSourceAdapter } from './adapters/mock'
+import { createZaycevMusicSourceAdapter } from './adapters/zaycev'
 import type { MusicSourceAdapter } from './MusicSourceAdapter'
 import { musicSourceRegistry } from './registry'
 import type { FetchTracksParams, FetchTracksResult } from './types'
@@ -12,10 +13,7 @@ export function bootstrapMusicSources(): void {
   }
 
   musicSourceRegistry.register(createMockMusicSourceAdapter())
-  // Будущие адаптеры подключаются так же:
-  // musicSourceRegistry.register(createSpotifyAdapter(...))
-  // musicSourceRegistry.register(createYandexMusicAdapter(...))
-  // musicSourceRegistry.register(createLocalFolderAdapter(...))
+  musicSourceRegistry.register(createZaycevMusicSourceAdapter())
 
   musicSourceRegistry.setActive('mock')
   bootstrapped = true
@@ -70,3 +68,5 @@ export { createMockMusicSourceAdapter } from './adapters/mock'
 export { createOfficialApiAdapterStub } from './adapters/official-api'
 export { createLocalFolderAdapterStub } from './adapters/local-folder'
 export { createWebSourceAdapterStub } from './adapters/web'
+export { createZaycevMusicSourceAdapter } from './adapters/zaycev'
+export { CAPABILITY_LABELS, hasCapability } from './types'

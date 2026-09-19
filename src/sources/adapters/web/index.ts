@@ -16,6 +16,7 @@ export function createWebSourceAdapterStub(options?: {
     label,
     kind: 'web',
     capabilities: ['browse', 'search'],
+    connectionNote: 'Веб-источник не настроен.',
 
     isAvailable() {
       return false
@@ -23,6 +24,10 @@ export function createWebSourceAdapterStub(options?: {
 
     async fetchTracks(): Promise<FetchTracksResult> {
       throw new Error(`[${id}] Web source adapter is not configured yet`)
+    },
+
+    canPlay() {
+      return false
     },
   }
 }

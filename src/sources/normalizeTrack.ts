@@ -15,6 +15,7 @@ export function createTrack(input: {
   coverUrl?: string | null
   coverColor?: string
   previewUrl?: string | null
+  pageUrl?: string | null
 }): Track {
   return {
     id: createTrackId(input.sourceId, input.externalId),
@@ -27,5 +28,11 @@ export function createTrack(input: {
     coverUrl: input.coverUrl ?? null,
     coverColor: input.coverColor,
     previewUrl: input.previewUrl ?? null,
+    pageUrl: input.pageUrl ?? null,
+    availability: 'unknown',
+    playback: {
+      embedded: Boolean(input.previewUrl),
+      externalOpen: Boolean(input.pageUrl),
+    },
   }
 }

@@ -28,3 +28,7 @@ export type LikedTrack = {
   trackId: string
   createdAt: string
 }
+
+/** Пользовательский каталог в терминах SOURCE-01. */
+export type Catalog = Category
+export type CatalogItem = TrackAssignment

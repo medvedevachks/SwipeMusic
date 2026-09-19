@@ -1,6 +1,7 @@
 import type { Category, LikedTrack, TrackAssignment } from '../../types/category'
 import type { GestureConfig } from '../../types/gesture'
 import type { TrackDecision } from '../../types/history'
+import type { SourceTrack } from '../../types/track'
 import type {
   CategoryDto,
   CollectionItemDto,
@@ -19,16 +20,48 @@ export function splitTrackId(trackId: string): { sourceId: string; externalId: s
   }
 }
 
+function playbackModeOf(track: SourceTrack): 'none' | 'external' | 'embedded' {
+  if (track.playback.embedded) {
+    return 'embedded'
+  }
+  if (track.playback.externalOpen) {
+    return 'external'
+  }
+  return 'none'
+}
+
 export function snapshotFromStore(input: {
   categories: Category[]
   assignments: TrackAssignment[]
   likedTracks: LikedTrack[]
+  sourceTracks?: SourceTrack[]
   viewedTrackIds: string[]
   gestureConfig: GestureConfig
   decisions: TrackDecision[]
 }): CollectionSnapshot {
   const now = new Date().toISOString()
+  const sourceTracks = input.sourceTracks ?? []
   const items: CollectionItemDto[] = [
+    ...sourceTracks.map((item) => {
+      const identity = splitTrackId(item.id)
+      return {
+        id: `src_${item.id}`,
+        kind: 'source_track' as const,
+        trackId: item.id,
+        sourceId: identity.sourceId,
+        externalId: identity.externalId,
+        categoryId: null,
+        title: item.title,
+        artist: item.artist,
+        pageUrl: item.pageUrl,
+        durationMs: item.durationMs ?? null,
+        availability: item.availability,
+        playbackMode: playbackModeOf(item),
+        position: null,
+        createdAt: item.addedAt,
+        updatedAt: item.addedAt,
+      }
+    }),
     ...input.likedTracks.map((item) => {
       const identity = splitTrackId(item.trackId)
       return {
@@ -44,6 +77,7 @@ export function snapshotFromStore(input: {
     }),
     ...input.assignments.map((item) => {
       const identity = splitTrackId(item.trackId)
+      const source = sourceTracks.find((track) => track.id === item.trackId)
       return {
         id: item.id,
         kind: 'assignment' as const,
@@ -51,6 +85,9 @@ export function snapshotFromStore(input: {
         sourceId: identity.sourceId,
         externalId: identity.externalId,
         categoryId: item.categoryId,
+        title: source?.title,
+        artist: source?.artist,
+        pageUrl: source?.pageUrl,
         createdAt: item.createdAt,
         updatedAt: item.createdAt,
       }
@@ -88,6 +125,7 @@ export function storeFromSnapshot(snapshot: CollectionSnapshot): {
   categories: Category[]
   assignments: TrackAssignment[]
   likedTracks: LikedTrack[]
+  sourceTracks: SourceTrack[]
   viewedTrackIds: string[]
   gestureConfig: GestureConfig
   decisions: TrackDecision[]
@@ -117,6 +155,25 @@ export function storeFromSnapshot(snapshot: CollectionSnapshot): {
         id: item.id,
         trackId: item.trackId,
         createdAt: item.createdAt,
+      })),
+    sourceTracks: liveItems
+      .filter((item) => item.kind === 'source_track')
+      .map((item) => ({
+        id: item.trackId,
+        sourceId: item.sourceId,
+        externalId: item.externalId,
+        title: item.title ?? item.trackId,
+        artist: item.artist ?? '',
+        durationMs: item.durationMs ?? undefined,
+        pageUrl: item.pageUrl ?? null,
+        coverUrl: null,
+        previewUrl: null,
+        availability: item.availability ?? 'unknown',
+        playback: {
+          embedded: item.playbackMode === 'embedded',
+          externalOpen: item.playbackMode === 'external',
+        },
+        addedAt: item.createdAt,
       })),
     viewedTrackIds: snapshot.settings?.viewedTrackIds ?? [],
     gestureConfig: snapshot.settings?.gestureConfig ?? {

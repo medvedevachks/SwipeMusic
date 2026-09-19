@@ -1,5 +1,6 @@
 import { and, eq } from 'drizzle-orm'
 import type { Database } from '../db/client.ts'
+import { assertZaycevPageUrl } from '../sources/zaycevUrl.ts'
 import {
   categories,
   collectionItems,
@@ -147,6 +148,9 @@ async function applyOne(db: Database, userId: string, operation: SyncOperation) 
       const id = requiredString(dto.id, 'id')
       const trackId = requiredString(dto.trackId, 'trackId')
       const identity = parseTrackIdentity(trackId)
+      if (identity.sourceId === 'zaycev' && (dto.pageUrl || dto.kind === 'source_track')) {
+        assertZaycevPageUrl(dto.pageUrl ?? '')
+      }
       const [current] = await db
         .select()
         .from(collectionItems)
@@ -165,6 +169,13 @@ async function applyOne(db: Database, userId: string, operation: SyncOperation) 
           sourceId: identity.sourceId,
           externalId: identity.externalId,
           categoryId: dto.categoryId ?? null,
+          title: dto.title ?? null,
+          artist: dto.artist ?? null,
+          pageUrl: dto.pageUrl ?? null,
+          durationMs: dto.durationMs ?? null,
+          availability: dto.availability ?? null,
+          playbackMode: dto.playbackMode ?? null,
+          position: dto.position ?? null,
           createdAt: new Date(dto.createdAt),
           updatedAt: new Date(dto.updatedAt),
           deletedAt: dto.deletedAt ? new Date(dto.deletedAt) : null,
@@ -177,6 +188,13 @@ async function applyOne(db: Database, userId: string, operation: SyncOperation) 
             sourceId: identity.sourceId,
             externalId: identity.externalId,
             categoryId: dto.categoryId ?? null,
+            title: dto.title ?? null,
+            artist: dto.artist ?? null,
+            pageUrl: dto.pageUrl ?? null,
+            durationMs: dto.durationMs ?? null,
+            availability: dto.availability ?? null,
+            playbackMode: dto.playbackMode ?? null,
+            position: dto.position ?? null,
             updatedAt: new Date(dto.updatedAt),
             deletedAt: dto.deletedAt ? new Date(dto.deletedAt) : null,
           },
@@ -263,6 +281,13 @@ export async function loadSnapshot(
       sourceId: row.sourceId,
       externalId: row.externalId,
       categoryId: row.categoryId,
+      title: row.title,
+      artist: row.artist,
+      pageUrl: row.pageUrl,
+      durationMs: row.durationMs,
+      availability: row.availability as CollectionItemDto['availability'],
+      playbackMode: row.playbackMode as CollectionItemDto['playbackMode'],
+      position: row.position,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       deletedAt: row.deletedAt?.toISOString() ?? null,

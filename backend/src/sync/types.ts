@@ -17,11 +17,18 @@ export type CategoryDto = {
 
 export type CollectionItemDto = {
   id: string
-  kind: 'like' | 'assignment'
+  kind: 'like' | 'assignment' | 'source_track'
   trackId: string
   sourceId: string
   externalId: string
   categoryId?: string | null
+  title?: string | null
+  artist?: string | null
+  pageUrl?: string | null
+  durationMs?: number | null
+  availability?: 'available' | 'unavailable' | 'unknown' | null
+  playbackMode?: 'none' | 'external' | 'embedded' | null
+  position?: number | null
   createdAt: string
   updatedAt: string
   deletedAt?: string | null

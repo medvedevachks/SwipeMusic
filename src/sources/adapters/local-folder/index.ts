@@ -11,6 +11,7 @@ export function createLocalFolderAdapterStub(): MusicSourceAdapter {
     label: 'Local folder',
     kind: 'local-folder',
     capabilities: ['browse', 'library'],
+    connectionNote: 'Локальная папка не подключена.',
 
     isAvailable() {
       return false
@@ -18,6 +19,10 @@ export function createLocalFolderAdapterStub(): MusicSourceAdapter {
 
     async fetchTracks(): Promise<FetchTracksResult> {
       throw new Error('[local-folder] Local folder adapter is not configured yet')
+    },
+
+    canPlay() {
+      return false
     },
   }
 }

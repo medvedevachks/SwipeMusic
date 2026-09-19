@@ -11,6 +11,7 @@ export function createMockMusicSourceAdapter(): MusicSourceAdapter {
     label: 'Demo library',
     kind: 'mock',
     capabilities: ['browse', 'recommendations'],
+    connectionNote: 'Демо-лента для свайпов. Это не внешний музыкальный сервис.',
 
     isAvailable() {
       return true
@@ -37,6 +38,10 @@ export function createMockMusicSourceAdapter(): MusicSourceAdapter {
         tracks: all.slice(0, limit),
         nextCursor: null,
       }
+    },
+
+    canPlay() {
+      return false
     },
   }
 }

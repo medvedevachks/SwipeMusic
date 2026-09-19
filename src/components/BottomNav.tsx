@@ -14,7 +14,7 @@ const navItems: {
   end?: boolean
 }[] = [
   { to: '/', label: 'Главная', Icon: HomeIcon, end: true },
-  { to: '/search', label: 'Поиск', Icon: SearchIcon },
+  { to: '/search', label: 'Источники', Icon: SearchIcon },
   { to: '/library', label: 'Медиатека', Icon: LibraryIcon },
   { to: '/player', label: 'Плеер', Icon: PlayerIcon },
   { to: '/profile', label: 'Профиль', Icon: ProfileIcon },

@@ -1,0 +1,1 @@
+export { createZaycevMusicSourceAdapter } from './zaycevAdapter'

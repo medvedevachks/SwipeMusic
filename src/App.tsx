@@ -11,6 +11,7 @@ import Profile from './pages/Profile'
 import Register from './pages/Register'
 import ResetPassword from './pages/ResetPassword'
 import Search from './pages/Search'
+import SourceDetail from './pages/SourceDetail'
 
 function App() {
   return (
@@ -25,6 +26,7 @@ function App() {
         <Route element={<MainLayout />}>
           <Route index element={<Home />} />
           <Route path="search" element={<Search />} />
+          <Route path="search/:sourceId" element={<SourceDetail />} />
           <Route path="library" element={<Library />} />
           <Route path="player" element={<Player />} />
           <Route path="profile" element={<Profile />} />

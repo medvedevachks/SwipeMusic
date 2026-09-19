@@ -9,6 +9,7 @@ import type {
 } from '../types/category'
 import type { GestureConfig } from '../types/gesture'
 import type { TrackDecision } from '../types/history'
+import type { SourceTrack } from '../types/track'
 import { createId } from '../utils/id'
 
 type CreateCategoryInput = {
@@ -23,6 +24,7 @@ type CollectionState = {
   categories: Category[]
   assignments: TrackAssignment[]
   likedTracks: LikedTrack[]
+  sourceTracks: SourceTrack[]
   viewedTrackIds: string[]
   decisions: TrackDecision[]
   gestureConfig: GestureConfig
@@ -37,6 +39,14 @@ type CollectionState = {
   likeTrack: (trackId: string) => void
   unlikeTrack: (trackId: string) => void
 
+  upsertSourceTrack: (track: SourceTrack) => SourceTrack
+  updateSourceTrack: (
+    trackId: string,
+    input: Partial<Pick<SourceTrack, 'title' | 'artist' | 'pageUrl'>>,
+  ) => void
+  removeSourceTrack: (trackId: string) => void
+  addSourceTrackToCatalog: (track: SourceTrack, categoryId: string) => SourceTrack
+
   pushViewedTrack: (trackId: string) => void
   recordDecision: (trackId: string, action: TrackDecision['action']) => void
   setGestureConfig: (config: GestureConfig) => void
@@ -46,6 +56,7 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
   categories: createDefaultCategories(),
   assignments: [],
   likedTracks: [],
+  sourceTracks: [],
   viewedTrackIds: [],
   decisions: [],
   gestureConfig: defaultGestureConfig,
@@ -98,6 +109,14 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
   },
 
   assignTrackToCategory: (trackId, categoryId) => {
+    if (
+      get().assignments.some(
+        (item) => item.trackId === trackId && item.categoryId === categoryId,
+      )
+    ) {
+      return
+    }
+
     const assignment: TrackAssignment = {
       id: createId('asg'),
       trackId,
@@ -106,13 +125,7 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
     }
 
     set((state) => ({
-      assignments: [
-        ...state.assignments.filter(
-          (item) =>
-            !(item.trackId === trackId && item.categoryId === categoryId),
-        ),
-        assignment,
-      ],
+      assignments: [...state.assignments, assignment],
     }))
   },
 
@@ -137,6 +150,57 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
     set((state) => ({
       likedTracks: state.likedTracks.filter((item) => item.trackId !== trackId),
     }))
+  },
+
+  upsertSourceTrack: (track) => {
+    const existing = get().sourceTracks.find((item) => item.id === track.id)
+    if (existing) {
+      const merged = {
+        ...existing,
+        ...track,
+        addedAt: existing.addedAt,
+      }
+      set((state) => ({
+        sourceTracks: state.sourceTracks.map((item) =>
+          item.id === track.id ? merged : item,
+        ),
+      }))
+      return merged
+    }
+
+    set((state) => ({
+      sourceTracks: [...state.sourceTracks, track],
+    }))
+    return track
+  },
+
+  updateSourceTrack: (trackId, input) => {
+    set((state) => ({
+      sourceTracks: state.sourceTracks.map((item) =>
+        item.id === trackId
+          ? {
+              ...item,
+              ...input,
+              title: input.title?.trim() || item.title,
+              artist: input.artist?.trim() || item.artist,
+            }
+          : item,
+      ),
+    }))
+  },
+
+  removeSourceTrack: (trackId) => {
+    set((state) => ({
+      sourceTracks: state.sourceTracks.filter((item) => item.id !== trackId),
+      assignments: state.assignments.filter((item) => item.trackId !== trackId),
+      likedTracks: state.likedTracks.filter((item) => item.trackId !== trackId),
+    }))
+  },
+
+  addSourceTrackToCatalog: (track, categoryId) => {
+    const saved = get().upsertSourceTrack(track)
+    get().assignTrackToCategory(saved.id, categoryId)
+    return saved
   },
 
   pushViewedTrack: (trackId) => {
