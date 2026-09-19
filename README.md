@@ -62,3 +62,9 @@ docker compose -f compose.yaml -f compose.prod.yaml up --build -d
 Нужны HTTPS reverse proxy, `APP_ORIGIN` с https, production SMTP. Mailpit в публичный контур не входит. Пока SMTP не задан, реальная отправка писем не настроена.
 
 Архитектура AUTH-01: [docs/architecture/auth.md](docs/architecture/auth.md).
+
+## Источники музыки
+
+Зарегистрированы `mock` (демо-лента) и `zaycev` (ручные HTTPS-ссылки). Официального API Zaycev.net нет: встроенного поиска, OAuth и Play нет. Подробности: [docs/integrations/zaycev.md](docs/integrations/zaycev.md).
+
+Приложение **не является** официальным партнёром Zaycev.net.
