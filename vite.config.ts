@@ -84,6 +84,14 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        navigateFallbackDenylist: [/^\/api\//],
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }: { url: URL }) =>
+              url.pathname.startsWith('/api/auth/'),
+            handler: 'NetworkOnly',
+          },
+        ],
       },
       devOptions: {
         enabled: true,
@@ -95,6 +103,10 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5173,
     proxy: {
+      '/api/auth': {
+        target: 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
       '/api/yandex-music': {
         target: 'https://api.music.yandex.net',
         changeOrigin: true,

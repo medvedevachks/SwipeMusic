@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:auth": "node --experimental-strip-types server/index.ts",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test": "node --experimental-strip-types --test server/auth.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
