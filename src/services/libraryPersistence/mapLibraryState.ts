@@ -7,6 +7,7 @@ import type { SwipeAction } from '../../types/swipe'
 import type { Track } from '../../types/track'
 
 export type LibraryStateDto = {
+  /** Каталоги. Ключ `categories` — совместимое имя ответа `/api/me/library-state`. */
   categories: Category[]
   tracks: CollectionTrackDto[]
   categoryAssignments: TrackAssignment[]

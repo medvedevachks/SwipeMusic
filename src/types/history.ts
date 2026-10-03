@@ -1,4 +1,4 @@
-import type { Category } from './category'
+import type { Catalog } from './category'
 import type { SwipeAction } from './swipe'
 import type { Track } from './track'
 
@@ -10,8 +10,11 @@ export type HistoryEntry = {
   id: string
   track: Track
   action: SwipeAction
-  /** Категория на момент действия (если categorize). */
-  category?: Category
+  /**
+   * Снимок каталога на момент действия.
+   * Имя поля `category` сохранено: так уже лежат записи в SQLite.
+   */
+  category?: Catalog
   createdAt: string
   sourceId: string
 }

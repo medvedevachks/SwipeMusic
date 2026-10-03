@@ -48,7 +48,7 @@ export default function CategoryPickerSheet({
   return (
     <BottomSheet
       open={open}
-      title={mode === 'list' ? 'Выберите категорию' : 'Новая категория'}
+      title={mode === 'list' ? 'Выберите каталог' : 'Новый каталог'}
       onClose={handleClose}
     >
       {mode === 'create' ? (
@@ -73,7 +73,7 @@ export default function CategoryPickerSheet({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Поиск категорий"
+            placeholder="Поиск каталогов"
             className="w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm text-[var(--color-fg)] outline-none ring-[var(--color-accent)] focus:ring-2"
           />
 
@@ -99,7 +99,7 @@ export default function CategoryPickerSheet({
             ))}
             {filtered.length === 0 && (
               <li className="py-6 text-center text-sm text-[var(--color-muted)]">
-                Категории не найдены
+                Каталоги не найдены
               </li>
             )}
           </ul>
@@ -109,7 +109,7 @@ export default function CategoryPickerSheet({
             onClick={() => setMode('create')}
             className="w-full rounded-xl border border-dashed border-[var(--color-border)] px-3 py-3 text-sm font-medium text-[var(--color-accent)]"
           >
-            Создать категорию
+            Создать каталог
           </button>
         </div>
       )}

@@ -47,7 +47,7 @@ export class SmartLibraryProvider implements LibraryProvider {
       },
       {
         id: ROOT_CATEGORIES,
-        title: 'Categories',
+        title: 'Каталоги',
         type: 'collection',
         count: categories.length,
         sourceId: this.id,

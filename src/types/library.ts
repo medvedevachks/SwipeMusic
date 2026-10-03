@@ -92,7 +92,7 @@ export const LIBRARY_SECTIONS: readonly LibrarySectionDefinition[] = [
   { id: 'folders', label: 'Папки', isGrouped: true, requiresLocalFiles: true },
   { id: 'artists', label: 'Исполнители', isGrouped: true },
   { id: 'albums', label: 'Альбомы', isGrouped: true },
-  { id: 'categories', label: 'Категории', isGrouped: true },
+  { id: 'categories', label: 'Каталоги', isGrouped: true },
   { id: 'favorites', label: 'Избранное', isGrouped: false },
   { id: 'recently-added', label: 'Недавно добавленные', isGrouped: false },
   { id: 'recently-played', label: 'Недавно прослушанные', isGrouped: false },

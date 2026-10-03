@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createDefaultCategories } from '../defaultCategories.ts'
+import { createDefaultCatalogs, createDefaultCategories } from '../defaultCategories.ts'
 import { getCollectionEngine } from '../collectionEngine/index.ts'
 import { useCollectionStore } from '../../store/collectionStore.ts'
 import { createBootstrapGate, executeLibraryBootstrap } from './bootstrapCore.ts'
@@ -11,7 +11,7 @@ import {
   type LibraryStateDto,
 } from './mapLibraryState.ts'
 import { applyLibrarySnapshot } from './session.ts'
-import type { Category } from '../../types/category.ts'
+import type { Catalog, Category } from '../../types/category.ts'
 import type { CollectionTrackData } from '../../types/collectionUser.ts'
 
 const categoryA: Category = {
@@ -263,6 +263,57 @@ test('logout clears user-scoped state and the next user does not see it', () => 
   assert.equal(state.history.length, 0)
   assert.equal(state.viewedTrackIds.length, 0)
   assert.equal(getCollectionEngine().getTrack('spotify:track-x'), null)
+})
+
+test('old category row hydrates as the same Catalog and history snapshot', () => {
+  const hydrated = mapLibraryState({
+    categories: [categoryA],
+    tracks: [],
+    categoryAssignments: [
+      {
+        id: 'asg_old',
+        trackId: 'spotify:track-x',
+        categoryId: 'cat_a',
+        createdAt: '2024-02-03T00:00:00.000Z',
+      },
+    ],
+    history: [
+      {
+        id: 'hist_old',
+        track: {
+          id: 'spotify:track-x',
+          sourceId: 'spotify',
+          externalId: 'track-x',
+          title: 'Песня',
+          artist: 'Исполнитель',
+        },
+        action: 'categorize',
+        category: categoryA,
+        createdAt: '2024-02-03T00:00:00.000Z',
+        sourceId: 'spotify',
+      },
+    ],
+    settings: { gestureConfig: { left: 'like', right: 'categorize', up: 'skip', down: 'previous' } },
+  })
+  const catalog: Catalog = hydrated.categories[0] as Catalog
+  assert.equal(catalog.id, 'cat_a')
+  assert.equal(catalog.name, 'A')
+  assert.equal(catalog.system, true)
+  assert.equal('providerId' in catalog, false)
+  assert.equal('sourceId' in catalog, false)
+  assert.equal(hydrated.assignments[0]?.categoryId, 'cat_a')
+  assert.equal(hydrated.history[0]?.category?.id, 'cat_a')
+  assert.equal(hydrated.history[0]?.action, 'categorize')
+})
+
+test('default catalogs are the same preset factory', () => {
+  assert.equal(createDefaultCatalogs, createDefaultCategories)
+  const once = createDefaultCatalogs()
+  assert.deepEqual(
+    once.map((catalog) => catalog.name),
+    ['Любимое', 'В машину', 'Тренировка', 'Перед сном', 'Вечеринка', 'Учёба'],
+  )
+  assert.equal(once.every((catalog) => catalog.system), true)
 })
 
 test('stale bootstrap does not overwrite the next user', async () => {

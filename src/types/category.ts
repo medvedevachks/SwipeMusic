@@ -1,4 +1,4 @@
-export type CategoryIconId =
+export type CatalogIconId =
   | 'heart'
   | 'car'
   | 'muscle'
@@ -8,14 +8,17 @@ export type CategoryIconId =
   | 'music'
   | 'star'
 
+/** Совместимое имя иконки. Тот же набор, что у каталога. */
+export type CategoryIconId = CatalogIconId
+
 /**
- * Полноценная сущность категории.
- * Поля расширяемы; UI может использовать только name/icon/color.
+ * Каталог Swipe Music: контейнер пользователя, не плейлист провайдера.
+ * Не содержит providerId и не принадлежит источнику. Треки внутри хранят свой sourceId.
  */
-export type Category = {
+export type Catalog = {
   id: string
   name: string
-  icon: CategoryIconId
+  icon: CatalogIconId
   color: string
   description: string
   createdAt: string
@@ -26,6 +29,13 @@ export type Category = {
   system: boolean
 }
 
+/** Старое имя той же сущности. Отдельной модели Category нет. */
+export type Category = Catalog
+
+/**
+ * Связь трека с каталогом.
+ * `categoryId` — совместимое имя поля в API и SQLite; значение равно id каталога.
+ */
 export type TrackAssignment = {
   id: string
   trackId: string

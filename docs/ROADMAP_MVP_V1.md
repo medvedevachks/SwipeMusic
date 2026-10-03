@@ -7,7 +7,7 @@
 | 0. Baseline | DONE | HEAD = `origin/main` = `475fd34`. Архитектура, Providers, persistence и Yandex сверены с кодом. `GPT.md`, этот файл и `docs/MVP_V1.md` зафиксированы. |
 | 1. User Account | DONE | Регистрация, вход, HttpOnly-сессия, выход, восстановление пароля. |
 | 2. Server Persistence | DONE | MVP-02A и MVP-02B: после входа frontend читает и пишет категории, коллекцию, лайки, назначения, историю и `gestureConfig` через `/api/me/*`. SQLite переживает reload, logout/login и перезапуск backend. |
-| 3. Universal Catalogs | PARTIAL | Есть `Category` и пресеты («Любимое», «В машину»). Один трек может быть в нескольких категориях. Организация переживает reload, но ключ по-прежнему `trackId` источника. |
+| 3. Universal Catalogs | PARTIAL | MVP-03A: каталог — контейнер пользователя, не плейлист провайдера. Старые category-строки читаются как каталоги. Один трек может быть в нескольких каталогах и каталог принимает разные sourceId. UI каталогов и playback каталога ещё нет (MVP-03B). |
 | 4. Canonical Track + Source Copies | PARTIAL | `MediaIndex` умеет `TrackRecord.copies` и ключ дедупликации. Рабочий `Track.id` — это `${sourceId}:${externalId}`. Коллекция пользователя ключуется этим id. |
 | 5. Playback Availability | PARTIAL | `PlaybackResolver` собирает кандидатов, смотрит `available`, priority и `requiresPremium`. Отдельного продуктового чеклиста доступа нет. |
 | 6. Alternative Source / Subscription UX | PARTIAL | Есть текст ошибки и fallback на preview внутри одного Provider. Нет сценария «подключите сервис / оформите доступ». |
@@ -34,6 +34,9 @@ MVP-01 User Account = DONE
 MVP-02 Server Persistence = DONE
 MVP-02A Server data model + authenticated API = DONE
 MVP-02B Frontend stores → server = DONE
+MVP-03 Universal Catalogs = PARTIAL
+MVP-03A Catalog domain + compatibility = DONE
+MVP-03B Catalog UI = TODO
 ```
 
-Следующий этап: MVP-03, Universal Catalogs.
+Следующий этап: MVP-03B, экран и сценарии каталога. Playback каталога и Canonical Track не входят в 03A.

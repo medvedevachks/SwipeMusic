@@ -1,7 +1,11 @@
 import type { Category } from '../types/category'
 import { createId } from '../utils/id.ts'
 
-/** Стартовый набор — системные пресеты, не зашитые в бизнес-логику свайпов. */
+/**
+ * Стартовый набор системных каталогов.
+ * Вызывается один раз для пустого аккаунта. Повторный вызов создал бы новые id,
+ * поэтому bootstrap не вызывает его, если сервер уже вернул каталоги.
+ */
 export function createDefaultCategories(): Category[] {
   const now = new Date().toISOString()
 
@@ -27,3 +31,6 @@ export function createDefaultCategories(): Category[] {
     system: true,
   }))
 }
+
+/** То же самое, что createDefaultCategories. Второго набора пресетов нет. */
+export const createDefaultCatalogs = createDefaultCategories

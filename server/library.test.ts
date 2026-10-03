@@ -774,6 +774,135 @@ test('deleting a user cascades library rows', () => {
   assert.equal(settings.count, 0)
 })
 
+test('catalog keeps its id and holds tracks from several sources', async () => {
+  const owner = await register('catalog-owner@example.com')
+  const other = await register('catalog-other@example.com')
+  const created = await api('/api/me/categories', {
+    method: 'POST',
+    cookie: owner.cookie,
+    body: categoryPayload('cat_car', { name: 'В машину', icon: 'car', system: true }),
+  })
+  const night = await api('/api/me/categories', {
+    method: 'POST',
+    cookie: owner.cookie,
+    body: categoryPayload('cat_night', { name: 'Ночь', icon: 'moon' }),
+  })
+  assert.equal(created.status, 201)
+  assert.equal((created.body.category as { id: string }).id, 'cat_car')
+  assert.equal(night.status, 201)
+
+  const sources = [
+    ['yandex-music', '1'],
+    ['local-folder', '2'],
+    ['spotify', '3'],
+  ] as const
+  for (const [sourceId, externalId] of sources) {
+    const trackId = `${sourceId}:${externalId}`
+    const saved = await api(`/api/me/collection/tracks/${encodeURIComponent(trackId)}`, {
+      method: 'PUT',
+      cookie: owner.cookie,
+      body: {
+        sourceId,
+        externalId,
+        title: externalId,
+        artist: sourceId,
+      },
+    })
+    assert.equal(saved.status, 200)
+    const assigned = await api(
+      `/api/me/collection/tracks/${encodeURIComponent(trackId)}/categories/cat_car`,
+      { method: 'PUT', cookie: owner.cookie, body: { id: `asg_${sourceId}` } },
+    )
+    assert.equal(assigned.status, 200)
+  }
+  const second = await api(
+    '/api/me/collection/tracks/yandex-music%3A1/categories/cat_night',
+    { method: 'PUT', cookie: owner.cookie, body: { id: 'asg_night' } },
+  )
+  assert.equal(second.status, 200)
+
+  const renamed = await api('/api/me/categories/cat_night', {
+    method: 'PATCH',
+    cookie: owner.cookie,
+    body: { name: 'Ночная', updatedAt: '2024-03-01T00:00:00.000Z' },
+  })
+  assert.equal(renamed.status, 200)
+  assert.equal((renamed.body.category as { id: string; name: string }).id, 'cat_night')
+  assert.equal((renamed.body.category as { name: string }).name, 'Ночная')
+
+  const history = await api('/api/me/history', {
+    method: 'POST',
+    cookie: owner.cookie,
+    body: {
+      id: 'hist_catalog',
+      action: 'categorize',
+      createdAt: '2024-03-01T00:00:00.000Z',
+      sourceId: 'yandex-music',
+      track: {
+        id: 'yandex-music:1',
+        sourceId: 'yandex-music',
+        externalId: '1',
+        title: '1',
+        artist: 'yandex-music',
+      },
+      category: categoryPayload('cat_car', { name: 'В машину', icon: 'car', system: true }),
+    },
+  })
+  assert.equal(history.status, 201)
+
+  await api('/api/auth/logout', { method: 'POST', cookie: owner.cookie })
+  const again = await api('/api/auth/login', {
+    method: 'POST',
+    body: { email: 'catalog-owner@example.com', password },
+  })
+  const state = await api('/api/me/library-state', { cookie: again.cookie })
+  const catalogs = state.body.categories as Array<{ id: string; name: string }>
+  const assignments = state.body.categoryAssignments as Array<{
+    trackId: string
+    categoryId: string
+  }>
+  assert.equal(state.status, 200)
+  assert.deepEqual(
+    catalogs.map((item) => item.id).sort(),
+    ['cat_car', 'cat_night'],
+  )
+  assert.equal(catalogs.find((item) => item.id === 'cat_night')?.name, 'Ночная')
+  const carTracks = assignments
+    .filter((item) => item.categoryId === 'cat_car')
+    .map((item) => item.trackId)
+    .sort()
+  assert.deepEqual(carTracks, ['local-folder:2', 'spotify:3', 'yandex-music:1'])
+  const yandexCatalogs = assignments
+    .filter((item) => item.trackId === 'yandex-music:1')
+    .map((item) => item.categoryId)
+    .sort()
+  assert.deepEqual(yandexCatalogs, ['cat_car', 'cat_night'])
+  const historyRow = (state.body.history as Array<{ category?: { id: string } }>)[0]
+  assert.equal(historyRow?.category?.id, 'cat_car')
+
+  const foreign = await api('/api/me/library-state', { cookie: other.cookie })
+  assert.deepEqual(foreign.body.categories, [])
+  const stolen = await api('/api/me/categories/cat_car', {
+    method: 'PATCH',
+    cookie: other.cookie,
+    body: { name: 'Чужой' },
+  })
+  assert.equal(stolen.status, 404)
+
+  const removed = await api('/api/me/categories/cat_night', {
+    method: 'DELETE',
+    cookie: again.cookie,
+  })
+  assert.equal(removed.status, 200)
+  const afterDelete = await api('/api/me/library-state', { cookie: again.cookie })
+  const left = afterDelete.body.categories as Array<{ id: string }>
+  assert.deepEqual(left.map((item) => item.id), ['cat_car'])
+  const stillCar = (afterDelete.body.categoryAssignments as Array<{ categoryId: string }>).every(
+    (item) => item.categoryId === 'cat_car',
+  )
+  assert.equal(stillCar, true)
+})
+
 function closeServer(target: Server): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!target.listening) {

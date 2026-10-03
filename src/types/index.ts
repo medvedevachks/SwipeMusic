@@ -1,4 +1,11 @@
-export type { Category, CategoryIconId, LikedTrack, TrackAssignment } from './category'
+export type {
+  Catalog,
+  CatalogIconId,
+  Category,
+  CategoryIconId,
+  LikedTrack,
+  TrackAssignment,
+} from './category'
 export type { Collection } from './collection'
 export type {
   CollectionActionLog,

@@ -259,7 +259,7 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
       })
     }, [clearDragVisual, frontApi, resetSprings])
 
-    // После выбора категории — та же песня / та же карточка.
+    // После выбора каталога — та же песня / та же карточка.
     useEffect(() => {
       if (prevResolveKeyRef.current === categoryResolveKey) {
         return

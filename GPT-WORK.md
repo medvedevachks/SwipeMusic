@@ -69,9 +69,12 @@ MVP-01B — DONE, commit 1aa61c9
 MVP-02 — DONE
 MVP-02A — DONE, commit `feat: add server persistence API`
 MVP-02B — DONE, commit `feat: persist user library state`
+MVP-03 — PARTIAL
+MVP-03A — DONE, commit `feat: introduce universal music catalogs`
+MVP-03B — TODO
 ```
 
-Следующий этап: MVP-03 — Universal Catalogs.
+Следующий этап: MVP-03B, экран каталогов.
 
 ## MVP-01B — Password recovery
 
@@ -120,3 +123,14 @@ MVP-02B — DONE, commit `feat: persist user library state`
 - Ошибка сохранения показывает «Не удалось сохранить изменения.» Ответ 401 переводит существующий auth store в `anonymous`.
 - Локально остаются `viewedTrackIds`, `collectionId` / `collectionName`, action log, очередь, плеер, поиск, MediaIndex, провайдеры и handle папки.
 - `npm test`: прежние 37 и 6 тестов frontend persistence.
+
+## MVP-03A — Catalog domain + compatibility
+
+Сделано на ветке `feature/mvp-03-universal-catalogs` от `233881d`. Commit: `feat: introduce universal music catalogs`.
+
+- Продуктовая сущность — `Catalog`. `Category` — то же самое тип-алиас, второй модели нет.
+- Таблицы `user_categories` и `user_category_tracks`, маршруты `/api/me/categories` и поле истории `category` оставлены. Старые строки читаются как каталоги, id не меняются.
+- Каталог принадлежит пользователю и не хранит providerId. Треки внутри сохраняют `${sourceId}:${externalId}`.
+- Жест вправо по-прежнему открывает picker. Подпись жеста и тексты picker — «Каталог».
+- Системные пресеты те же шесть. `createDefaultCatalogs` — та же функция, что `createDefaultCategories`.
+- Провайдерский плейлист не равен каталогу. Canonical Track и playback каталога не делались.

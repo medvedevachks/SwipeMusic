@@ -94,7 +94,7 @@ export function TrackActionSheet({
           {categories.length > 0 ? (
             <div className="mt-1 space-y-1 border-t border-[var(--color-border)] pt-2">
               <p className="px-1 text-xs uppercase tracking-wide text-[var(--color-muted)]">
-                Assign Category
+                В каталог
               </p>
               {categories.map((category) => (
                 <button

@@ -17,7 +17,10 @@ export type CategoryIconId =
   | 'music'
   | 'star'
 
-/** Совпадает с `Category` из src/types/category.ts. */
+/**
+ * Wire-форма каталога. Таблица и JSON по-прежнему называются category:
+ * это те же строки, что пользователь уже сохранил.
+ */
 export type CategoryDto = {
   id: string
   name: string
@@ -30,6 +33,9 @@ export type CategoryDto = {
   favorite: boolean
   system: boolean
 }
+
+/** Продуктовое имя той же DTO. Отдельной таблицы catalogs нет. */
+export type CatalogDto = CategoryDto
 
 /** Совпадает с `Track` из src/types/track.ts. Playback URL сюда не входит. */
 export type TrackSnapshot = {

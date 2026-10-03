@@ -12,7 +12,7 @@ export type SwipeDecision = {
   track: Track
   action: SwipeAction
   direction: SwipeDirection
-  /** UI должен дождаться выбора категории перед переходом дальше. */
+  /** UI должен дождаться выбора каталога перед переходом дальше. */
   requiresCategorySelection: boolean
   /** Можно ли выполнить previous при текущем состоянии колоды. */
   canGoPrevious: boolean

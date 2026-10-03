@@ -48,7 +48,7 @@ export function LibraryContentTable({
             <th className="px-2 py-2">Исполнитель</th>
             <th className="px-2 py-2">Альбом</th>
             <th className="px-2 py-2">Источник</th>
-            <th className="px-2 py-2">Категория</th>
+            <th className="px-2 py-2">Каталог</th>
             <th className="px-2 py-2">Длительность</th>
             <th className="px-2 py-2">Добавлен</th>
             <th className="px-2 py-2">Прослушиваний</th>

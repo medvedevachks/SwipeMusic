@@ -5,12 +5,13 @@
 ## Git
 
 - Репозиторий: https://github.com/r-sh-galimov/SwipeMusic
-- Ветка разработки: `feature/mvp-02-server-persistence`
-- Baseline ветки: `1aa61c9` (`feat: add password recovery flow`) на `feature/mvp-01-user-account`
+- Ветка разработки: `feature/mvp-03-universal-catalogs`
+- Baseline ветки: `233881d` (`feat: persist user library state`) на `feature/mvp-02-server-persistence`
 - Опубликованный `origin/main`: `475fd34`
 - Локальный commit аккаунта: `f4995d3`. Восстановление пароля: `1aa61c9`
 - MVP-02A (серверное хранение библиотеки) зафиксирован коммитом `feat: add server persistence API`
 - MVP-02B (frontend читает и пишет эту библиотеку) зафиксирован коммитом `feat: persist user library state`
+- MVP-03A (каталог вместо категории, совместимое хранение) зафиксирован коммитом `feat: introduce universal music catalogs`
 - Локальный clone поверхностный (`grafted`)
 
 ## Стек
@@ -90,7 +91,7 @@ UI
 | MediaIndex | IndexedDB |
 | Handle и снимок local-folder | IndexedDB |
 | Кэш плагинов | IndexedDB |
-| Категории, лайки, назначения, история, `gestureConfig`, Collection Engine | сервер SQLite после входа. `GET /api/me/library-state` — источник истины. До гидратации экран сортировки скрыт |
+| Каталоги, лайки, назначения, история, `gestureConfig`, Collection Engine | сервер SQLite после входа. `GET /api/me/library-state` — источник истины. В JSON каталоги по-прежнему в поле `categories`. До гидратации экран сортировки скрыт |
 | Серверная библиотека пользователя | SQLite: `user_categories`, `user_collection_tracks`, `user_category_tracks`, `user_history`, `user_settings`. Владелец берётся из сессии, не из URL |
 | Недавний поиск | только память вкладки |
 | Аккаунт Swipe Music | SQLite `.data/swipemusic.sqlite`: `users`, `sessions`, `password_reset_tokens` |
@@ -101,8 +102,9 @@ UI
 
 ## Каталог и трек
 
-- Категории есть. Один `trackId` может быть в нескольких категориях.
-- Идентификатор трека в UI и коллекции: `${sourceId}:${externalId}`.
+- Пользовательский контейнер — каталог Swipe Music, не плейлист провайдера. В коде это тот же тип, что раньше назывался Category. Таблицы `user_categories` / `user_category_tracks` и маршруты `/api/me/categories` не переименовывались: старые строки читаются как каталоги, id сохраняются.
+- Один трек может быть в нескольких каталогах. Один каталог может содержать треки разных `sourceId`.
+- Идентификатор трека в UI и коллекции: `${sourceId}:${externalId}`. Canonical Track нет.
 - `MediaIndex` уже хранит `copies[]` и умеет склеивать записи по ISRC / MusicBrainz / hash / title+artist+duration. Это ещё не пользовательский Canonical Track.
 - Пользовательская организация переживает reload, logout/login и перезапуск backend. Id трека по-прежнему `${sourceId}:${externalId}`.
 

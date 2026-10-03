@@ -10,7 +10,7 @@ export const defaultGestureConfig: GestureConfig = {
 }
 
 export const gestureActionLabels: Record<SwipeAction, string> = {
-  categorize: 'Категория',
+  categorize: 'Каталог',
   like: 'Лайк',
   skip: 'Дальше',
   previous: 'Назад',
