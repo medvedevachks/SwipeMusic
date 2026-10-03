@@ -122,6 +122,41 @@ CREATE INDEX IF NOT EXISTS idx_user_history_created
   ON user_history (user_id, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_user_assignments_track
   ON user_category_tracks (user_id, track_id);
+
+CREATE TABLE IF NOT EXISTS user_canonical_tracks (
+  user_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  artist TEXT NOT NULL,
+  album TEXT,
+  duration_ms INTEGER,
+  artwork_url TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS user_track_source_copies (
+  user_id TEXT NOT NULL,
+  source_track_key TEXT NOT NULL,
+  canonical_track_id TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  artist TEXT NOT NULL,
+  album TEXT,
+  duration_ms INTEGER,
+  artwork_url TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, source_track_key),
+  UNIQUE (user_id, source_id, external_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id, canonical_track_id) REFERENCES user_canonical_tracks (user_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_source_copies_canonical
+  ON user_track_source_copies (user_id, canonical_track_id);
 `
 
 export function openDatabase(databasePath: string): DatabaseSync {

@@ -2,6 +2,12 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import type { AppConfig } from '../config/env.ts'
 import { createLibraryRepository, type LibraryResult } from '../library/repository.ts'
+import { createIdentityRepository } from '../library/identity/repository.ts'
+import {
+  validateLinkBody,
+  validateSourceSnapshot,
+  validateUnlinkBody,
+} from '../library/identity/validation.ts'
 import {
   isClientId,
   parseHistoryLimit,
@@ -43,6 +49,7 @@ export async function handleLibraryRequest(
   }
 
   const library = createLibraryRepository(context.db)
+  const identity = createIdentityRepository(context.db)
   const limit = parseHistoryLimit(url.searchParams.get('limit'))
 
   if (method === 'GET' && path === '/api/me/library-state') {
@@ -239,6 +246,77 @@ export async function handleLibraryRequest(
       return
     }
     sendJson(res, 405, { error: 'METHOD_NOT_ALLOWED' })
+    return
+  }
+
+  if (method === 'POST' && path === '/api/me/tracks/identity') {
+    const body = await readBody(req, res)
+    if (body === undefined) return
+    const parsed = validateSourceSnapshot(body)
+    if (!parsed.ok) {
+      sendJson(res, 400, { error: 'VALIDATION', fields: parsed.fields })
+      return
+    }
+    const ensured = identity.ensureSourceCopy(userId, parsed.value)
+    if (!ensured.ok) {
+      sendFailure(res, ensured)
+      return
+    }
+    sendJson(res, 200, ensured.value)
+    return
+  }
+
+  if (method === 'POST' && path === '/api/me/tracks/link') {
+    const body = await readBody(req, res)
+    if (body === undefined) return
+    const parsed = validateLinkBody(body)
+    if (!parsed.ok) {
+      sendJson(res, 400, { error: 'VALIDATION', fields: parsed.fields })
+      return
+    }
+    const linked = identity.linkSourceCopies(
+      userId,
+      parsed.value.sourceTrackKeyA,
+      parsed.value.sourceTrackKeyB,
+    )
+    if (!linked.ok) {
+      sendFailure(res, linked)
+      return
+    }
+    sendJson(res, 200, linked.value)
+    return
+  }
+
+  if (method === 'POST' && path === '/api/me/tracks/unlink') {
+    const body = await readBody(req, res)
+    if (body === undefined) return
+    const parsed = validateUnlinkBody(body)
+    if (!parsed.ok) {
+      sendJson(res, 400, { error: 'VALIDATION', fields: parsed.fields })
+      return
+    }
+    const detached = identity.unlinkSourceCopy(userId, parsed.value.sourceTrackKey)
+    if (!detached.ok) {
+      sendFailure(res, detached)
+      return
+    }
+    sendJson(res, 200, detached.value)
+    return
+  }
+
+  const identityMatch = path.match(/^\/api\/me\/tracks\/(.+)\/identity$/)
+  if (identityMatch && method === 'GET') {
+    const key = safeDecode(identityMatch[1])
+    if (!splitTrackId(key)) {
+      sendJson(res, 404, { error: 'NOT_FOUND' })
+      return
+    }
+    const found = identity.readOrBackfill(userId, key)
+    if (!found.ok) {
+      sendFailure(res, found)
+      return
+    }
+    sendJson(res, 200, found.value)
     return
   }
 

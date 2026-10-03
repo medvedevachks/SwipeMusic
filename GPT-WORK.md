@@ -72,9 +72,12 @@ MVP-02B — DONE, commit `feat: persist user library state`
 MVP-03 — DONE
 MVP-03A — DONE, commit `feat: introduce universal music catalogs`
 MVP-03B — DONE, commit `feat: add universal catalog management UI`
+MVP-04 — PARTIAL
+MVP-04A — DONE, commit `feat: add canonical track identity layer`
+MVP-04B — TODO
 ```
 
-Следующий этап: MVP-04 — Canonical Track + Source Copies. Playback каталога в MVP-03 не входит.
+Следующий этап: MVP-04B, переход UI и каталогов на канонический трек. Playback fallback не входит в 04A.
 
 ## MVP-01B — Password recovery
 
@@ -144,3 +147,13 @@ MVP-03B — DONE, commit `feat: add universal catalog management UI`
 - Переименование идёт через `updateCategory`. Удаление своего каталога спрашивает подтверждение и возвращает в `/library`. Системный каталог кнопки удаления не имеет, `deleteCategory` его не трогает.
 - «Убрать из каталога» снимает одно назначение. Трек, лайк, история и членство в других каталогах остаются. Удаление каталога снимает только его назначения.
 - Жест вправо и «В каталог» в меню трека по-прежнему пишут в тот же store. Playback каталога нет.
+
+## MVP-04A — Canonical track foundation
+
+Сделано на ветке `feature/mvp-04-canonical-track` от `c7e9f4e`. Commit: `feat: add canonical track identity layer`.
+
+- `Track.id` = `${sourceId}:${externalId}` остаётся ключом Source Copy. Канонический id — `can_<uuid>` пользователя.
+- Таблицы `user_canonical_tracks` и `user_track_source_copies` добавляются рядом со старыми. Коллекция, каталоги и история не переписываются.
+- Первая встреча source track создаёт один canonical и одну копию. Автосклейки библиотеки нет.
+- Связать копии можно через `POST /api/me/tracks/link`. Операция транзакционная, идемпотентная и только внутри пользователя. `unlink` отделяет копию на новый canonical.
+- Matcher отвечает `MATCH` / `NO_MATCH` / `AMBIGUOUS` и сам записи не объединяет. UI, поиск, провайдеры и playback не менялись.
