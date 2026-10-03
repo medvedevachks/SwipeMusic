@@ -58,6 +58,9 @@ export function createUserRepository(db: DatabaseSync) {
     SELECT id, first_name, last_name, email, password_hash, created_at, updated_at
     FROM users WHERE id = ?
   `)
+  const updatePasswordStmt = db.prepare(`
+    UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?
+  `)
 
   return {
     create(input: RegisterInput, passwordHash: string): UserRecord {
@@ -90,6 +93,10 @@ export function createUserRepository(db: DatabaseSync) {
     findById(id: string): UserRecord | null {
       const row = byId.get(id) as UserRow | undefined
       return row ? toRecord(row) : null
+    },
+
+    updatePassword(id: string, passwordHash: string): void {
+      updatePasswordStmt.run(passwordHash, new Date().toISOString(), id)
     },
   }
 }

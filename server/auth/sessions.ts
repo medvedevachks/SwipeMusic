@@ -47,6 +47,7 @@ export function createSessionRepository(db: DatabaseSync, ttlMs: number) {
   `)
   const touch = db.prepare(`UPDATE sessions SET last_used_at = ? WHERE id = ?`)
   const remove = db.prepare(`DELETE FROM sessions WHERE token_hash = ?`)
+  const removeUser = db.prepare(`DELETE FROM sessions WHERE user_id = ?`)
 
   return {
     create(userId: string): { token: string; session: SessionRecord } {
@@ -82,6 +83,10 @@ export function createSessionRepository(db: DatabaseSync, ttlMs: number) {
 
     deleteByToken(token: string): void {
       remove.run(hashToken(token))
+    },
+
+    deleteAllForUser(userId: string): void {
+      removeUser.run(userId)
     },
 
     isExpired(session: SessionRecord, now = Date.now()): boolean {

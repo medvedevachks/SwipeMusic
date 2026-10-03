@@ -81,4 +81,24 @@ export const authClient = {
     }
     return result.user
   },
+
+  async forgotPassword(email: string): Promise<void> {
+    const result = await request('/forgot-password', {
+      method: 'POST',
+      body: { email },
+    })
+    if (result.status !== 200) {
+      fail(result)
+    }
+  },
+
+  async resetPassword(token: string, password: string): Promise<void> {
+    const result = await request('/reset-password', {
+      method: 'POST',
+      body: { token, password },
+    })
+    if (result.status !== 200) {
+      fail(result)
+    }
+  },
 }

@@ -5,8 +5,8 @@
 | Этап | Статус | Почему |
 |---|---|---|
 | 0. Baseline | DONE | HEAD = `origin/main` = `475fd34`. Архитектура, Providers, persistence и Yandex сверены с кодом. `GPT.md`, этот файл и `docs/MVP_V1.md` зафиксированы. |
-| 1. User Account | PARTIAL | MVP-01A сделан на ветке `feature/mvp-01-user-account` и не закоммичен: регистрация, вход, HttpOnly-сессия, выход, `/login`, `/register`, защита маршрутов. Восстановления пароля нет. |
-| 2. Server Persistence | TODO | Категории, лайки и история по-прежнему в памяти вкладки. SQLite хранит только users и sessions. |
+| 1. User Account | DONE | Регистрация, вход, HttpOnly-сессия, выход, восстановление пароля. Каталоги к аккаунту ещё не привязаны. |
+| 2. Server Persistence | TODO | Следующий этап. Категории, лайки и история по-прежнему в памяти вкладки. SQLite хранит users, sessions и password reset tokens. |
 | 3. Universal Catalogs | PARTIAL | Есть `Category` и пресеты («Любимое», «В машину»). Один трек может быть в нескольких категориях. Данные не переживают перезагрузку и привязаны к `trackId` источника. |
 | 4. Canonical Track + Source Copies | PARTIAL | `MediaIndex` умеет `TrackRecord.copies` и ключ дедупликации. Рабочий `Track.id` — это `${sourceId}:${externalId}`. Коллекция пользователя ключуется этим id. |
 | 5. Playback Availability | PARTIAL | `PlaybackResolver` собирает кандидатов, смотрит `available`, priority и `requiresPremium`. Отдельного продуктового чеклиста доступа нет. |
@@ -29,5 +29,8 @@
 
 ```text
 MVP-01A Account backend + sessions = DONE
-MVP-01B Password recovery = TODO
+MVP-01B Password recovery = DONE
+MVP-01 User Account = DONE
 ```
+
+Следующий этап: MVP-02 Server Persistence.

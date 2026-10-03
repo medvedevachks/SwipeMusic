@@ -31,6 +31,23 @@ function readString(record: Record<string, unknown>, key: string): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+export function passwordFieldError(password: string): string | null {
+  if (password.length < PASSWORD_MIN) {
+    return `Пароль не короче ${PASSWORD_MIN} символов`
+  }
+  if (password.length > PASSWORD_MAX) {
+    return `Пароль не длиннее ${PASSWORD_MAX} символов`
+  }
+  return null
+}
+
+function emailFieldError(email: string): string | null {
+  if (!email || email.length > EMAIL_MAX || !EMAIL_PATTERN.test(email)) {
+    return 'Укажите корректный email'
+  }
+  return null
+}
+
 export function validateRegister(body: unknown):
   | { ok: true; value: RegisterInput }
   | { ok: false; fields: FieldErrors } {
@@ -66,10 +83,9 @@ export function validateRegister(body: unknown):
     fields.email = 'Укажите корректный email'
   }
 
-  if (password.length < PASSWORD_MIN) {
-    fields.password = `Пароль не короче ${PASSWORD_MIN} символов`
-  } else if (password.length > PASSWORD_MAX) {
-    fields.password = `Пароль не длиннее ${PASSWORD_MAX} символов`
+  const passwordError = passwordFieldError(password)
+  if (passwordError) {
+    fields.password = passwordError
   }
 
   if (Object.keys(fields).length > 0) {
@@ -109,4 +125,58 @@ export function validateLogin(body: unknown):
   }
 
   return { ok: true, value: { email, password } }
+}
+
+export type ForgotPasswordInput = {
+  email: string
+}
+
+export type ResetPasswordInput = {
+  token: string
+  password: string
+}
+
+export function validateForgotPassword(body: unknown):
+  | { ok: true; value: ForgotPasswordInput }
+  | { ok: false; fields: FieldErrors } {
+  const record = asRecord(body)
+  if (!record) {
+    return { ok: false, fields: { body: 'Ожидается JSON-объект' } }
+  }
+
+  const email = readString(record, 'email').toLowerCase()
+  const emailError = emailFieldError(email)
+  if (emailError) {
+    return { ok: false, fields: { email: emailError } }
+  }
+
+  return { ok: true, value: { email } }
+}
+
+export function validateResetPassword(body: unknown):
+  | { ok: true; value: ResetPasswordInput }
+  | { ok: false; fields: FieldErrors } {
+  const record = asRecord(body)
+  const fields: FieldErrors = {}
+  if (!record) {
+    return { ok: false, fields: { body: 'Ожидается JSON-объект' } }
+  }
+
+  const token = typeof record.token === 'string' ? record.token.trim() : ''
+  const password = typeof record.password === 'string' ? record.password : ''
+
+  if (!token || token.length > 200) {
+    fields.token = 'Ссылка восстановления недействительна'
+  }
+
+  const passwordError = passwordFieldError(password)
+  if (passwordError) {
+    fields.password = passwordError
+  }
+
+  if (Object.keys(fields).length > 0) {
+    return { ok: false, fields }
+  }
+
+  return { ok: true, value: { token, password } }
 }

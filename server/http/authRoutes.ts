@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '../auth/password.ts'
+import { createPasswordResetRepository } from '../auth/passwordReset.ts'
+import type { ForgotPasswordLimiter } from '../auth/rateLimit.ts'
 import {
   createSessionRepository,
   SESSION_COOKIE,
@@ -10,17 +12,28 @@ import {
   isUniqueConstraintError,
   toPublicUser,
 } from '../auth/users.ts'
-import { validateLogin, validateRegister } from '../auth/validation.ts'
+import {
+  validateForgotPassword,
+  validateLogin,
+  validateRegister,
+  validateResetPassword,
+} from '../auth/validation.ts'
 import type { AppConfig } from '../config/env.ts'
+import type { MailSender } from '../mail/MailSender.ts'
 import {
   readCookie,
   serializeClearSessionCookie,
   serializeSessionCookie,
 } from './cookies.ts'
 
+export const FORGOT_PASSWORD_MESSAGE =
+  'Если аккаунт с такой почтой существует, инструкция отправлена.'
+
 type AuthContext = {
   db: DatabaseSync
   config: AppConfig
+  mail: MailSender
+  limiter: ForgotPasswordLimiter
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -69,6 +82,10 @@ function sessionToken(req: IncomingMessage): string | null {
   return readCookie(req.headers.cookie, SESSION_COOKIE)
 }
 
+function clientIp(req: IncomingMessage): string {
+  return req.socket.remoteAddress ?? 'unknown'
+}
+
 export async function handleAuthRequest(
   req: IncomingMessage,
   res: ServerResponse,
@@ -85,6 +102,7 @@ export async function handleAuthRequest(
 
   const users = createUserRepository(context.db)
   const sessions = createSessionRepository(context.db, context.config.sessionTtlMs)
+  const resets = createPasswordResetRepository(context.db)
 
   if (method === 'POST' && path === '/api/auth/register') {
     let body: unknown
@@ -152,6 +170,87 @@ export async function handleAuthRequest(
       sessions.deleteByToken(token)
     }
     res.setHeader('Set-Cookie', serializeClearSessionCookie(context.config))
+    sendJson(res, 200, { ok: true })
+    return
+  }
+
+  if (method === 'POST' && path === '/api/auth/forgot-password') {
+    let body: unknown
+    try {
+      body = await readBody(req)
+    } catch {
+      sendJson(res, 400, { error: 'VALIDATION', fields: { body: 'Некорректный JSON' } })
+      return
+    }
+
+    const parsed = validateForgotPassword(body)
+    if (!parsed.ok) {
+      sendJson(res, 400, { error: 'VALIDATION', fields: parsed.fields })
+      return
+    }
+
+    const allowed = context.limiter.consume(clientIp(req), parsed.value.email)
+    if (!allowed) {
+      sendJson(res, 429, { error: 'RATE_LIMITED' })
+      return
+    }
+
+    const user = users.findByEmail(parsed.value.email)
+    if (user) {
+      const { token } = resets.issue(user.id)
+      const resetUrl = `${context.config.appPublicUrl}/reset-password?token=${encodeURIComponent(token)}`
+      try {
+        await context.mail.sendPasswordReset({
+          to: user.email,
+          resetUrl,
+        })
+      } catch {
+        console.error('password reset mail failed')
+      }
+    }
+
+    sendJson(res, 200, { message: FORGOT_PASSWORD_MESSAGE })
+    return
+  }
+
+  if (method === 'POST' && path === '/api/auth/reset-password') {
+    let body: unknown
+    try {
+      body = await readBody(req)
+    } catch {
+      sendJson(res, 400, { error: 'VALIDATION', fields: { body: 'Некорректный JSON' } })
+      return
+    }
+
+    const parsed = validateResetPassword(body)
+    if (!parsed.ok) {
+      sendJson(res, 400, { error: 'VALIDATION', fields: parsed.fields })
+      return
+    }
+
+    const reset = resets.findByToken(parsed.value.token)
+    if (!reset || !resets.isUsable(reset)) {
+      sendJson(res, 400, { error: 'INVALID_RESET_TOKEN' })
+      return
+    }
+
+    const passwordHash = hashPassword(parsed.value.password)
+    context.db.exec('BEGIN')
+    try {
+      const marked = resets.markUsed(reset.id)
+      if (!marked) {
+        context.db.exec('ROLLBACK')
+        sendJson(res, 400, { error: 'INVALID_RESET_TOKEN' })
+        return
+      }
+      users.updatePassword(reset.userId, passwordHash)
+      sessions.deleteAllForUser(reset.userId)
+      context.db.exec('COMMIT')
+    } catch (error) {
+      context.db.exec('ROLLBACK')
+      throw error
+    }
+
     sendJson(res, 200, { ok: true })
     return
   }

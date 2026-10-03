@@ -49,6 +49,8 @@ export default function Login() {
       title="Войти"
       footer={
         <>
+          <AuthLink to="/forgot-password">Забыли пароль?</AuthLink>
+          {' · '}
           Нет аккаунта? <AuthLink to="/register">Создать аккаунт</AuthLink>
         </>
       }

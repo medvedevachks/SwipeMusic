@@ -1,11 +1,15 @@
 import { createServer, type Server } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
+import type { ForgotPasswordLimiter } from '../auth/rateLimit.ts'
 import type { AppConfig } from '../config/env.ts'
+import type { MailSender } from '../mail/MailSender.ts'
 import { handleAuthRequest } from './authRoutes.ts'
 
 export type AuthServerOptions = {
   db: DatabaseSync
   config: AppConfig
+  mail: MailSender
+  limiter: ForgotPasswordLimiter
 }
 
 export function createAuthServer(options: AuthServerOptions): Server {

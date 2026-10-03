@@ -63,21 +63,30 @@
 Не начат был на момент baseline. После него выполнен MVP-01A, см. ниже.
 
 ```text
-MVP-01 — User Account
-MVP-01A — DONE, не закоммичен
-MVP-01B — Password recovery, не начат
+MVP-01 — User Account = DONE
+MVP-01A — DONE, commit f4995d3
+MVP-01B — DONE в рабочем дереве, не закоммичен
 ```
+
+Следующий этап: MVP-02 Server Persistence. Не начат.
+
+## MVP-01B — Password recovery
+
+- `POST /api/auth/forgot-password` отвечает одинаково, есть email или нет.
+- `POST /api/auth/reset-password` меняет пароль тем же scrypt, гасит все сессии и не создаёт новую.
+- Токен случайный, в БД только hash, 30 минут, одноразовый. Новый запрос гасит предыдущие активные токены.
+- Письма идут через `MailSender`. Development: `MAIL_TRANSPORT=console`. Production требует SMTP и не принимает console transport.
+- Лимит запросов: IP + email, в памяти процесса, сбрасывается после перезапуска сервера.
+- Экраны `/forgot-password` и `/reset-password`. На входе есть «Забыли пароль?».
+- `npm test`: прежние 9 тестов и новые тесты восстановления проходят.
 
 ## MVP-01A — Account backend + sessions
 
-Сделано на ветке `feature/mvp-01-user-account` от `475fd34`. Commit и push не выполнялись.
+Сделано на ветке `feature/mvp-01-user-account` от `475fd34`, commit `f4995d3`.
 
 - Backend `server/`: регистрация, вход, `GET /api/auth/me`, выход.
 - Пользователь с UUID, email в нижнем регистре, пароль только как scrypt hash.
 - Сессия 30 дней, cookie `sm_session` HttpOnly, SameSite=Lax. В БД только hash токена.
 - База `.data/swipemusic.sqlite` в `.gitignore`.
 - Frontend: `/login`, `/register`, блок на профиле, защита маршрутов, восстановление сессии после reload.
-- `npm test`: 9 auth-тестов, все прошли.
 - Плееры, свайп, поиск, источники и MediaIndex не переписывались.
-
-Осталось для MVP-01B: восстановление пароля и связанный auth UX. Письма не отправляются.

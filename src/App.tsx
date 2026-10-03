@@ -11,6 +11,8 @@ import Login from './pages/Login'
 import Profile from './pages/Profile'
 import QueuePage from './pages/Queue'
 import Register from './pages/Register'
+import ForgotPassword from './pages/ForgotPassword'
+import ResetPassword from './pages/ResetPassword'
 import Search from './pages/Search'
 import Sources from './pages/Sources'
 
@@ -18,6 +20,8 @@ function App() {
   return (
     <AuthGate>
       <Routes>
+        <Route path="forgot-password" element={<ForgotPassword />} />
+        <Route path="reset-password" element={<ResetPassword />} />
         <Route element={<RequireAnonymous />}>
           <Route path="login" element={<Login />} />
           <Route path="register" element={<Register />} />
