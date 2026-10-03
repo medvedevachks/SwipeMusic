@@ -12,6 +12,7 @@
 - MVP-02A (серверное хранение библиотеки) зафиксирован коммитом `feat: add server persistence API`
 - MVP-02B (frontend читает и пишет эту библиотеку) зафиксирован коммитом `feat: persist user library state`
 - MVP-03A (каталог вместо категории, совместимое хранение) зафиксирован коммитом `feat: introduce universal music catalogs`
+- MVP-03B (список, создание, открытие, переименование, удаление каталога и снятие трека) зафиксирован коммитом `feat: add universal catalog management UI`. Playback каталога не входит в MVP-03
 - Локальный clone поверхностный (`grafted`)
 
 ## Стек
@@ -103,8 +104,10 @@ UI
 ## Каталог и трек
 
 - Пользовательский контейнер — каталог Swipe Music, не плейлист провайдера. В коде это тот же тип, что раньше назывался Category. Таблицы `user_categories` / `user_category_tracks` и маршруты `/api/me/categories` не переименовывались: старые строки читаются как каталоги, id сохраняются.
+- Экран `/library` показывает «Мои каталоги». Карточка каталога: `/library/catalogs/:catalogId`. Можно создать, открыть, переименовать, удалить свой каталог и убрать трек из него. Удаление каталога не удаляет трек из коллекции. Системный каталог удалить нельзя.
 - Один трек может быть в нескольких каталогах. Один каталог может содержать треки разных `sourceId`.
 - Идентификатор трека в UI и коллекции: `${sourceId}:${externalId}`. Canonical Track нет.
+- Воспроизведение каталога, очередь и shuffle каталога не входят в MVP-03 и остаются отдельным этапом roadmap.
 - `MediaIndex` уже хранит `copies[]` и умеет склеивать записи по ISRC / MusicBrainz / hash / title+artist+duration. Это ещё не пользовательский Canonical Track.
 - Пользовательская организация переживает reload, logout/login и перезапуск backend. Id трека по-прежнему `${sourceId}:${externalId}`.
 
@@ -117,4 +120,4 @@ UI
 - Нет Car Mode.
 - VK и Zaycev не подключены.
 - Cross-provider fallback есть только если MediaIndex уже склеил копии. Отдельного UX подписки нет.
-- `npm test`: 22 auth, 15 server persistence, 6 frontend persistence. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.
+- `npm test`: 22 auth, 16 server persistence, 8 frontend persistence, 3 catalog UI/domain. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.

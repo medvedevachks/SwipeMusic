@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { CatalogList } from '../components/catalog/CatalogList'
 import { BulkActionBar } from '../components/library/BulkActionBar'
 import { LibraryBreadcrumb } from '../components/library/LibraryBreadcrumb'
 import { LibraryContentTable } from '../components/library/LibraryContentTable'
@@ -191,6 +192,8 @@ export default function Library() {
           Refresh
         </button>
       </div>
+
+      <CatalogList />
 
       <div className="flex flex-wrap gap-2">
         {providers.map((provider) => {

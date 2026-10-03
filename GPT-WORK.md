@@ -69,12 +69,12 @@ MVP-01B — DONE, commit 1aa61c9
 MVP-02 — DONE
 MVP-02A — DONE, commit `feat: add server persistence API`
 MVP-02B — DONE, commit `feat: persist user library state`
-MVP-03 — PARTIAL
+MVP-03 — DONE
 MVP-03A — DONE, commit `feat: introduce universal music catalogs`
-MVP-03B — TODO
+MVP-03B — DONE, commit `feat: add universal catalog management UI`
 ```
 
-Следующий этап: MVP-03B, экран каталогов.
+Следующий этап: MVP-04 — Canonical Track + Source Copies. Playback каталога в MVP-03 не входит.
 
 ## MVP-01B — Password recovery
 
@@ -134,3 +134,13 @@ MVP-03B — TODO
 - Жест вправо по-прежнему открывает picker. Подпись жеста и тексты picker — «Каталог».
 - Системные пресеты те же шесть. `createDefaultCatalogs` — та же функция, что `createDefaultCategories`.
 - Провайдерский плейлист не равен каталогу. Canonical Track и playback каталога не делались.
+
+## MVP-03B — Catalog UI
+
+Сделано на ветке `feature/mvp-03-universal-catalogs` от `067638f`. Commit: `feat: add universal catalog management UI`.
+
+- На `/library` блок «Мои каталоги»: иконка, имя, число треков по назначениям, `sortOrder`. Создание переиспользует форму каталога и `createCategory`.
+- Карточка `/library/catalogs/:catalogId`: название, иконка, описание, треки из снимка коллекции, источник через общее имя источника. Чужой или отсутствующий id показывает «Каталог не найден».
+- Переименование идёт через `updateCategory`. Удаление своего каталога спрашивает подтверждение и возвращает в `/library`. Системный каталог кнопки удаления не имеет, `deleteCategory` его не трогает.
+- «Убрать из каталога» снимает одно назначение. Трек, лайк, история и членство в других каталогах остаются. Удаление каталога снимает только его назначения.
+- Жест вправо и «В каталог» в меню трека по-прежнему пишут в тот же store. Playback каталога нет.

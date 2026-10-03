@@ -1,12 +1,12 @@
 import { create } from 'zustand'
-import { getCollectionEngine } from '../services/collectionEngine'
+import { getCollectionEngine } from '../services/collectionEngine/index.ts'
 import {
   persistAssignment,
   persistTrackDelete,
   persistTrackRecord,
   persistUnassign,
 } from '../services/libraryPersistence/mutations.ts'
-import { useCollectionStore } from './collectionStore'
+import { useCollectionStore } from './collectionStore.ts'
 import type {
   CollectionActionLog,
   CollectionStats,

@@ -6,6 +6,7 @@ import {
 } from './components/auth/AuthGate'
 import LibraryBootstrap from './services/libraryPersistence/LibraryBootstrap'
 import MainLayout from './layouts/MainLayout'
+import CatalogDetail from './pages/CatalogDetail'
 import Home from './pages/Home'
 import Library from './pages/Library'
 import Login from './pages/Login'
@@ -33,6 +34,7 @@ function App() {
             <Route index element={<Home />} />
             <Route path="search" element={<Search />} />
             <Route path="library" element={<Library />} />
+            <Route path="library/catalogs/:catalogId" element={<CatalogDetail />} />
             <Route path="queue" element={<QueuePage />} />
             <Route path="profile" element={<Profile />} />
             <Route path="sources" element={<Sources />} />

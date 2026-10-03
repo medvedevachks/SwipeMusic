@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { defaultGestureConfig } from '../config/gestureConfig.ts'
+import { getCollectionEngine } from '../services/collectionEngine/index.ts'
 import {
   persistCategory,
   persistCategoryDelete,
@@ -152,9 +153,13 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
 
   deleteCategory: (id) => {
     const target = get().categories.find((category) => category.id === id)
-    if (target?.system) {
+    if (!target || target.system) {
       return
     }
+
+    const trackIds = get()
+      .assignments.filter((assignment) => assignment.categoryId === id)
+      .map((assignment) => assignment.trackId)
 
     set((state) => ({
       categories: state.categories.filter((category) => category.id !== id),
@@ -162,6 +167,10 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
         (assignment) => assignment.categoryId !== id,
       ),
     }))
+    const engine = getCollectionEngine()
+    for (const trackId of trackIds) {
+      engine.removeCategory(trackId, id)
+    }
     persistCategoryDelete(id)
   },
 
