@@ -1,4 +1,4 @@
-import { AuthApiError, type AuthFieldErrors, type AuthUser } from './types'
+import { AuthApiError, type AuthFieldErrors, type AuthUser } from './types.ts'
 
 const AUTH_ROOT = '/api/auth'
 

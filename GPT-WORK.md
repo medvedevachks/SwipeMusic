@@ -66,12 +66,12 @@
 MVP-01 — User Account = DONE
 MVP-01A — DONE, commit f4995d3
 MVP-01B — DONE, commit 1aa61c9
-MVP-02 — PARTIAL
+MVP-02 — DONE
 MVP-02A — DONE, commit `feat: add server persistence API`
-MVP-02B — TODO
+MVP-02B — DONE, commit `feat: persist user library state`
 ```
 
-Следующий этап: MVP-02B. Frontend Collection/Category/History ещё не пишет на сервер.
+Следующий этап: MVP-03 — Universal Catalogs.
 
 ## MVP-01B — Password recovery
 
@@ -107,3 +107,16 @@ MVP-02B — TODO
 - `GET /api/me/library-state` отдаёт categories, tracks, categoryAssignments, history, settings.
 - Frontend stores не переключались. Logout и сброс пароля библиотеку не стирают.
 - `npm test`: 22 auth + 15 persistence, все проходят.
+
+## MVP-02B — Frontend persistence integration
+
+Сделано на ветке `feature/mvp-02-server-persistence` поверх `214657a`. Commit: `feat: persist user library state`.
+
+- После `authenticated` + `user.id` один bootstrap: `GET /api/me/library-state`. Повторный запрос той же сессии в полёте склеивается. Снимок сервера заменяет память, старое состояние вкладки не сливается.
+- Пустой аккаунт один раз создаёт текущие default categories и перечитывает снимок. Непустой аккаунт defaults не создаёт заново.
+- Лайк, категория, назначение, история и `gestureConfig` пишутся из store/Collection Engine, не из одного экрана. Каталожный `addTrack` на сервер не уходит.
+- Collection Engine гидратируется через `replaceStorageData`.
+- Logout очищает user-scoped runtime и не удаляет серверную библиотеку.
+- Ошибка сохранения показывает «Не удалось сохранить изменения.» Ответ 401 переводит существующий auth store в `anonymous`.
+- Локально остаются `viewedTrackIds`, `collectionId` / `collectionName`, action log, очередь, плеер, поиск, MediaIndex, провайдеры и handle папки.
+- `npm test`: прежние 37 и 6 тестов frontend persistence.

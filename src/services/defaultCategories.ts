@@ -1,5 +1,5 @@
 import type { Category } from '../types/category'
-import { createId } from '../utils/id'
+import { createId } from '../utils/id.ts'
 
 /** Стартовый набор — системные пресеты, не зашитые в бизнес-логику свайпов. */
 export function createDefaultCategories(): Category[] {

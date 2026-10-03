@@ -1,5 +1,12 @@
 import { create } from 'zustand'
 import { getCollectionEngine } from '../services/collectionEngine'
+import {
+  persistAssignment,
+  persistTrackDelete,
+  persistTrackRecord,
+  persistUnassign,
+} from '../services/libraryPersistence/mutations.ts'
+import { useCollectionStore } from './collectionStore'
 import type {
   CollectionActionLog,
   CollectionStats,
@@ -28,6 +35,17 @@ type CollectionEngineStore = {
 }
 
 const engine = getCollectionEngine()
+
+function persistCurrentTrack(trackId: string): void {
+  const record = engine.getTrack(trackId)
+  if (!record) {
+    return
+  }
+  const like = useCollectionStore
+    .getState()
+    .likedTracks.find((item) => item.trackId === trackId)
+  persistTrackRecord(record, record.liked ? (like?.createdAt ?? record.addedAt) : null)
+}
 
 const emptyStats: CollectionStats = {
   totalTracks: 0,
@@ -59,36 +77,68 @@ export const useCollectionEngineStore = create<CollectionEngineStore>((set) => {
     stats: snap.stats.totalTracks ? snap.stats : emptyStats,
 
     addTrack: (track) => engine.addTrack(track),
-    removeTrack: (trackId) => engine.removeTrack(trackId),
+    removeTrack: (trackId) => {
+      engine.removeTrack(trackId)
+      persistTrackDelete(trackId)
+    },
     assignCategory: (trackId, categoryId, track) => {
-      engine.assignCategory(trackId, categoryId, track)
+      const updated = engine.assignCategory(trackId, categoryId, track)
+      const snapshot = updated?.track ?? track
+      if (!snapshot) {
+        return
+      }
+      const assignment = useCollectionStore.getState().ensureAssignment(trackId, categoryId)
+      persistAssignment(snapshot, assignment)
+      persistCurrentTrack(trackId)
     },
     removeCategory: (trackId, categoryId) => {
       engine.removeCategory(trackId, categoryId)
+      useCollectionStore.getState().removeAssignment(trackId, categoryId)
+      persistUnassign(trackId, categoryId)
+      persistCurrentTrack(trackId)
     },
     toggleLike: (trackId, track) => {
-      engine.toggleLike(trackId, track)
+      const updated = engine.toggleLike(trackId, track)
+      if (!updated) {
+        return
+      }
+      useCollectionStore.getState().mirrorLike(trackId, updated.liked)
+      persistCurrentTrack(trackId)
     },
     setLiked: (trackId, liked, track) => {
-      engine.setLiked(trackId, liked, track)
+      const updated = engine.setLiked(trackId, liked, track)
+      if (!updated) {
+        return
+      }
+      useCollectionStore.getState().mirrorLike(trackId, liked)
+      persistCurrentTrack(trackId)
     },
     setDisliked: (trackId, disliked, track) => {
       engine.setDisliked(trackId, disliked, track)
+      if (disliked) {
+        useCollectionStore.getState().mirrorLike(trackId, false)
+      }
+      persistCurrentTrack(trackId)
     },
     toggleFavorite: (trackId, track) => {
       engine.toggleFavorite(trackId, track)
+      persistCurrentTrack(trackId)
     },
     markPlayed: (trackId, track) => {
       engine.markPlayed(trackId, track)
+      persistCurrentTrack(trackId)
     },
     markSkipped: (trackId, track) => {
       engine.markSkipped(trackId, track)
+      persistCurrentTrack(trackId)
     },
     hideTrack: (trackId, track) => {
       engine.hideTrack(trackId, track)
+      persistCurrentTrack(trackId)
     },
     restoreTrack: (trackId) => {
       engine.restoreTrack(trackId)
+      persistCurrentTrack(trackId)
     },
     refresh: () => {
       const next = engine.getSnapshot()

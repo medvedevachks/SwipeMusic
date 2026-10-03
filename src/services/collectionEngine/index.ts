@@ -1,4 +1,4 @@
 export {
   CollectionEngine,
   getCollectionEngine,
-} from './CollectionEngine'
+} from './CollectionEngine.ts'

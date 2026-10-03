@@ -4,6 +4,7 @@ import {
   RequireAnonymous,
   RequireAuth,
 } from './components/auth/AuthGate'
+import LibraryBootstrap from './services/libraryPersistence/LibraryBootstrap'
 import MainLayout from './layouts/MainLayout'
 import Home from './pages/Home'
 import Library from './pages/Library'
@@ -19,6 +20,7 @@ import Sources from './pages/Sources'
 function App() {
   return (
     <AuthGate>
+      <LibraryBootstrap />
       <Routes>
         <Route path="forgot-password" element={<ForgotPassword />} />
         <Route path="reset-password" element={<ResetPassword />} />

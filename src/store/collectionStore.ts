@@ -1,6 +1,11 @@
 import { create } from 'zustand'
-import { defaultGestureConfig } from '../config/gestureConfig'
-import { createDefaultCategories } from '../services/defaultCategories'
+import { defaultGestureConfig } from '../config/gestureConfig.ts'
+import {
+  persistCategory,
+  persistCategoryDelete,
+  persistGesture,
+  persistHistory,
+} from '../services/libraryPersistence/mutations.ts'
 import type {
   Category,
   CategoryIconId,
@@ -12,7 +17,7 @@ import type { GestureConfig } from '../types/gesture'
 import type { HistoryEntry } from '../types/history'
 import type { SwipeAction } from '../types/swipe'
 import type { Track } from '../types/track'
-import { createId } from '../utils/id'
+import { createId } from '../utils/id.ts'
 
 type CreateCategoryInput = {
   name: string
@@ -59,6 +64,17 @@ type CollectionState = {
   pushViewedTrack: (trackId: string) => void
   recordHistory: (input: RecordHistoryInput) => HistoryEntry
   setGestureConfig: (config: GestureConfig) => void
+  ensureAssignment: (trackId: string, categoryId: string) => TrackAssignment
+  removeAssignment: (trackId: string, categoryId: string) => void
+  mirrorLike: (trackId: string, liked: boolean) => void
+  applyServerState: (input: {
+    categories: Category[]
+    assignments: TrackAssignment[]
+    likedTracks: LikedTrack[]
+    history: HistoryEntry[]
+    gestureConfig: GestureConfig
+  }) => void
+  clearUserLibrary: () => void
 }
 
 const initialCollectionId = createId('col')
@@ -67,7 +83,7 @@ const initialCreatedAt = new Date().toISOString()
 export const useCollectionStore = create<CollectionState>((set, get) => ({
   collectionId: initialCollectionId,
   collectionName: 'Моя коллекция',
-  categories: createDefaultCategories(),
+  categories: [],
   assignments: [],
   likedTracks: [],
   viewedTrackIds: [],
@@ -105,6 +121,7 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
     set((state) => ({
       categories: [...state.categories, category],
     }))
+    persistCategory(category, 'create')
 
     return category
   },
@@ -127,6 +144,10 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
           : category,
       ),
     }))
+    const updated = get().categories.find((category) => category.id === id)
+    if (updated) {
+      persistCategory(updated, 'update')
+    }
   },
 
   deleteCategory: (id) => {
@@ -141,43 +162,63 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
         (assignment) => assignment.categoryId !== id,
       ),
     }))
+    persistCategoryDelete(id)
   },
 
   assignTrackToCategory: (trackId, categoryId) => {
+    get().ensureAssignment(trackId, categoryId)
+  },
+
+  ensureAssignment: (trackId, categoryId) => {
+    const existing = get().assignments.find(
+      (item) => item.trackId === trackId && item.categoryId === categoryId,
+    )
+    if (existing) {
+      return existing
+    }
     const assignment: TrackAssignment = {
       id: createId('asg'),
       trackId,
       categoryId,
       createdAt: new Date().toISOString(),
     }
-
     set((state) => ({
-      assignments: [
-        ...state.assignments.filter(
-          (item) =>
-            !(item.trackId === trackId && item.categoryId === categoryId),
-        ),
-        assignment,
-      ],
+      assignments: [...state.assignments, assignment],
+    }))
+    return assignment
+  },
+
+  removeAssignment: (trackId, categoryId) => {
+    set((state) => ({
+      assignments: state.assignments.filter(
+        (item) => !(item.trackId === trackId && item.categoryId === categoryId),
+      ),
     }))
   },
 
   likeTrack: (trackId) => {
+    get().mirrorLike(trackId, true)
+  },
+
+  unlikeTrack: (trackId) => {
+    get().mirrorLike(trackId, false)
+  },
+
+  mirrorLike: (trackId, liked) => {
+    if (!liked) {
+      set((state) => ({
+        likedTracks: state.likedTracks.filter((item) => item.trackId !== trackId),
+      }))
+      return
+    }
     if (get().likedTracks.some((item) => item.trackId === trackId)) {
       return
     }
-
     set((state) => ({
       likedTracks: [
         ...state.likedTracks,
         { trackId, createdAt: new Date().toISOString() },
       ],
-    }))
-  },
-
-  unlikeTrack: (trackId) => {
-    set((state) => ({
-      likedTracks: state.likedTracks.filter((item) => item.trackId !== trackId),
     }))
   },
 
@@ -206,11 +247,34 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
     set((state) => ({
       history: [...state.history, entry],
     }))
+    persistHistory(entry)
 
     return entry
   },
 
   setGestureConfig: (config) => {
     set({ gestureConfig: config })
+    persistGesture(config)
+  },
+
+  applyServerState: (input) => {
+    set({
+      categories: input.categories,
+      assignments: input.assignments,
+      likedTracks: input.likedTracks,
+      history: input.history,
+      gestureConfig: input.gestureConfig,
+    })
+  },
+
+  clearUserLibrary: () => {
+    set({
+      categories: [],
+      assignments: [],
+      likedTracks: [],
+      viewedTrackIds: [],
+      history: [],
+      gestureConfig: defaultGestureConfig,
+    })
   },
 }))

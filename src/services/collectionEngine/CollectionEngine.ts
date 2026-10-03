@@ -1,5 +1,5 @@
 import type { CollectionStorage } from '../../storage/CollectionStorage'
-import { MemoryCollectionStorage } from '../../storage/MemoryCollectionStorage'
+import { MemoryCollectionStorage } from '../../storage/MemoryCollectionStorage.ts'
 import type {
   CollectionActionLog,
   CollectionEngineSnapshot,
@@ -8,7 +8,7 @@ import type {
   CollectionUserActionType,
 } from '../../types/collectionUser'
 import type { Track } from '../../types/track'
-import { createId } from '../../utils/id'
+import { createId } from '../../utils/id.ts'
 
 type Listener = (snapshot: CollectionEngineSnapshot) => void
 

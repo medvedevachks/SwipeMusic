@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { authClient } from '../services/auth/authClient'
+import { authClient } from '../services/auth/authClient.ts'
 import type { AuthUser } from '../services/auth/types'
 
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'

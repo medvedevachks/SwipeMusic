@@ -10,6 +10,7 @@
 - Опубликованный `origin/main`: `475fd34`
 - Локальный commit аккаунта: `f4995d3`. Восстановление пароля: `1aa61c9`
 - MVP-02A (серверное хранение библиотеки) зафиксирован коммитом `feat: add server persistence API`
+- MVP-02B (frontend читает и пишет эту библиотеку) зафиксирован коммитом `feat: persist user library state`
 - Локальный clone поверхностный (`grafted`)
 
 ## Стек
@@ -89,7 +90,7 @@ UI
 | MediaIndex | IndexedDB |
 | Handle и снимок local-folder | IndexedDB |
 | Кэш плагинов | IndexedDB |
-| Категории, лайки, история, CollectionEngine во frontend | только память вкладки. На сервер ещё не переключены |
+| Категории, лайки, назначения, история, `gestureConfig`, Collection Engine | сервер SQLite после входа. `GET /api/me/library-state` — источник истины. До гидратации экран сортировки скрыт |
 | Серверная библиотека пользователя | SQLite: `user_categories`, `user_collection_tracks`, `user_category_tracks`, `user_history`, `user_settings`. Владелец берётся из сессии, не из URL |
 | Недавний поиск | только память вкладки |
 | Аккаунт Swipe Music | SQLite `.data/swipemusic.sqlite`: `users`, `sessions`, `password_reset_tokens` |
@@ -103,14 +104,15 @@ UI
 - Категории есть. Один `trackId` может быть в нескольких категориях.
 - Идентификатор трека в UI и коллекции: `${sourceId}:${externalId}`.
 - `MediaIndex` уже хранит `copies[]` и умеет склеивать записи по ISRC / MusicBrainz / hash / title+artist+duration. Это ещё не пользовательский Canonical Track.
-- Пользовательская организация не переживает перезагрузку и не отделена от id источника.
+- Пользовательская организация переживает reload, logout/login и перезапуск backend. Id трека по-прежнему `${sourceId}:${externalId}`.
 
 ## Ограничения
 
-- Сервер уже хранит категории, коллекцию, назначения, историю свайпов и раскладку жестов по сессии (`/api/me/*`). Frontend stores по-прежнему в памяти вкладки: подключение — MVP-02B. Между устройствами это ещё не синхронизируется.
+- Библиотека пишется на сервер сразу после действия. Очереди офлайн-мутаций и разрешения конфликтов нет. Две вкладки при первом пустом аккаунте могут создать два набора default categories.
+- Между устройствами нет live sync: второе устройство видит данные после своего login/reload.
 - Подтверждения email нет.
 - Смена пароля из уже открытого профиля нет: только сценарий «забыл пароль».
 - Нет Car Mode.
 - VK и Zaycev не подключены.
 - Cross-provider fallback есть только если MediaIndex уже склеил копии. Отдельного UX подписки нет.
-- Автотесты backend: `npm test` запускает auth (22) и server persistence.
+- `npm test`: 22 auth, 15 server persistence, 6 frontend persistence. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.
