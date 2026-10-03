@@ -14,6 +14,7 @@
 - MVP-03A (каталог вместо категории, совместимое хранение) зафиксирован коммитом `feat: introduce universal music catalogs`
 - MVP-03B (список, создание, открытие, переименование, удаление каталога и снятие трека) зафиксирован коммитом `feat: add universal catalog management UI`. Playback каталога не входит в MVP-03
 - MVP-04A (канонический трек и копии источников, без склейки UI) зафиксирован коммитом `feat: add canonical track identity layer`
+- MVP-04B1 (состояние композиции и canonical-членство каталога) зафиксирован коммитом `feat: add canonical library persistence`
 - Локальный clone поверхностный (`grafted`)
 
 ## Стек
@@ -94,7 +95,7 @@ UI
 | Handle и снимок local-folder | IndexedDB |
 | Кэш плагинов | IndexedDB |
 | Каталоги, лайки, назначения, история, `gestureConfig`, Collection Engine | сервер SQLite после входа. `GET /api/me/library-state` — источник истины. В JSON каталоги по-прежнему в поле `categories`. До гидратации экран сортировки скрыт |
-| Серверная библиотека пользователя | SQLite: `user_categories`, `user_collection_tracks`, `user_category_tracks`, `user_history`, `user_settings`, `user_canonical_tracks`, `user_track_source_copies`. Владелец берётся из сессии, не из URL |
+| Серверная библиотека пользователя | SQLite: `user_categories`, `user_collection_tracks`, `user_category_tracks`, `user_history`, `user_settings`, `user_canonical_tracks`, `user_track_source_copies`, `user_canonical_library_tracks`, `user_catalog_canonical_tracks`. Владелец берётся из сессии, не из URL |
 | Недавний поиск | только память вкладки |
 | Аккаунт Swipe Music | SQLite `.data/swipemusic.sqlite`: `users`, `sessions`, `password_reset_tokens` |
 | Сессия аккаунта | HttpOnly cookie `sm_session`. В БД хранится только SHA-256 токена. В localStorage токена нет |
@@ -107,10 +108,11 @@ UI
 - Пользовательский контейнер — каталог Swipe Music, не плейлист провайдера. В коде это тот же тип, что раньше назывался Category. Таблицы `user_categories` / `user_category_tracks` и маршруты `/api/me/categories` не переименовывались: старые строки читаются как каталоги, id сохраняются.
 - Экран `/library` показывает «Мои каталоги». Карточка каталога: `/library/catalogs/:catalogId`. Можно создать, открыть, переименовать, удалить свой каталог и убрать трек из него. Удаление каталога не удаляет трек из коллекции. Системный каталог удалить нельзя.
 - Один трек может быть в нескольких каталогах. Один каталог может содержать треки разных `sourceId`.
-- Идентификатор трека в UI, каталоге, истории и коллекции по-прежнему `${sourceId}:${externalId}`. Это ключ Source Copy, не id канонического трека.
-- Канонический трек — отдельная сущность пользователя: `user_canonical_tracks` и `user_track_source_copies`. Он не принадлежит провайдеру и не хранит playback URL. Одна композиция может иметь несколько копий. Автоматически библиотека не склеивается. Каталог по-прежнему ссылается на source track.
-- Воспроизведение каталога, очередь и shuffle каталога не входят в MVP-03 и остаются отдельным этапом roadmap. Playback fallback между копиями не делается.
-- `MediaIndex` уже хранит локальные `copies[]` и ключ ISRC / MusicBrainz / hash / title+artist+duration. Это индекс устройства, не серверный Canonical Track. Серверный matcher его не вызывает.
+- Source Copy — идентичность провайдера: `${sourceId}:${externalId}`. UI, история и старая коллекция по-прежнему используют этот ключ.
+- Canonical Track — идентичность композиции Swipe Music, `can_<uuid>` пользователя. Он не принадлежит провайдеру и не хранит playback URL.
+- `user_collection_tracks` хранит снимок source track и старый ключ. `user_canonical_library_tracks` хранит состояние композиции: like, addedAt, прослушивания, заметки. `user_catalog_canonical_tracks` — членство каталога. Старая `user_category_tracks` остаётся для совместимости и больше не является новым источником истины.
+- Экран библиотеки, каталогов, свайпа и поиска пока показывает source tracks. Склейка поиска и playback fallback не сделаны.
+- `MediaIndex` — дедупликация индекса устройства. Canonical identity — серверное состояние вошедшего пользователя. Matcher их не связывает и библиотеку сам не склеивает.
 - Пользовательская организация переживает reload, logout/login и перезапуск backend. Id трека по-прежнему `${sourceId}:${externalId}`.
 
 ## Ограничения
@@ -122,4 +124,4 @@ UI
 - Нет Car Mode.
 - VK и Zaycev не подключены.
 - Cross-provider fallback есть только если MediaIndex уже склеил копии. Отдельного UX подписки нет.
-- `npm test`: 22 auth, 16 server persistence, 5 matcher, 4 canonical identity, 8 frontend persistence, 3 catalog UI/domain. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.
+- `npm test`: 22 auth, 16 server persistence, 5 matcher, 4 canonical identity, 15 canonical library, 8 frontend persistence, 3 catalog UI/domain. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.

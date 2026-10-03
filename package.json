@@ -8,7 +8,7 @@
     "dev:auth": "node --experimental-strip-types server/index.ts",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node --experimental-strip-types --test server/auth.test.ts server/library.test.ts server/library/identity/match.test.ts server/library/identity.test.ts src/services/libraryPersistence/libraryPersistence.test.ts src/services/catalogs/selectCatalogs.test.ts",
+    "test": "node --experimental-strip-types --test server/auth.test.ts server/library.test.ts server/library/identity/match.test.ts server/library/identity.test.ts server/library/canonical/library.test.ts src/services/libraryPersistence/libraryPersistence.test.ts src/services/catalogs/selectCatalogs.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

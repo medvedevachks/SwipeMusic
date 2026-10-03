@@ -2,6 +2,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import type { AppConfig } from '../config/env.ts'
 import { createLibraryRepository, type LibraryResult } from '../library/repository.ts'
+import { createCanonicalLibraryRepository } from '../library/canonical/repository.ts'
+import { validateLikedPatch } from '../library/canonical/validation.ts'
 import { createIdentityRepository } from '../library/identity/repository.ts'
 import {
   validateLinkBody,
@@ -50,6 +52,7 @@ export async function handleLibraryRequest(
 
   const library = createLibraryRepository(context.db)
   const identity = createIdentityRepository(context.db)
+  const canonicalLibrary = createCanonicalLibraryRepository(context.db)
   const limit = parseHistoryLimit(url.searchParams.get('limit'))
 
   if (method === 'GET' && path === '/api/me/library-state') {
@@ -57,6 +60,7 @@ export async function handleLibraryRequest(
       sendJson(res, 400, { error: 'VALIDATION', fields: limit.fields })
       return
     }
+    canonicalLibrary.migrate(userId)
     sendJson(res, 200, library.libraryState(userId, limit.value))
     return
   }
@@ -301,6 +305,60 @@ export async function handleLibraryRequest(
       return
     }
     sendJson(res, 200, detached.value)
+    return
+  }
+
+  if (method === 'GET' && path === '/api/me/canonical-library') {
+    sendJson(res, 200, { items: canonicalLibrary.list(userId) })
+    return
+  }
+
+  const canonicalStateMatch = path.match(/^\/api\/me\/canonical-library\/([^/]+)$/)
+  if (canonicalStateMatch && method === 'PATCH') {
+    const canonicalId = safeDecode(canonicalStateMatch[1])
+    if (!isClientId(canonicalId)) {
+      sendJson(res, 404, { error: 'NOT_FOUND' })
+      return
+    }
+    const body = await readBody(req, res)
+    if (body === undefined) return
+    const parsed = validateLikedPatch(body)
+    if (!parsed.ok) {
+      sendJson(res, 400, { error: 'VALIDATION', fields: parsed.fields })
+      return
+    }
+    const updated = canonicalLibrary.patchLiked(userId, canonicalId, parsed.value.liked)
+    if (!updated.ok) {
+      sendFailure(res, updated)
+      return
+    }
+    sendJson(res, 200, { item: updated.value })
+    return
+  }
+
+  const canonicalCatalogMatch = path.match(/^\/api\/me\/catalogs\/([^/]+)\/tracks\/([^/]+)$/)
+  if (canonicalCatalogMatch && (method === 'PUT' || method === 'DELETE')) {
+    const catalogId = safeDecode(canonicalCatalogMatch[1])
+    const canonicalId = safeDecode(canonicalCatalogMatch[2])
+    if (!isClientId(catalogId) || !isClientId(canonicalId)) {
+      sendJson(res, 404, { error: 'NOT_FOUND' })
+      return
+    }
+    if (method === 'PUT') {
+      const assigned = canonicalLibrary.assign(userId, catalogId, canonicalId)
+      if (!assigned.ok) {
+        sendFailure(res, assigned)
+        return
+      }
+      sendJson(res, 200, { membership: assigned.value })
+      return
+    }
+    const removed = canonicalLibrary.unassign(userId, catalogId, canonicalId)
+    if (!removed.ok) {
+      sendFailure(res, removed)
+      return
+    }
+    sendJson(res, 200, removed.value)
     return
   }
 

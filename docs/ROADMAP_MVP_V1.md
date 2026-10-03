@@ -8,7 +8,7 @@
 | 1. User Account | DONE | Регистрация, вход, HttpOnly-сессия, выход, восстановление пароля. |
 | 2. Server Persistence | DONE | MVP-02A и MVP-02B: после входа frontend читает и пишет категории, коллекцию, лайки, назначения, историю и `gestureConfig` через `/api/me/*`. SQLite переживает reload, logout/login и перезапуск backend. |
 | 3. Universal Catalogs | DONE | MVP-03A и MVP-03B: каталог — контейнер пользователя, не плейлист провайдера. На `/library` есть список, создание, карточка, переименование, удаление и снятие трека. Playback каталога в MVP-03 не входит. |
-| 4. Canonical Track + Source Copies | PARTIAL | MVP-04A: у пользователя есть Canonical Track и Source Copy. Старый `${sourceId}:${externalId}` сохранён. Каталог всё ещё ссылается на source track. UI-склейки и playback fallback нет (MVP-04B). |
+| 4. Canonical Track + Source Copies | PARTIAL | MVP-04A и MVP-04B1: композиция и членство каталога хранятся на canonical id. Старый source key, история и экраны остаются. UI-проекция, склейка поиска и playback fallback ещё нет. |
 | 5. Playback Availability | PARTIAL | `PlaybackResolver` собирает кандидатов, смотрит `available`, priority и `requiresPremium`. Отдельного продуктового чеклиста доступа нет. |
 | 6. Alternative Source / Subscription UX | PARTIAL | Есть текст ошибки и fallback на preview внутри одного Provider. Нет сценария «подключите сервис / оформите доступ». |
 | 7. Yandex stabilization | PARTIAL | Device Flow, поиск, чтение лайков и плейлистов, кандидаты стрима есть в коде. Live не подтверждался. Refresh token не используется. Ручного user token нет. |
@@ -39,7 +39,9 @@ MVP-03A Catalog domain + compatibility = DONE
 MVP-03B Catalog UI = DONE
 MVP-04 Canonical Track + Source Copies = PARTIAL
 MVP-04A Domain model + persistence foundation = DONE
-MVP-04B UI and catalog identity = TODO
+MVP-04B Canonical library, catalogs and UI = PARTIAL
+MVP-04B1 Canonical library and catalog persistence = DONE
+MVP-04B2 Frontend canonical projection = TODO
 ```
 
-Следующий этап: MVP-04B. Playback fallback и склейка поиска в 04A не входят.
+Следующий этап: MVP-04B2. Склейка поиска и playback fallback в него не входят.

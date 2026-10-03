@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
 import { isUniqueConstraintError } from '../../auth/users.ts'
+import { createCanonicalLibraryRepository } from '../canonical/repository.ts'
 import type { LibraryResult } from '../repository.ts'
 import type {
   CanonicalTrackDto,
@@ -92,6 +93,7 @@ function withTransaction<T>(db: DatabaseSync, run: () => T): T {
 }
 
 export function createIdentityRepository(db: DatabaseSync) {
+  const canonicalLibrary = createCanonicalLibraryRepository(db)
   const copyByKey = db.prepare(`
     SELECT source_track_key, canonical_track_id, source_id, external_id,
            title, artist, album, duration_ms, artwork_url, created_at, updated_at
@@ -260,6 +262,7 @@ export function createIdentityRepository(db: DatabaseSync) {
       if (!left || !right) {
         return failure(404, 'NOT_FOUND')
       }
+      canonicalLibrary.migrate(userId)
       if (left.canonical_track_id === right.canonical_track_id) {
         const same = readIdentity(userId, left.canonical_track_id)
         return same ? { ok: true, value: same } : failure(404, 'NOT_FOUND')
@@ -269,6 +272,7 @@ export function createIdentityRepository(db: DatabaseSync) {
       const targetId = left.canonical_track_id
       const sourceId = right.canonical_track_id
       withTransaction(db, () => {
+        canonicalLibrary.absorbCanonical(userId, targetId, sourceId, now)
         moveCopies.run(targetId, now, userId, sourceId)
         touchCanonical.run(now, userId, targetId)
         deleteCanonical.run(userId, sourceId)
@@ -288,6 +292,7 @@ export function createIdentityRepository(db: DatabaseSync) {
       if (!copy) {
         return failure(404, 'NOT_FOUND')
       }
+      canonicalLibrary.migrate(userId)
       const siblings = copiesByCanonical.all(userId, copy.canonical_track_id) as CopyRow[]
       if (siblings.length <= 1) {
         const alone = readIdentity(userId, copy.canonical_track_id)
@@ -309,6 +314,7 @@ export function createIdentityRepository(db: DatabaseSync) {
           now,
         )
         retargetCopy.run(canonicalId, now, userId, key)
+        canonicalLibrary.attachNeutralState(userId, canonicalId, now)
       })
       const detached = readIdentity(userId, canonicalId)
       if (!detached) {

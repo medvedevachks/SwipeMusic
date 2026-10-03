@@ -74,10 +74,12 @@ MVP-03A — DONE, commit `feat: introduce universal music catalogs`
 MVP-03B — DONE, commit `feat: add universal catalog management UI`
 MVP-04 — PARTIAL
 MVP-04A — DONE, commit `feat: add canonical track identity layer`
-MVP-04B — TODO
+MVP-04B — PARTIAL
+MVP-04B1 — DONE, commit `feat: add canonical library persistence`
+MVP-04B2 — TODO
 ```
 
-Следующий этап: MVP-04B, переход UI и каталогов на канонический трек. Playback fallback не входит в 04A.
+Следующий этап: MVP-04B2, переход экранов библиотеки, каталогов и свайпа на Canonical Track. Поиск и playback в этот переход не входят.
 
 ## MVP-01B — Password recovery
 
@@ -157,3 +159,13 @@ MVP-04B — TODO
 - Первая встреча source track создаёт один canonical и одну копию. Автосклейки библиотеки нет.
 - Связать копии можно через `POST /api/me/tracks/link`. Операция транзакционная, идемпотентная и только внутри пользователя. `unlink` отделяет копию на новый canonical.
 - Matcher отвечает `MATCH` / `NO_MATCH` / `AMBIGUOUS` и сам записи не объединяет. UI, поиск, провайдеры и playback не менялись.
+
+## MVP-04B1 — Canonical library and catalog persistence
+
+Сделано на ветке `feature/mvp-04-canonical-track` от `33372dd`. Commit: `feat: add canonical library persistence`.
+
+- Состояние композиции лежит в `user_canonical_library_tracks`. Членство каталога — в `user_catalog_canonical_tracks`. Снимок источника остаётся в `user_collection_tracks` с ключом `${sourceId}:${externalId}`.
+- Перенос старого аккаунта идёт без fuzzy matching. Уже связанные копии получают одно состояние и один набор каталогов. Повторный запуск не дублирует строки. Маркер `canonical-library-v1` пишется только после успешной транзакции.
+- `link` переносит состояние и объединяет каталоги. `liked` побеждает `disliked`. Заметки и конфликтующие metadata не выбрасываются. `unlink` оставляет каталоги у исходной композиции, а отделённая копия получает пустое состояние.
+- Удаление каталога снимает canonical membership и не удаляет композицию. Удаление source snapshot не удаляет Canonical Track и остальные копии.
+- История по-прежнему хранит source track. `GET /api/me/library-state` сохраняет прежние поля. Экраны не переключены. Поиск не склеивается. Playback fallback нет.
