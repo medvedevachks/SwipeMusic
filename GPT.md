@@ -5,17 +5,18 @@
 ## Git
 
 - Репозиторий: https://github.com/r-sh-galimov/SwipeMusic
-- Ветка разработки: `feature/mvp-01-user-account`
+- Ветка разработки: `feature/mvp-02-server-persistence`
+- Baseline ветки: `1aa61c9` (`feat: add password recovery flow`) на `feature/mvp-01-user-account`
 - Опубликованный `origin/main`: `475fd34`
-- Локальный commit аккаунта: `f4995d3` (`feat: add user account and session foundation`)
-- MVP-01B (восстановление пароля) есть в рабочем дереве и ещё не закоммичен
+- Локальный commit аккаунта: `f4995d3`. Восстановление пароля: `1aa61c9`
+- MVP-02A (серверное хранение библиотеки) зафиксирован коммитом `feat: add server persistence API`
 - Локальный clone поверхностный (`grafted`)
 
 ## Стек
 
 React 19, TypeScript, Vite 8, Tailwind 4, Zustand, React Router 7, `vite-plugin-pwa`. Скрипты: `dev`, `dev:auth`, `build`, `lint`, `test`, `preview`.
 
-Account backend: Node.js, `node:sqlite`, HTTP API только для `/api/auth/*`. На Node 22.19 модуль `node:sqlite` работает без флага и помечен runtime как experimental (stability 1.1).
+Account backend: Node.js, `node:sqlite`, HTTP API `/api/auth/*` и `/api/me/*`. На Node 22+ модуль `node:sqlite` работает без флага и помечен runtime как experimental (stability 1.1).
 
 ## Экраны
 
@@ -88,13 +89,14 @@ UI
 | MediaIndex | IndexedDB |
 | Handle и снимок local-folder | IndexedDB |
 | Кэш плагинов | IndexedDB |
-| Категории, лайки, история, CollectionEngine | только память вкладки |
+| Категории, лайки, история, CollectionEngine во frontend | только память вкладки. На сервер ещё не переключены |
+| Серверная библиотека пользователя | SQLite: `user_categories`, `user_collection_tracks`, `user_category_tracks`, `user_history`, `user_settings`. Владелец берётся из сессии, не из URL |
 | Недавний поиск | только память вкладки |
 | Аккаунт Swipe Music | SQLite `.data/swipemusic.sqlite`: `users`, `sessions`, `password_reset_tokens` |
 | Сессия аккаунта | HttpOnly cookie `sm_session`. В БД хранится только SHA-256 токена. В localStorage токена нет |
 | Reset token | Только SHA-256 в БД, 30 минут, одноразовый. Ссылка живёт в письме, не в браузерном хранилище |
 
-`users.id` — UUID. Пароль хранится как `scrypt$v1$...`. После сброса пароля удаляются все сессии пользователя. Каталоги по-прежнему не на сервере. Лимит запросов восстановления держится в памяти процесса и сбрасывается после перезапуска сервера.
+`users.id` — UUID. Пароль хранится как `scrypt$v1$...`. После сброса пароля удаляются все сессии пользователя, библиотека остаётся. Серверные timestamp — ISO 8601 UTC. Foreign keys включены (`PRAGMA foreign_keys = ON`), пользовательские строки ссылаются на `users.id` с `ON DELETE CASCADE`. API удаления аккаунта нет. Лимит запросов восстановления держится в памяти процесса и сбрасывается после перезапуска сервера.
 
 ## Каталог и трек
 
@@ -105,10 +107,10 @@ UI
 
 ## Ограничения
 
-- Каталоги, лайки и история ещё не привязаны к аккаунту и не синхронизируются между устройствами. Это MVP-02.
+- Сервер уже хранит категории, коллекцию, назначения, историю свайпов и раскладку жестов по сессии (`/api/me/*`). Frontend stores по-прежнему в памяти вкладки: подключение — MVP-02B. Между устройствами это ещё не синхронизируется.
 - Подтверждения email нет.
 - Смена пароля из уже открытого профиля нет: только сценарий «забыл пароль».
 - Нет Car Mode.
 - VK и Zaycev не подключены.
 - Cross-provider fallback есть только если MediaIndex уже склеил копии. Отдельного UX подписки нет.
-- Автотесты есть у auth backend (`npm test`), включая восстановление пароля.
+- Автотесты backend: `npm test` запускает auth (22) и server persistence.

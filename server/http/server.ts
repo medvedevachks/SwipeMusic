@@ -4,6 +4,7 @@ import type { ForgotPasswordLimiter } from '../auth/rateLimit.ts'
 import type { AppConfig } from '../config/env.ts'
 import type { MailSender } from '../mail/MailSender.ts'
 import { handleAuthRequest } from './authRoutes.ts'
+import { handleLibraryRequest } from './libraryRoutes.ts'
 
 export type AuthServerOptions = {
   db: DatabaseSync
@@ -14,7 +15,12 @@ export type AuthServerOptions = {
 
 export function createAuthServer(options: AuthServerOptions): Server {
   return createServer((req, res) => {
-    void handleAuthRequest(req, res, options).catch((error: unknown) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+    const handler = url.pathname.startsWith('/api/me')
+      ? handleLibraryRequest(req, res, options)
+      : handleAuthRequest(req, res, options)
+
+    void handler.catch((error: unknown) => {
       if (res.headersSent) {
         res.end()
         return

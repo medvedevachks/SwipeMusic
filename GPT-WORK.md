@@ -65,10 +65,13 @@
 ```text
 MVP-01 — User Account = DONE
 MVP-01A — DONE, commit f4995d3
-MVP-01B — DONE в рабочем дереве, не закоммичен
+MVP-01B — DONE, commit 1aa61c9
+MVP-02 — PARTIAL
+MVP-02A — DONE, commit `feat: add server persistence API`
+MVP-02B — TODO
 ```
 
-Следующий этап: MVP-02 Server Persistence. Не начат.
+Следующий этап: MVP-02B. Frontend Collection/Category/History ещё не пишет на сервер.
 
 ## MVP-01B — Password recovery
 
@@ -78,7 +81,7 @@ MVP-01B — DONE в рабочем дереве, не закоммичен
 - Письма идут через `MailSender`. Development: `MAIL_TRANSPORT=console`. Production требует SMTP и не принимает console transport.
 - Лимит запросов: IP + email, в памяти процесса, сбрасывается после перезапуска сервера.
 - Экраны `/forgot-password` и `/reset-password`. На входе есть «Забыли пароль?».
-- `npm test`: прежние 9 тестов и новые тесты восстановления проходят.
+- `npm test`: прежние 9 тестов и новые тесты восстановления проходят. Позже весь набор — 22 auth-теста, commit `1aa61c9`.
 
 ## MVP-01A — Account backend + sessions
 
@@ -90,3 +93,17 @@ MVP-01B — DONE в рабочем дереве, не закоммичен
 - База `.data/swipemusic.sqlite` в `.gitignore`.
 - Frontend: `/login`, `/register`, блок на профиле, защита маршрутов, восстановление сессии после reload.
 - Плееры, свайп, поиск, источники и MediaIndex не переписывались.
+
+## MVP-02A — Server data model + authenticated API
+
+Сделано на ветке `feature/mvp-02-server-persistence` от `1aa61c9`. Commit: `feat: add server persistence API`.
+
+- Та же SQLite `.data/swipemusic.sqlite`. Новые таблицы: `user_categories`, `user_collection_tracks`, `user_category_tracks`, `user_history`, `user_settings`.
+- Владелец только из cookie-сессии. Маршрутов с `userId` в URL нет.
+- Лайк — поля `liked` / `likedAt` на строке коллекции, не отдельная таблица.
+- Назначение категории — отдельная связь, idempotent. Удаление категории снимает назначения и не удаляет трек. Системную категорию API не удаляет.
+- История — append `HistoryEntry` / `SwipeAction`, снимок трека внутри записи. Лимит 1–200, по умолчанию 100.
+- Настройки — только `gestureConfig`. Токены провайдеров и playback URL не принимаются.
+- `GET /api/me/library-state` отдаёт categories, tracks, categoryAssignments, history, settings.
+- Frontend stores не переключались. Logout и сброс пароля библиотеку не стирают.
+- `npm test`: 22 auth + 15 persistence, все проходят.

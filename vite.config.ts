@@ -88,7 +88,8 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: ({ url }: { url: URL }) =>
-              url.pathname.startsWith('/api/auth/'),
+              url.pathname.startsWith('/api/auth/') ||
+              url.pathname.startsWith('/api/me/'),
             handler: 'NetworkOnly',
           },
         ],
@@ -104,6 +105,10 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api/auth': {
+        target: 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
+      '/api/me': {
         target: 'http://127.0.0.1:8787',
         changeOrigin: true,
       },
