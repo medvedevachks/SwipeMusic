@@ -5,8 +5,8 @@
 ## Git
 
 - Репозиторий: https://github.com/r-sh-galimov/SwipeMusic
-- Ветка разработки: `feature/mvp-05-playback-availability`
-- Baseline ветки: `c7e9f4e` (`feat: add universal catalog management UI`) на `feature/mvp-03-universal-catalogs`
+- Ветка разработки: `feature/mvp-06-runtime-fallback`
+- Baseline ветки: `335fdfd` (`feat: add playable source selection`) на `feature/mvp-05-playback-availability`
 - Опубликованный `origin/main`: `475fd34`
 - Локальный commit аккаунта: `f4995d3`. Восстановление пароля: `1aa61c9`
 - MVP-02A (серверное хранение библиотеки) зафиксирован коммитом `feat: add server persistence API`
@@ -18,6 +18,7 @@
 - MVP-04B2 (frontend-организация через CanonicalTrack) зафиксирован коммитом `feat: use canonical tracks for user organization`
 - MVP-05A (модель availability и resolver, без fallback) зафиксирован коммитом `feat: add playback availability layer`
 - MVP-05B (одна PLAYABLE SourceCopy до playback, без runtime fallback) зафиксирован коммитом `feat: add playable source selection`
+- MVP-06A (generic runtime fallback и discovery contract, без UX и без discovery-интеграций) зафиксирован коммитом `feat: add runtime playback fallback`
 - Локальный clone поверхностный (`grafted`)
 
 ## Стек
@@ -118,6 +119,13 @@ UI
 - Склейка поиска, дедуп ленты свайпа, playback fallback и playback каталога не сделаны. У строки «Моя музыка» нет Play.
 - Playback availability — отдельное runtime-состояние SourceCopy, не часть canonical identity и не SQLite. `PLAYABLE` доказывается проверкой. `UNKNOWN` значит, что доказательств ещё нет, и не считается playable. Подключение аккаунта не доказывает доступность конкретного трека. Availability resolver не выбирает источник и не запускает плеер.
 - `selectPlayableSourceCopy` выбирает только `PLAYABLE` до playback. Явный source Track сохраняется, если эта copy уже `PLAYABLE`. Без предпочтения tie-break — стабильный `sourceTrackKey`, не приоритет провайдера. Если preferred copy уже не `PLAYABLE`, другая `PLAYABLE` copy может быть выбрана только до старта. Это не retry после ошибки плеера. `prepareCanonicalPlayback` возвращает существующий source Track из снимка коллекции и не вызывает AudioPlayer. Нет снимка — `TRACK_SNAPSHOT_MISSING`, URL не выдумывается. Playback URL в canonical state не пишется.
+- Runtime fallback — отдельный слой над существующим `PlaybackIntent` → `AudioPlayer.playTrack`. Второго плеера нет. Движок не знает имён провайдеров: он видит известные `SourceCopy`, их availability и одну попытку на `sourceTrackKey`. Зарегистрированный адаптер без `SourceCopy` этой композиции не становится альтернативой. Подписка имеет смысл только для известной copy со статусом `SUBSCRIPTION_REQUIRED`. Connect/auth — только для известной copy со статусом `NOT_CONNECTED` или `AUTH_REQUIRED`.
+- Политики: `OFF` — одна попытка, `ASK` — после ошибки следующая copy не стартует и возвращается `CONFIRMATION_REQUIRED`, `AUTO` — следующая `PLAYABLE` copy стартует сама. Для canonical fallback по умолчанию `AUTO`. Car Mode позже использует тот же `AUTO`, отдельного car playback engine нет.
+- Discovery — optional contract `AlternateSourceDiscoveryProvider`. Результат: `FOUND`, `NOT_FOUND`, `AMBIGUOUS`, `UNSUPPORTED`, `ERROR`. `AMBIGUOUS` и неподтверждённый кандидат `SourceCopy` не создают. Production-реестр пуст, автоматический discovery в playback не запускается. Реальных discovery для Yandex, Spotify, Local, VK, Zaycev и Custom нет.
+- Поиск, свайп, библиотека, альбом, очередь и `BottomPlayer` сходятся в `AudioPlayer.playTrack`. Если у source Track нет canonical mapping или известна только одна копия, играет прежний путь. Если известных копий две или больше, `routeLivePlayback` запускает generic orchestrator. Каждая попытка — обычный source Track через `PlaybackResolver` и `AudioPlayer`, очередь при смене копии не двигается. Next, Previous, Stop и logout отменяют активную сессию. Pause fallback не запускает.
+- Ошибка старта playback возвращается в orchestrator. Событие `error` адаптера после успешного старта, когда нет pending switch, тоже передаётся в сессию. Отдельного polling нет.
+- UX смены источника, подтверждение ASK, подписка и подключение провайдера не сделаны. Это MVP-06B.
+- Склейка поиска, дедуп ленты свайпа и playback каталога не сделаны. У строки «Моя музыка» нет Play.
 - `MediaIndex` — дедупликация индекса устройства. Canonical identity — серверное состояние вошедшего пользователя. Matcher их не связывает и библиотеку сам не склеивает.
 - Пользовательская организация переживает reload, logout/login и перезапуск backend. Source Track id по-прежнему `${sourceId}:${externalId}`. Организация адресуется canonical id.
 
@@ -127,7 +135,7 @@ UI
 - Между устройствами нет live sync: второе устройство видит данные после своего login/reload.
 - Подтверждения email нет.
 - Смена пароля из уже открытого профиля нет: только сценарий «забыл пароль».
-- Нет Car Mode.
-- VK и Zaycev не подключены.
-- Cross-provider fallback есть только если MediaIndex уже склеил копии. Отдельного UX подписки нет.
-- `npm test`: 118 тестов. 22 auth, 16 server persistence, 5 matcher, 4 canonical identity, 15 canonical library, 8 frontend persistence, 3 catalog UI/domain, 14 frontend canonical organization, 16 playback availability, 15 playable source selection. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.
+- Нет экрана Car Mode. Позже он должен использовать `RuntimeFallbackPolicy.AUTO` того же engine.
+- VK и Zaycev не подключены. В fallback они не реализуются и остаются `UNSUPPORTED`, пока нет известной playable copy.
+- Cross-provider fallback engine умеет переключать только известные `PLAYABLE` SourceCopy одной композиции. UX подписки и подключения провайдера не сделан.
+- `npm test`: 145 тестов. 22 auth, 16 server persistence, 5 matcher, 4 canonical identity, 15 canonical library, 8 frontend persistence, 3 catalog UI/domain, 14 frontend canonical organization, 16 playback availability, 15 playable source selection, 16 runtime fallback, 11 live playback integration. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.

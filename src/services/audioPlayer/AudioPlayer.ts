@@ -8,6 +8,12 @@ import type { Track } from '../../types/track'
 import { getPlaybackResolver } from '../playbackResolver'
 import type { PlaybackCandidate } from '../playbackResolver'
 import { getPlaybackQueue } from '../playbackQueue'
+import {
+  beginQueueTransport,
+  cancelActiveFallback,
+  emitPlaybackMediaError,
+} from '../runtimeFallback/fallbackControl.ts'
+import { routeLivePlayback } from '../runtimeFallback/livePlayback.ts'
 import type { PlayerAdapter } from './PlayerAdapter'
 import { getPlayerManager } from './PlayerManager'
 
@@ -93,20 +99,22 @@ export class AudioPlayer {
       }
 
       switch (event.type) {
-        case 'error':
+        case 'error': {
+          const blocked = isAutoplayBlockedError(new Error(event.error ?? 'Playback error'))
+          const message = blocked ? null : (event.error ?? 'Playback error')
           this.patchState({
             ...timePatch,
             playing: false,
             paused: true,
             buffering: false,
             loading: false,
-            error: isAutoplayBlockedError(
-              new Error(event.error ?? 'Playback error'),
-            )
-              ? null
-              : (event.error ?? 'Playback error'),
+            error: message,
           })
+          if (!blocked && !this.state.pendingTrack && message) {
+            emitPlaybackMediaError(this.state.currentTime)
+          }
           return
+        }
         case 'ended':
           if (this.state.pendingTrack) {
             return
@@ -248,16 +256,34 @@ export class AudioPlayer {
     }
   }
 
-  async playTrack(track: Track): Promise<void> {
-    const generation = ++this.playGeneration
+  async playTrack(track: Track, options?: { preserveQueue?: boolean }): Promise<void> {
+    if (!options?.preserveQueue) {
+      cancelActiveFallback('manual-play')
+      this.adoptRequestedTrack(track)
+      const route = await routeLivePlayback(track, (requested) => this.playResolved(requested))
+      if (route.handled) {
+        return
+      }
+    }
+    await this.playResolved(track)
+  }
+
+  /**
+   * Индекс очереди ставится на запрошенный source Track один раз.
+   * Смена SourceCopy внутри fallback сюда не возвращается.
+   */
+  private adoptRequestedTrack(track: Track): void {
     const queue = getPlaybackQueue()
     if (!queue.getItems().some((item) => item.id === track.id)) {
-      // Одиночный трек вне текущей очереди — не наследуем чужой album/playlist context.
       queue.setQueue([track], 0, { type: 'none' })
     } else {
       queue.focusTrack(track.id)
     }
+  }
 
+  private async playResolved(track: Track): Promise<void> {
+    const generation = ++this.playGeneration
+    const queue = getPlaybackQueue()
     // Сразу глушим любой backend — A не должен продолжать звучать.
     // await: Spotify SDK pause асинхронный (через PlayerManager).
     await Promise.resolve(this.adapter.pause())
@@ -432,6 +458,7 @@ export class AudioPlayer {
   }
 
   stop(): void {
+    cancelActiveFallback('stop')
     this.playGeneration += 1
     this.adapter.stop()
     this.patchState({
@@ -460,8 +487,11 @@ export class AudioPlayer {
   }
 
   async next(): Promise<void> {
-    const track = getPlaybackQueue().next()
-    if (!track) {
+    const holder: { track: Track | null } = { track: null }
+    beginQueueTransport('next', () => {
+      holder.track = getPlaybackQueue().next()
+    })
+    if (!holder.track) {
       this.stop()
       this.patchState({
         currentTrack: null,
@@ -471,12 +501,15 @@ export class AudioPlayer {
       })
       return
     }
-    await this.playTrack(track)
+    await this.playTrack(holder.track)
   }
 
   async previous(): Promise<void> {
-    const { currentTime } = this.state
-    if (currentTime > 3 && !this.state.pendingTrack) {
+    let restart = false
+    beginQueueTransport('previous', () => {
+      restart = this.state.currentTime > 3 && !this.state.pendingTrack
+    })
+    if (restart) {
       this.seek(0)
       if (!this.state.playing) {
         await this.resume()

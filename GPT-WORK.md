@@ -80,9 +80,12 @@ MVP-04B2 — DONE, commit `feat: use canonical tracks for user organization`
 MVP-05 — DONE
 MVP-05A — DONE, commit `feat: add playback availability layer`
 MVP-05B — DONE, commit `feat: add playable source selection`
+MVP-06 — PARTIAL
+MVP-06A — DONE, commit `feat: add runtime playback fallback`
+MVP-06B — TODO
 ```
 
-Следующий этап: MVP-06 — Alternative Source / Subscription UX. Runtime fallback, приоритет провайдеров, Connect Provider и subscription UX в MVP-05 не входят.
+Следующий этап: MVP-06B — пользовательский UX поверх generic fallback engine. Connect Provider, покупка подписки и discovery-интеграции в MVP-06A не входят.
 
 ## MVP-01B — Password recovery
 
@@ -206,4 +209,21 @@ MVP-05B — DONE, commit `feat: add playable source selection`
 - Track для существующего PlaybackResolver берётся из снимка коллекции. SourceCopy полного Track и playback URL не хранит. Нет снимка — `TRACK_SNAPSHOT_MISSING`, URL не создаётся.
 - `prepareCanonicalPlayback` не вызывает AudioPlayer. Поиск, свайп, каталог и очередь не переписывались. У строки «Моя музыка» Play не добавлялся.
 - VK, Zaycev и Custom остаются заготовками. Auth и playback Yandex и Spotify не менялись.
+
+## MVP-06A — Generic runtime fallback
+
+Сделано на ветке `feature/mvp-06-runtime-fallback` от `335fdfd`, commit `feat: add runtime playback fallback`.
+
+- Fallback engine не содержит веток по именам провайдеров. Новый provider позже становится fallback-ready через регистрацию, SourceCopy, availability и существующий playback path. Discovery — необязательное расширение.
+- `buildCanonicalSourceInventory` отдаёт только известные SourceCopy этой композиции. Зарегистрированный адаптер без SourceCopy не создаёт копию и не попадает в группы подписки или подключения.
+- `AlternateSourceDiscoveryProvider` и пустой production-реестр заложены. Результат: `FOUND`, `NOT_FOUND`, `AMBIGUOUS`, `UNSUPPORTED`, `ERROR`. `AMBIGUOUS` и неподтверждённый кандидат SourceCopy не создают. Автоматический discovery в playback не вызывается. Реализаций для Yandex, Spotify, Local, VK, Zaycev и Custom нет.
+- `RuntimePlaybackFallbackOrchestrator` пытается только `PLAYABLE` копии того же `canonicalTrackId`. Порядок: preferred, если она `PLAYABLE`, затем остальные по `sourceTrackKey`. Каждый ключ — одна попытка. Сессия эфемерная, в SQLite не пишется.
+- Политики: `OFF`, `ASK`, `AUTO`. По умолчанию для canonical fallback — `AUTO`. `ASK` после ошибки возвращает `CONFIRMATION_REQUIRED` и не стартует следующую copy. Car Mode позже использует тот же `AUTO`.
+- Ошибка playback не записывается как вечный `UNAVAILABLE`. Pause, Next, Previous и новый ручной Play fallback не запускают: Next/Previous и новый Play отменяют сессию. Индекс очереди оркестратор не меняет.
+- Поздний результат старой попытки игнорируется через generation и `AbortController`. Перед следующей попыткой предыдущая останавливается. При ошибке позиция передаётся в следующую попытку, если порт умеет seek.
+- Исчерпанный результат группирует известные не-playable копии: subscription, not connected, auth, unavailable, unknown, unsupported. Это данные для UX, не сам UX.
+- Событие `PlaybackSourceChanged` с причиной `RUNTIME_FALLBACK` публикуется при переключении. Экраны поиска, свайпа, библиотеки и `BottomPlayer` сами fallback не содержат: они приходят в `AudioPlayer.playTrack`.
+- `routeLivePlayback` подключён к этому `playTrack`. Нет canonical mapping или меньше двух известных копий — остаётся прежний source playback. Иначе orchestrator ведёт попытки. Ошибка старта и media error уже начатого playback без pending switch попадают в сессию. Next/Previous сначала отменяют сессию, затем двигают очередь прежним механизмом. Stop и logout отменяют сессию. Pause не отменяет её и не считается ошибкой.
+- UX уведомления, ASK, подписки и подключения провайдера не сделан.
+- VK, Zaycev и Custom не реализованы. Auth, stream и discovery Yandex и Spotify не менялись.
 

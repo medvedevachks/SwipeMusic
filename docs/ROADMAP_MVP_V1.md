@@ -10,7 +10,7 @@
 | 3. Universal Catalogs | DONE | MVP-03A и MVP-03B: каталог — контейнер пользователя, не плейлист провайдера. На `/library` есть список, создание, карточка, переименование, удаление и снятие трека. Playback каталога в MVP-03 не входит. |
 | 4. Canonical Track + Source Copies | DONE | MVP-04A, MVP-04B1 и MVP-04B2: лайк и членство каталога на frontend идут через CanonicalTrack. Source Track остаётся идентичностью провайдера, поиска, свайп-ленты, истории и playback. Склейка поиска, дедуп ленты и playback fallback не входят в этот этап. |
 | 5. Playback Availability | DONE | MVP-05A и MVP-05B: availability доказывает PLAYABLE, selector выбирает одну SourceCopy до playback. Явный source сохраняется. Приоритета провайдеров и runtime fallback нет. |
-| 6. Alternative Source / Subscription UX | PARTIAL | Есть текст ошибки и fallback на preview внутри одного Provider. Нет сценария «подключите сервис / оформите доступ». |
+| 6. Alternative Source / Subscription UX | PARTIAL | MVP-06A: generic runtime fallback подключён к `AudioPlayer.playTrack`. UX подписки, подключения и подтверждения ASK ещё нет. |
 | 7. Yandex stabilization | PARTIAL | Device Flow, поиск, чтение лайков и плейлистов, кандидаты стрима есть в коде. Live не подтверждался. Refresh token не используется. Ручного user token нет. |
 | 8. Local Music stabilization | PARTIAL | Выбор папки, скан, IndexedDB handle, поиск и локальное воспроизведение реализованы. Отдельной стабилизации и QA нет. |
 | 9. Spotify verification | PARTIAL | OAuth PKCE, поиск, sync, preview и Web Playback SDK есть в коде. Нужен `VITE_SPOTIFY_CLIENT_ID`. В этой сессии аккаунт не проверялся. |
@@ -19,9 +19,9 @@
 | 12. Unified Library | PARTIAL | На `/library` есть секция «Моя музыка» по CanonicalTrack. Каталог провайдера и демо остаётся отдельным списком source tracks. Полной склейки всех копий в один каталог нет. |
 | 13. Unified Search | PARTIAL | `SearchEngine` мержит активные адаптеры в один UI `/search`. Неподключённые и пустые адаптеры результата не дают. |
 | 14. Catalog Playback Context | TODO | `PlaybackContext` не содержит `catalog`. Слово catalog в свайп-колоде означает режим демо-ленты, не пользовательский каталог. |
-| 15. Queue improvements | PARTIAL | Очередь, shuffle, repeat, persist и блокировка album/playlist есть. Контекста каталога и явного cross-provider fallback в очереди нет. |
+| 15. Queue improvements | PARTIAL | Очередь, shuffle, repeat, persist и блокировка album/playlist есть. Контекста каталога нет. Runtime fallback не двигает индекс очереди. |
 | 16. Cross-device sync | TODO | Клиент читает и пишет библиотеку при входе и reload. Живой синхронизации, conflict resolution и offline queue нет. |
-| 17. Car Mode | TODO | Есть иконка категории «В машину». Экрана Car Mode нет. |
+| 17. Car Mode | TODO | Есть иконка категории «В машину». Экрана Car Mode нет. Позже Car Mode использует `RuntimeFallbackPolicy.AUTO` того же engine. |
 | 18. PWA / resilience | PARTIAL | `vite-plugin-pwa`, service worker и IndexedDB-индекс есть. Офлайн-устойчивость всего MVP не проверена. |
 | 19. MVP QA | TODO | `npm test` покрывает auth, server persistence и frontend library bootstrap. Остальной UI без тестового фреймворка. |
 
@@ -45,6 +45,9 @@ MVP-04B2 Frontend canonical projection = DONE
 MVP-05 Playback Availability = DONE
 MVP-05A Availability model + resolver foundation = DONE
 MVP-05B Playable source selection before playback = DONE
+MVP-06 Alternative Source / Subscription UX = PARTIAL
+MVP-06A Generic runtime fallback + discovery-ready pipeline = DONE
+MVP-06B Alternative source / subscription UX = TODO
 ```
 
-Следующий этап: MVP-06 — Alternative Source / Subscription UX. В MVP-05 нет runtime fallback, приоритета провайдеров и сценария «подключите сервис / оформите доступ».
+Следующий этап: MVP-06B — уведомление о смене источника, подтверждение ASK и действия только для известной SourceCopy. Discovery VK/Zaycev и новые provider integrations не входят в MVP-06A.
