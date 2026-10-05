@@ -9,7 +9,7 @@
 | 2. Server Persistence | DONE | MVP-02A и MVP-02B: после входа frontend читает и пишет категории, коллекцию, лайки, назначения, историю и `gestureConfig` через `/api/me/*`. SQLite переживает reload, logout/login и перезапуск backend. |
 | 3. Universal Catalogs | DONE | MVP-03A и MVP-03B: каталог — контейнер пользователя, не плейлист провайдера. На `/library` есть список, создание, карточка, переименование, удаление и снятие трека. Playback каталога в MVP-03 не входит. |
 | 4. Canonical Track + Source Copies | DONE | MVP-04A, MVP-04B1 и MVP-04B2: лайк и членство каталога на frontend идут через CanonicalTrack. Source Track остаётся идентичностью провайдера, поиска, свайп-ленты, истории и playback. Склейка поиска, дедуп ленты и playback fallback не входят в этот этап. |
-| 5. Playback Availability | PARTIAL | MVP-05A: у SourceCopy есть runtime-статус PLAYABLE, NOT_CONNECTED, AUTH_REQUIRED, SUBSCRIPTION_REQUIRED, UNAVAILABLE, UNSUPPORTED или UNKNOWN. Resolver не выбирает источник и не запускает playback. Fallback и subscription UX ещё нет. |
+| 5. Playback Availability | DONE | MVP-05A и MVP-05B: availability доказывает PLAYABLE, selector выбирает одну SourceCopy до playback. Явный source сохраняется. Приоритета провайдеров и runtime fallback нет. |
 | 6. Alternative Source / Subscription UX | PARTIAL | Есть текст ошибки и fallback на preview внутри одного Provider. Нет сценария «подключите сервис / оформите доступ». |
 | 7. Yandex stabilization | PARTIAL | Device Flow, поиск, чтение лайков и плейлистов, кандидаты стрима есть в коде. Live не подтверждался. Refresh token не используется. Ручного user token нет. |
 | 8. Local Music stabilization | PARTIAL | Выбор папки, скан, IndexedDB handle, поиск и локальное воспроизведение реализованы. Отдельной стабилизации и QA нет. |
@@ -42,9 +42,9 @@ MVP-04A Domain model + persistence foundation = DONE
 MVP-04B Canonical library, catalogs and UI = DONE
 MVP-04B1 Canonical library and catalog persistence = DONE
 MVP-04B2 Frontend canonical projection = DONE
-MVP-05 Playback Availability = PARTIAL
+MVP-05 Playback Availability = DONE
 MVP-05A Availability model + resolver foundation = DONE
-MVP-05B Playable source selection before playback = TODO
+MVP-05B Playable source selection before playback = DONE
 ```
 
-Следующий этап: MVP-05B. Он только подставляет уже известную playable SourceCopy перед текущим playback. Subscription UX и provider fallback из MVP-06 в него не входят.
+Следующий этап: MVP-06 — Alternative Source / Subscription UX. В MVP-05 нет runtime fallback, приоритета провайдеров и сценария «подключите сервис / оформите доступ».

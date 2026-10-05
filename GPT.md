@@ -5,7 +5,7 @@
 ## Git
 
 - Репозиторий: https://github.com/r-sh-galimov/SwipeMusic
-- Ветка разработки: `feature/mvp-04-canonical-track`
+- Ветка разработки: `feature/mvp-05-playback-availability`
 - Baseline ветки: `c7e9f4e` (`feat: add universal catalog management UI`) на `feature/mvp-03-universal-catalogs`
 - Опубликованный `origin/main`: `475fd34`
 - Локальный commit аккаунта: `f4995d3`. Восстановление пароля: `1aa61c9`
@@ -17,6 +17,7 @@
 - MVP-04B1 (состояние композиции и canonical-членство каталога) зафиксирован коммитом `feat: add canonical library persistence`
 - MVP-04B2 (frontend-организация через CanonicalTrack) зафиксирован коммитом `feat: use canonical tracks for user organization`
 - MVP-05A (модель availability и resolver, без fallback) зафиксирован коммитом `feat: add playback availability layer`
+- MVP-05B (одна PLAYABLE SourceCopy до playback, без runtime fallback) зафиксирован коммитом `feat: add playable source selection`
 - Локальный clone поверхностный (`grafted`)
 
 ## Стек
@@ -115,7 +116,8 @@ UI
 - Canonical Track — идентичность пользовательской организации: один лайк и один набор каталогов на композицию. Id — `can_<uuid>` пользователя. Он не принадлежит провайдеру и не хранит playback URL.
 - `user_collection_tracks` хранит снимок source track и старый ключ. `user_canonical_library_tracks.liked` — источник истины лайка. `user_catalog_canonical_tracks` — членство каталога. Старая `user_category_tracks` остаётся для совместимости. Новые действия лайка и каталога её не пишут.
 - Склейка поиска, дедуп ленты свайпа, playback fallback и playback каталога не сделаны. У строки «Моя музыка» нет Play.
-- Playback availability — отдельное runtime-состояние SourceCopy, не часть canonical identity и не SQLite. `PLAYABLE` доказывается проверкой. `UNKNOWN` значит, что доказательств ещё нет, и не считается playable. Подключение аккаунта не доказывает доступность конкретного трека. Resolver не выбирает источник и не запускает плеер.
+- Playback availability — отдельное runtime-состояние SourceCopy, не часть canonical identity и не SQLite. `PLAYABLE` доказывается проверкой. `UNKNOWN` значит, что доказательств ещё нет, и не считается playable. Подключение аккаунта не доказывает доступность конкретного трека. Availability resolver не выбирает источник и не запускает плеер.
+- `selectPlayableSourceCopy` выбирает только `PLAYABLE` до playback. Явный source Track сохраняется, если эта copy уже `PLAYABLE`. Без предпочтения tie-break — стабильный `sourceTrackKey`, не приоритет провайдера. Если preferred copy уже не `PLAYABLE`, другая `PLAYABLE` copy может быть выбрана только до старта. Это не retry после ошибки плеера. `prepareCanonicalPlayback` возвращает существующий source Track из снимка коллекции и не вызывает AudioPlayer. Нет снимка — `TRACK_SNAPSHOT_MISSING`, URL не выдумывается. Playback URL в canonical state не пишется.
 - `MediaIndex` — дедупликация индекса устройства. Canonical identity — серверное состояние вошедшего пользователя. Matcher их не связывает и библиотеку сам не склеивает.
 - Пользовательская организация переживает reload, logout/login и перезапуск backend. Source Track id по-прежнему `${sourceId}:${externalId}`. Организация адресуется canonical id.
 
@@ -128,4 +130,4 @@ UI
 - Нет Car Mode.
 - VK и Zaycev не подключены.
 - Cross-provider fallback есть только если MediaIndex уже склеил копии. Отдельного UX подписки нет.
-- `npm test`: 103 теста. 22 auth, 16 server persistence, 5 matcher, 4 canonical identity, 15 canonical library, 8 frontend persistence, 3 catalog UI/domain, 14 frontend canonical organization, 16 playback availability. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.
+- `npm test`: 118 тестов. 22 auth, 16 server persistence, 5 matcher, 4 canonical identity, 15 canonical library, 8 frontend persistence, 3 catalog UI/domain, 14 frontend canonical organization, 16 playback availability, 15 playable source selection. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.

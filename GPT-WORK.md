@@ -77,12 +77,12 @@ MVP-04A — DONE, commit `feat: add canonical track identity layer`
 MVP-04B — DONE
 MVP-04B1 — DONE, commit `feat: add canonical library persistence`
 MVP-04B2 — DONE, commit `feat: use canonical tracks for user organization`
-MVP-05 — PARTIAL
+MVP-05 — DONE
 MVP-05A — DONE, commit `feat: add playback availability layer`
-MVP-05B — TODO
+MVP-05B — DONE, commit `feat: add playable source selection`
 ```
 
-Следующий этап: MVP-05B — подставить уже посчитанную playable SourceCopy перед существующим playback. Fallback, приоритет источников и subscription UX не входят в MVP-05B.
+Следующий этап: MVP-06 — Alternative Source / Subscription UX. Runtime fallback, приоритет провайдеров, Connect Provider и subscription UX в MVP-05 не входят.
 
 ## MVP-01B — Password recovery
 
@@ -194,4 +194,16 @@ MVP-05B — TODO
 - Local playable только при выданной папке и handle файла. Mock/demo с preview — `PLAYABLE`. VK, Zaycev и custom stub не помечаются playable.
 - Короткий session cache сбрасывается при `invalidatePlaybackAvailabilityBySource` и при logout. Availability store отделён от canonical identity store.
 - PlaybackResolver, очередь и плеер не менялись. Автовыбор источника, приоритет провайдеров и fallback не делались.
+
+## MVP-05B — Playable source selection
+
+Сделано на ветке `feature/mvp-05-playback-availability` от `9f09162`. Commit: `feat: add playable source selection`.
+
+- Availability по-прежнему только доказывает, что copy `PLAYABLE`. Selector выбирает одну такую copy до playback.
+- Явный Play source Track передаётся как `preferredSourceTrackKey`. Если эта copy `PLAYABLE`, она сохраняется. Продуктового приоритета провайдеров нет. Без предпочтения порядок — `sourceTrackKey` по возрастанию.
+- Если preferred copy уже не `PLAYABLE`, другая `PLAYABLE` copy выбирается до старта. Это `PRE_PLAY_ALTERNATIVE`, не runtime fallback. Ошибка playback не запускает вторую copy.
+- Нет `PLAYABLE` copy — `NO_PLAYABLE_COPY`. `UNKNOWN` и stub `UNSUPPORTED` не выбираются. OAuth и подписка не открываются.
+- Track для существующего PlaybackResolver берётся из снимка коллекции. SourceCopy полного Track и playback URL не хранит. Нет снимка — `TRACK_SNAPSHOT_MISSING`, URL не создаётся.
+- `prepareCanonicalPlayback` не вызывает AudioPlayer. Поиск, свайп, каталог и очередь не переписывались. У строки «Моя музыка» Play не добавлялся.
+- VK, Zaycev и Custom остаются заготовками. Auth и playback Yandex и Spotify не менялись.
 
