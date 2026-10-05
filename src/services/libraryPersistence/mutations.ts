@@ -39,6 +39,30 @@ export function handleLibraryFailure(error: unknown, kind: 'load' | 'save'): voi
   )
 }
 
+export async function runLibraryMutation<T>(task: () => Promise<T>): Promise<T | null> {
+  if (!isLibraryPersistenceArmed()) {
+    return null
+  }
+  pending += 1
+  if (useLibraryPersistenceStore.getState().status !== 'loading') {
+    useLibraryPersistenceStore.getState().setStatus('saving', null)
+  }
+  try {
+    if (!isLibraryPersistenceArmed()) {
+      return null
+    }
+    return await task()
+  } catch (error) {
+    handleLibraryFailure(error, 'save')
+    return null
+  } finally {
+    pending -= 1
+    if (pending === 0) {
+      noteIdleAfterSave()
+    }
+  }
+}
+
 function enqueue(task: () => Promise<void>): void {
   if (!isLibraryPersistenceArmed()) {
     return

@@ -2,17 +2,22 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getCategoryGlyph } from '../../config/categoryPresets'
 import {
+  canonicalCatalogCount,
+  listCanonicalItems,
+} from '../../services/canonical/selectors'
+import {
   formatCatalogTrackCount,
-  getCatalogTrackCount,
   listCatalogs,
 } from '../../services/catalogs/selectCatalogs'
+import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore'
 import { useCollectionStore } from '../../store/collectionStore'
 import CreateCategoryForm from '../CreateCategoryForm'
 
 export function CatalogList() {
   const categories = useCollectionStore((state) => state.categories)
-  const assignments = useCollectionStore((state) => state.assignments)
+  const itemsById = useCanonicalLibraryStore((state) => state.itemsById)
   const createCategory = useCollectionStore((state) => state.createCategory)
+  const canonicalItems = listCanonicalItems(Object.values(itemsById))
   const [creating, setCreating] = useState(false)
   const catalogs = listCatalogs(categories)
 
@@ -50,7 +55,7 @@ export function CatalogList() {
       ) : (
         <ul className="grid gap-2 sm:grid-cols-2">
           {catalogs.map((catalog) => {
-            const count = getCatalogTrackCount(assignments, catalog.id)
+            const count = canonicalCatalogCount(canonicalItems, catalog.id)
             return (
               <li key={catalog.id}>
                 <Link

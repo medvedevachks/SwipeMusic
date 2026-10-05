@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { CanonicalOrganizedList } from '../components/catalog/CanonicalOrganizedList'
 import { CatalogList } from '../components/catalog/CatalogList'
 import { BulkActionBar } from '../components/library/BulkActionBar'
 import { LibraryBreadcrumb } from '../components/library/LibraryBreadcrumb'
@@ -7,9 +8,19 @@ import { LibraryContentTable } from '../components/library/LibraryContentTable'
 import { LibraryTree } from '../components/library/LibraryTree'
 import { TrackActionSheet } from '../components/library/TrackActionSheet'
 import {
+  assignSourceToCatalog,
+  likeSearchResult,
+  likeSourceTrack,
+} from '../services/canonical/userOrganization'
+import {
+  canonicalItemForTrack,
+  projectCanonicalMeta,
+} from '../services/canonical/selectors'
+import {
   getPlaybackIntent,
   playLibrarySelection,
 } from '../services/playbackIntent'
+import { useCanonicalLibraryStore } from '../store/canonicalLibraryStore'
 import { useCollectionEngineStore } from '../store/collectionEngineStore'
 import { useCollectionStore } from '../store/collectionStore'
 import { useLibraryUiStore } from '../store/libraryUiStore'
@@ -54,9 +65,11 @@ export default function Library() {
   const setActionTrackId = useLibraryUiStore((state) => state.setActionTrackId)
 
   const categories = useCollectionStore((state) => state.categories)
-  const setLiked = useCollectionEngineStore((state) => state.setLiked)
+  const itemsById = useCanonicalLibraryStore((state) => state.itemsById)
+  const sourceKeyToCanonicalId = useCanonicalLibraryStore(
+    (state) => state.sourceKeyToCanonicalId,
+  )
   const toggleFavorite = useCollectionEngineStore((state) => state.toggleFavorite)
-  const assignCategory = useCollectionEngineStore((state) => state.assignCategory)
   const insertNext = usePlayerStore((state) => state.insertNext)
   const appendToQueue = usePlayerStore((state) => state.appendToQueue)
   const setShuffleMode = usePlayerStore((state) => state.setShuffleMode)
@@ -84,8 +97,23 @@ export default function Library() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [selectAllTracks])
 
-  const rows = searchResults.length > 0 ? searchResults : tracks
+  const sourceRows = searchResults.length > 0 ? searchResults : tracks
   const fromSearch = searchResults.length > 0
+  const canonicalLookup = useMemo(
+    () => ({ itemsById, sourceKeyToCanonicalId }),
+    [itemsById, sourceKeyToCanonicalId],
+  )
+  const rows = useMemo(
+    () =>
+      sourceRows.map((row) => {
+        const item = canonicalItemForTrack(canonicalLookup, row.track)
+        if (!item) {
+          return row
+        }
+        return { ...row, meta: projectCanonicalMeta(row.meta, item) }
+      }),
+    [sourceRows, canonicalLookup],
+  )
 
   const playbackContextForRows = (sampleTrack?: Track | null) =>
     resolveLibraryPlaybackContext({
@@ -194,6 +222,16 @@ export default function Library() {
       </div>
 
       <CatalogList />
+      <CanonicalOrganizedList />
+
+      <div className="space-y-1">
+        <h2 className="font-display text-lg font-semibold text-[var(--color-fg)]">
+          Доступные треки
+        </h2>
+        <p className="text-sm text-[var(--color-muted)]">
+          Каталог подключённого источника. Это не организованная библиотека.
+        </p>
+      </div>
 
       <div className="flex flex-wrap gap-2">
         {providers.map((provider) => {
@@ -313,13 +351,20 @@ export default function Library() {
             onLike={() => {
               for (const id of selectedTrackIds) {
                 const row = rows.find((item) => item.track.id === id)
-                setLiked(id, true, row?.track)
+                if (row) {
+                  void (fromSearch
+                    ? likeSearchResult(row.track)
+                    : likeSourceTrack(row.track, true))
+                }
               }
               clearTrackSelection()
             }}
             onUnlike={() => {
               for (const id of selectedTrackIds) {
-                setLiked(id, false)
+                const row = rows.find((item) => item.track.id === id)
+                if (row) {
+                  void likeSourceTrack(row.track, false)
+                }
               }
               clearTrackSelection()
             }}
@@ -400,7 +445,10 @@ export default function Library() {
         }}
         onToggleLike={() => {
           if (actionRow) {
-            setLiked(actionRow.track.id, !actionRow.meta.liked, actionRow.track)
+            const nextLiked = !actionRow.meta.liked
+            void (fromSearch && nextLiked
+              ? likeSearchResult(actionRow.track)
+              : likeSourceTrack(actionRow.track, nextLiked))
           }
         }}
         onToggleFavorite={() => {
@@ -410,7 +458,7 @@ export default function Library() {
         }}
         onAssignCategory={(categoryId) => {
           if (actionRow) {
-            assignCategory(actionRow.track.id, categoryId, actionRow.track)
+            void assignSourceToCatalog(actionRow.track, categoryId)
           }
         }}
         onReveal={() => {

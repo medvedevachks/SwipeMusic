@@ -1,5 +1,6 @@
-import { useCollectionEngineStore } from '../../store/collectionEngineStore'
-import { useCollectionStore } from '../../store/collectionStore'
+import { commitSwipeLike } from '../canonical/userOrganization.ts'
+import { useCollectionEngineStore } from '../../store/collectionEngineStore.ts'
+import { useCollectionStore } from '../../store/collectionStore.ts'
 import type { SwipeAction } from '../../types/swipe'
 import type { Track } from '../../types/track'
 
@@ -23,9 +24,8 @@ export function classifySwipeTrack(
 
   switch (action) {
     case 'like':
-      collection.likeTrack(track.id)
-      collection.recordHistory({ track, action: 'like' })
-      engine.setLiked(track.id, true, track)
+      // Жест остаётся мгновенным. Сохранение — canonical like, история пишется после успеха.
+      void commitSwipeLike(track)
       return { kind: 'applied', action }
 
     case 'skip':

@@ -1,5 +1,8 @@
+import { clearCanonicalIdentityFlights } from '../canonical/userOrganization.ts'
+import { mapCanonicalLibrary } from '../canonical/mapCanonical.ts'
 import { createDefaultCategories } from '../defaultCategories.ts'
 import { getCollectionEngine } from '../collectionEngine/index.ts'
+import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
 import { useCollectionStore } from '../../store/collectionStore.ts'
 import { createBootstrapGate, executeLibraryBootstrap } from './bootstrapCore.ts'
 import { libraryClient } from './client.ts'
@@ -13,6 +16,15 @@ function clearLocalLibrary(): void {
   useLibraryPersistenceStore.getState().setArmed(false)
   useCollectionStore.getState().clearUserLibrary()
   getCollectionEngine().replaceStorageData({ tracks: [], actions: [] })
+  useCanonicalLibraryStore.getState().clear()
+  clearCanonicalIdentityFlights()
+}
+
+export function applyCanonicalSnapshot(
+  userId: string,
+  items: Parameters<typeof mapCanonicalLibrary>[0],
+): void {
+  useCanonicalLibraryStore.getState().replaceForUser(userId, mapCanonicalLibrary(items))
 }
 
 export function applyLibrarySnapshot(dto: LibraryStateDto): void {
@@ -60,6 +72,12 @@ export function bootstrapLibrary(userId: string): Promise<void> {
       if (!isCurrent() || outcome === 'stale') {
         return
       }
+      useCanonicalLibraryStore.getState().beginLoad()
+      const canonical = await libraryClient.loadCanonicalLibrary()
+      if (!isCurrent()) {
+        return
+      }
+      applyCanonicalSnapshot(userId, canonical.items)
       useLibraryPersistenceStore.getState().setStatus('ready', null)
     } catch (error) {
       if (!isCurrent()) {

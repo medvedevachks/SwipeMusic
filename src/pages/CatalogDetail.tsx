@@ -1,14 +1,19 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { getCategoryGlyph } from '../config/categoryPresets'
+import { removeCanonicalFromCatalog } from '../services/canonical/userOrganization'
+import {
+  canonicalCatalogCount,
+  canonicalTracksInCatalog,
+  formatSourceCopyCount,
+  listCanonicalItems,
+} from '../services/canonical/selectors'
 import {
   canDeleteCatalog,
   formatCatalogTrackCount,
   getCatalogById,
-  getCatalogTrackCount,
-  getTracksForCatalog,
 } from '../services/catalogs/selectCatalogs'
-import { useCollectionEngineStore } from '../store/collectionEngineStore'
+import { useCanonicalLibraryStore } from '../store/canonicalLibraryStore'
 import { useCollectionStore } from '../store/collectionStore'
 import { getSourceDisplayName } from '../utils/sourceDisplay'
 
@@ -17,15 +22,14 @@ export default function CatalogDetail() {
   const navigate = useNavigate()
   const catalogId = params.catalogId ?? ''
   const categories = useCollectionStore((state) => state.categories)
-  const assignments = useCollectionStore((state) => state.assignments)
+  const itemsById = useCanonicalLibraryStore((state) => state.itemsById)
   const updateCategory = useCollectionStore((state) => state.updateCategory)
   const deleteCategory = useCollectionStore((state) => state.deleteCategory)
-  const records = useCollectionEngineStore((state) => state.tracks)
-  const removeCategory = useCollectionEngineStore((state) => state.removeCategory)
 
   const catalog = getCatalogById(categories, catalogId)
-  const tracks = getTracksForCatalog(catalogId, assignments, records)
-  const count = getCatalogTrackCount(assignments, catalogId)
+  const canonicalItems = listCanonicalItems(Object.values(itemsById))
+  const tracks = canonicalTracksInCatalog(canonicalItems, catalogId)
+  const count = canonicalCatalogCount(canonicalItems, catalogId)
   const [renaming, setRenaming] = useState(false)
   const [name, setName] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -183,21 +187,17 @@ export default function CatalogDetail() {
         </p>
       ) : (
         <ul className="space-y-2">
-          {tracks.map((item) => {
-            const title = item.track?.title ?? item.trackId
-            const artist = item.track?.artist ?? '—'
-            const sourceId = item.track?.sourceId ?? item.sourceId
-            return (
+          {tracks.map((item) => (
               <li
-                key={item.trackId}
+                key={item.canonicalTrack.id}
                 className="flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2"
               >
                 <span
                   className="h-12 w-12 shrink-0 rounded-lg border border-[var(--color-border)]"
                   style={{
-                    backgroundColor: item.track?.coverColor ?? 'var(--color-accent)',
-                    backgroundImage: item.track?.coverUrl
-                      ? `url(${item.track.coverUrl})`
+                    backgroundColor: 'var(--color-accent)',
+                    backgroundImage: item.canonicalTrack.artworkUrl
+                      ? `url(${item.canonicalTrack.artworkUrl})`
                       : undefined,
                     backgroundSize: 'cover',
                     backgroundPosition: 'center',
@@ -206,25 +206,37 @@ export default function CatalogDetail() {
                 />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium text-[var(--color-fg)]">
-                    {title}
+                    {item.canonicalTrack.title}
+                    {item.state.liked ? ' · лайк' : ''}
                   </span>
                   <span className="block truncate text-xs text-[var(--color-muted)]">
-                    {artist}
+                    {item.canonicalTrack.artist}
                   </span>
-                  <span className="mt-0.5 inline-flex rounded-full bg-[var(--color-accent)]/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--color-accent)]">
-                    {getSourceDisplayName(sourceId)}
+                  <span className="mt-1 flex flex-wrap gap-1">
+                    <span className="rounded-full bg-[var(--color-accent)]/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--color-accent)]">
+                      {formatSourceCopyCount(item.copies.length)}
+                    </span>
+                    {item.copies.map((copy) => (
+                      <span
+                        key={copy.sourceTrackKey}
+                        className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-muted)]"
+                      >
+                        {getSourceDisplayName(copy.sourceId)}
+                      </span>
+                    ))}
                   </span>
                 </span>
                 <button
                   type="button"
                   className="min-h-11 shrink-0 rounded-xl border border-[var(--color-border)] px-3 text-xs"
-                  onClick={() => removeCategory(item.trackId, catalog.id)}
+                  onClick={() => {
+                    void removeCanonicalFromCatalog(item.canonicalTrack.id, catalog.id)
+                  }}
                 >
                   Убрать из каталога
                 </button>
               </li>
-            )
-          })}
+            ))}
         </ul>
       )}
     </section>

@@ -15,6 +15,7 @@
 - MVP-03B (список, создание, открытие, переименование, удаление каталога и снятие трека) зафиксирован коммитом `feat: add universal catalog management UI`. Playback каталога не входит в MVP-03
 - MVP-04A (канонический трек и копии источников, без склейки UI) зафиксирован коммитом `feat: add canonical track identity layer`
 - MVP-04B1 (состояние композиции и canonical-членство каталога) зафиксирован коммитом `feat: add canonical library persistence`
+- MVP-04B2 (frontend-организация через CanonicalTrack) сделан в рабочем дереве, без commit
 - Локальный clone поверхностный (`grafted`)
 
 ## Стек
@@ -106,14 +107,15 @@ UI
 ## Каталог и трек
 
 - Пользовательский контейнер — каталог Swipe Music, не плейлист провайдера. В коде это тот же тип, что раньше назывался Category. Таблицы `user_categories` / `user_category_tracks` и маршруты `/api/me/categories` не переименовывались: старые строки читаются как каталоги, id сохраняются.
-- Экран `/library` показывает «Мои каталоги». Карточка каталога: `/library/catalogs/:catalogId`. Можно создать, открыть, переименовать, удалить свой каталог и убрать трек из него. Удаление каталога не удаляет трек из коллекции. Системный каталог удалить нельзя.
-- Один трек может быть в нескольких каталогах. Один каталог может содержать треки разных `sourceId`.
-- Source Copy — идентичность провайдера: `${sourceId}:${externalId}`. UI, история и старая коллекция по-прежнему используют этот ключ.
-- Canonical Track — идентичность композиции Swipe Music, `can_<uuid>` пользователя. Он не принадлежит провайдеру и не хранит playback URL.
-- `user_collection_tracks` хранит снимок source track и старый ключ. `user_canonical_library_tracks` хранит состояние композиции: like, addedAt, прослушивания, заметки. `user_catalog_canonical_tracks` — членство каталога. Старая `user_category_tracks` остаётся для совместимости и больше не является новым источником истины.
-- Экран библиотеки, каталогов, свайпа и поиска пока показывает source tracks. Склейка поиска и playback fallback не сделаны.
+- Экран `/library` показывает «Мои каталоги» и «Моя музыка». Карточка каталога: `/library/catalogs/:catalogId`. Можно создать, открыть, переименовать, удалить свой каталог и убрать композицию из него. Удаление каталога не удаляет композицию и лайк. Системный каталог удалить нельзя.
+- Число треков каталога и строки внутри него считаются по canonical membership. Несколько SourceCopy одной композиции дают одну строку и один вклад в счётчик.
+- «Доступные треки» на `/library` остаются каталогом провайдера или демо. Поиск и лента свайпа тоже остаются source tracks и не склеиваются.
+- Source Copy — идентичность провайдера, поиска и playback: `${sourceId}:${externalId}`. История хранит этот source snapshot.
+- Canonical Track — идентичность пользовательской организации: один лайк и один набор каталогов на композицию. Id — `can_<uuid>` пользователя. Он не принадлежит провайдеру и не хранит playback URL.
+- `user_collection_tracks` хранит снимок source track и старый ключ. `user_canonical_library_tracks.liked` — источник истины лайка. `user_catalog_canonical_tracks` — членство каталога. Старая `user_category_tracks` остаётся для совместимости. Новые действия лайка и каталога её не пишут.
+- Склейка поиска, дедуп ленты свайпа, playback fallback и playback каталога не сделаны. У строки «Моя музыка» нет Play.
 - `MediaIndex` — дедупликация индекса устройства. Canonical identity — серверное состояние вошедшего пользователя. Matcher их не связывает и библиотеку сам не склеивает.
-- Пользовательская организация переживает reload, logout/login и перезапуск backend. Id трека по-прежнему `${sourceId}:${externalId}`.
+- Пользовательская организация переживает reload, logout/login и перезапуск backend. Source Track id по-прежнему `${sourceId}:${externalId}`. Организация адресуется canonical id.
 
 ## Ограничения
 
@@ -124,4 +126,4 @@ UI
 - Нет Car Mode.
 - VK и Zaycev не подключены.
 - Cross-provider fallback есть только если MediaIndex уже склеил копии. Отдельного UX подписки нет.
-- `npm test`: 22 auth, 16 server persistence, 5 matcher, 4 canonical identity, 15 canonical library, 8 frontend persistence, 3 catalog UI/domain. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.
+- `npm test`: 87 тестов. 22 auth, 16 server persistence, 5 matcher, 4 canonical identity, 15 canonical library, 8 frontend persistence, 3 catalog UI/domain, 14 frontend canonical organization. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.

@@ -72,14 +72,14 @@ MVP-02B — DONE, commit `feat: persist user library state`
 MVP-03 — DONE
 MVP-03A — DONE, commit `feat: introduce universal music catalogs`
 MVP-03B — DONE, commit `feat: add universal catalog management UI`
-MVP-04 — PARTIAL
+MVP-04 — DONE
 MVP-04A — DONE, commit `feat: add canonical track identity layer`
-MVP-04B — PARTIAL
+MVP-04B — DONE
 MVP-04B1 — DONE, commit `feat: add canonical library persistence`
-MVP-04B2 — TODO
+MVP-04B2 — DONE, без commit
 ```
 
-Следующий этап: MVP-04B2, переход экранов библиотеки, каталогов и свайпа на Canonical Track. Поиск и playback в этот переход не входят.
+Следующий этап: MVP-05 — Playback Availability. Склейка поиска, дедуп свайп-ленты, playback fallback и playback каталога не начаты.
 
 ## MVP-01B — Password recovery
 
@@ -168,4 +168,15 @@ MVP-04B2 — TODO
 - Перенос старого аккаунта идёт без fuzzy matching. Уже связанные копии получают одно состояние и один набор каталогов. Повторный запуск не дублирует строки. Маркер `canonical-library-v1` пишется только после успешной транзакции.
 - `link` переносит состояние и объединяет каталоги. `liked` побеждает `disliked`. Заметки и конфликтующие metadata не выбрасываются. `unlink` оставляет каталоги у исходной композиции, а отделённая копия получает пустое состояние.
 - Удаление каталога снимает canonical membership и не удаляет композицию. Удаление source snapshot не удаляет Canonical Track и остальные копии.
-- История по-прежнему хранит source track. `GET /api/me/library-state` сохраняет прежние поля. Экраны не переключены. Поиск не склеивается. Playback fallback нет.
+- История по-прежнему хранит source track. `GET /api/me/library-state` сохраняет прежние поля. На момент MVP-04B1 экраны ещё не были переключены. Поиск не склеивается. Playback fallback нет.
+
+## MVP-04B2 — Frontend canonical organization
+
+Сделано на ветке `feature/mvp-04-canonical-track` от `f0769fc`. Commit не создавался.
+
+- После входа рядом с `GET /api/me/library-state` загружается `GET /api/me/canonical-library`. Старый bootstrap остаётся: снимки источников, история, `gestureConfig` и Collection Engine.
+- Лайк, снятие лайка и членство каталога идут через `ensureCanonicalForTrack`, затем PATCH/PUT/DELETE canonical API. Клиент не передаёт `userId`. Новые действия не пишут `user_category_tracks` и не считают `user_collection_tracks.liked` источником истины.
+- «Моя музыка» и карточка каталога показывают одну строку на CanonicalTrack. Счётчик каталога считает композиции, не копии. «Доступные треки», поиск и лента свайпа остаются source tracks.
+- История после успешного свайпа хранит source Track, с которым взаимодействовали. Playback, провайдеры и жесты не менялись. У canonical-строки нет Play, fallback нет.
+- Logout очищает canonical state до загрузки следующего пользователя.
+- `npm test`: прежние 73 и 14 тестов frontend canonical organization. Lint и build проходят. Старое предупреждение oxlint в `ProviderAuthPanel.tsx` не исправлялось.

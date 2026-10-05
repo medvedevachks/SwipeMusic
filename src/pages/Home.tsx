@@ -3,8 +3,8 @@ import { AlbumModeBanner } from '../components/AlbumModeBanner'
 import CategoryPickerSheet from '../components/CategoryPickerSheet'
 import SwipeDeck from '../components/SwipeDeck'
 import { useSwipeFeed } from '../hooks/useSwipeFeed'
+import { commitCatalogChoice } from '../services/canonical/userOrganization.ts'
 import { getPlaybackIntent } from '../services/playbackIntent'
-import { useCollectionEngineStore } from '../store/collectionEngineStore'
 import { useCollectionStore } from '../store/collectionStore'
 import { usePlayerStore } from '../store/playerStore'
 import { useSwipeDeckSessionStore } from '../store/swipeDeckSessionStore'
@@ -17,14 +17,6 @@ export default function Home() {
   const gestureConfig = useCollectionStore((state) => state.gestureConfig)
   const categories = useCollectionStore((state) => state.categories)
   const createCategory = useCollectionStore((state) => state.createCategory)
-  const assignTrackToCategory = useCollectionStore(
-    (state) => state.assignTrackToCategory,
-  )
-  const recordHistory = useCollectionStore((state) => state.recordHistory)
-
-  const collectionAssignCategory = useCollectionEngineStore(
-    (state) => state.assignCategory,
-  )
 
   const setQueue = usePlayerStore((state) => state.setQueue)
   const currentTime = usePlayerStore((state) => state.currentTime)
@@ -159,18 +151,13 @@ export default function Home() {
             return
           }
 
+          const track = pendingTrack
           const category = useCollectionStore
             .getState()
             .categories.find((item) => item.id === categoryId)
-          assignTrackToCategory(pendingTrack.id, categoryId)
-          recordHistory({
-            track: pendingTrack,
-            action: 'categorize',
-            category,
-          })
-          collectionAssignCategory(pendingTrack.id, categoryId, pendingTrack)
           setPendingTrack(null)
           setCategoryResolveKey((value) => value + 1)
+          void commitCatalogChoice(track, categoryId, category)
         }}
       />
     </div>

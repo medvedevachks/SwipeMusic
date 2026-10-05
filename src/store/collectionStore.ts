@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { defaultGestureConfig } from '../config/gestureConfig.ts'
 import { getCollectionEngine } from '../services/collectionEngine/index.ts'
+import { useCanonicalLibraryStore } from './canonicalLibraryStore.ts'
 import {
   persistCategory,
   persistCategoryDelete,
@@ -171,6 +172,7 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
     for (const trackId of trackIds) {
       engine.removeCategory(trackId, id)
     }
+    useCanonicalLibraryStore.getState().dropCatalog(id)
     persistCategoryDelete(id)
   },
 

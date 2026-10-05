@@ -1,3 +1,9 @@
+import type {
+  CanonicalLibraryItem,
+  CanonicalMembership,
+  SourceCopySnapshot,
+  TrackIdentity,
+} from '../../types/canonical.ts'
 import type { Category, TrackAssignment } from '../../types/category'
 import type { GestureConfig } from '../../types/gesture'
 import type { HistoryEntry } from '../../types/history'
@@ -128,5 +134,43 @@ export const libraryClient = {
       method: 'PATCH',
       body: { gestureConfig },
     }).then(() => undefined)
+  },
+
+  loadCanonicalLibrary(): Promise<{ items: CanonicalLibraryItem[] }> {
+    return request('/api/me/canonical-library') as Promise<{ items: CanonicalLibraryItem[] }>
+  },
+
+  ensureIdentity(snapshot: SourceCopySnapshot): Promise<TrackIdentity> {
+    return request('/api/me/tracks/identity', {
+      method: 'POST',
+      body: snapshot,
+    }) as Promise<TrackIdentity>
+  },
+
+  patchCanonicalLiked(
+    canonicalTrackId: string,
+    liked: boolean,
+  ): Promise<{ item: CanonicalLibraryItem }> {
+    return request(`/api/me/canonical-library/${encodeURIComponent(canonicalTrackId)}`, {
+      method: 'PATCH',
+      body: { liked },
+    }) as Promise<{ item: CanonicalLibraryItem }>
+  },
+
+  assignCanonical(
+    catalogId: string,
+    canonicalTrackId: string,
+  ): Promise<{ membership: CanonicalMembership }> {
+    return request(
+      `/api/me/catalogs/${encodeURIComponent(catalogId)}/tracks/${encodeURIComponent(canonicalTrackId)}`,
+      { method: 'PUT' },
+    ) as Promise<{ membership: CanonicalMembership }>
+  },
+
+  unassignCanonical(catalogId: string, canonicalTrackId: string): Promise<void> {
+    return request(
+      `/api/me/catalogs/${encodeURIComponent(catalogId)}/tracks/${encodeURIComponent(canonicalTrackId)}`,
+      { method: 'DELETE' },
+    ).then(() => undefined)
   },
 }
