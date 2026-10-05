@@ -1,5 +1,9 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { canonicalItemForTrack } from '../../services/canonical/selectors'
+import { openManualSourceAlternatives } from '../../services/runtimeFallback/fallbackUxRuntime'
+import { usePlaybackFallbackUxStore } from '../../store/playbackFallbackUxStore'
+import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore'
 import { useGlobalPlayerStore } from '../../store/playerStore'
 import { getSourceDisplayName } from '../../utils/sourceDisplay'
 import PlayerProgressBar from './PlayerProgressBar'
@@ -26,6 +30,14 @@ export default function BottomPlayer() {
   const repeatMode = useGlobalPlayerStore((s) => s.repeatMode)
   const shuffleMode = useGlobalPlayerStore((s) => s.shuffleMode)
   const error = useGlobalPlayerStore((s) => s.error)
+  const ownsPlayerError = usePlaybackFallbackUxStore((s) => s.model.ownsPlayerError)
+  const shownTrack = pendingTrack ?? currentTrack
+  const alternativeCount = useCanonicalLibraryStore((s) => {
+    if (!shownTrack) {
+      return 0
+    }
+    return canonicalItemForTrack(s, shownTrack)?.copies.length ?? 0
+  })
   const queueLength = useGlobalPlayerStore((s) => s.queue.length)
 
   const pause = useGlobalPlayerStore((s) => s.pause)
@@ -269,6 +281,18 @@ export default function BottomPlayer() {
                 >
                   Очередь ({queueLength})
                 </Link>
+                {alternativeCount >= 2 && shownTrack ? (
+                  <button
+                    type="button"
+                    className="block min-h-11 w-full px-3 py-2 text-left text-sm text-white/85 hover:bg-white/10"
+                    onClick={() => {
+                      setMenuOpen(false)
+                      void openManualSourceAlternatives(shownTrack)
+                    }}
+                  >
+                    Источники композиции
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="block w-full px-3 py-2 text-left text-sm text-white/85 hover:bg-white/10"
@@ -329,7 +353,7 @@ export default function BottomPlayer() {
           />
         </div>
 
-        {error ? (
+        {error && !ownsPlayerError ? (
           <p className="truncate text-[11px] text-rose-400" role="alert">
             {error}
           </p>

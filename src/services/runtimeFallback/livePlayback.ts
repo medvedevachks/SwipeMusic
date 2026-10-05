@@ -2,10 +2,12 @@ import { canonicalItemForTrack } from '../canonical/selectors.ts'
 import { sourceTrackKeyOf } from '../canonical/mapCanonical.ts'
 import { findCollectionPlaybackTrack } from '../playbackAvailability/playbackTrackForSourceCopy.ts'
 import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
+import { usePlaybackFallbackUxStore } from '../../store/playbackFallbackUxStore.ts'
 import type { SourceCopy } from '../../types/canonical.ts'
 import type { CanonicalPlaybackAvailability } from '../../types/playbackAvailability.ts'
 import {
   RUNTIME_FALLBACK_POLICY,
+  RUNTIME_FALLBACK_STATUS,
   type PlaybackAttemptPort,
   type RuntimeFallbackPolicy,
   type RuntimeFallbackResult,
@@ -17,6 +19,7 @@ import {
   bindMediaError,
   type FallbackCancelReason,
 } from './fallbackControl.ts'
+import { publishFallbackResult, dismissFallbackUx } from './fallbackUxPublish.ts'
 import { RuntimePlaybackFallbackOrchestrator } from './RuntimePlaybackFallbackOrchestrator.ts'
 
 export type LiveFallbackContext = {
@@ -61,8 +64,11 @@ function ensureMediaErrorBridge(): void {
     if (attemptDepth > 0) {
       return
     }
+    const orchestrator = getLiveOrchestrator()
     const port = createGuardedAttemptPort(createExistingPipelineAttemptPort())
-    void getLiveOrchestrator().notifyRuntimeFailure(positionSeconds, port)
+    void orchestrator.notifyRuntimeFailure(positionSeconds, port).then((result) => {
+      publishFallbackResult(result, orchestrator.getGeneration())
+    })
   })
 }
 
@@ -115,12 +121,35 @@ export async function routeLivePlayback(
     },
     createGuardedAttemptPort(createPort()),
   )
+  if (result.status !== RUNTIME_FALLBACK_STATUS.CANCELLED) {
+    publishFallbackResult(result, orchestrator.getGeneration(), track)
+  }
   return { handled: true, result }
+}
+
+export async function confirmLiveFallback(): Promise<RuntimeFallbackResult | null> {
+  const orchestrator = getLiveOrchestrator()
+  const pending = usePlaybackFallbackUxStore.getState().model
+  const decision = pending.kind === 'confirmation'
+  if (!decision || pending.generation !== orchestrator.getGeneration()) {
+    dismissFallbackUx()
+    return null
+  }
+  const result = await orchestrator.confirmPending(
+    createGuardedAttemptPort(createExistingPipelineAttemptPort()),
+  )
+  if (!result) {
+    dismissFallbackUx()
+    return null
+  }
+  publishFallbackResult(result, orchestrator.getGeneration(), usePlaybackFallbackUxStore.getState().requestedTrack)
+  return result
 }
 
 export function bindLiveFallbackOrchestrator(orchestrator: RuntimePlaybackFallbackOrchestrator): void {
   bindFallbackCancellation((reason: FallbackCancelReason) => {
     orchestrator.cancel(reason)
+    dismissFallbackUx()
   })
 }
 

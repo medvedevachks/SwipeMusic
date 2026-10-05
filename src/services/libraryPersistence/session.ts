@@ -1,6 +1,7 @@
 import { clearCanonicalIdentityFlights } from '../canonical/userOrganization.ts'
 import { resetPlaybackAvailability } from '../playbackAvailability/resetPlaybackAvailability.ts'
 import { cancelActiveFallback } from '../runtimeFallback/fallbackControl.ts'
+import { clearPlaybackFallbackUx } from '../../store/playbackFallbackUxStore.ts'
 import { mapCanonicalLibrary } from '../canonical/mapCanonical.ts'
 import { createDefaultCategories } from '../defaultCategories.ts'
 import { getCollectionEngine } from '../collectionEngine/index.ts'
@@ -16,6 +17,7 @@ const gate = createBootstrapGate()
 
 function clearLocalLibrary(): void {
   cancelActiveFallback('logout')
+  clearPlaybackFallbackUx()
   useLibraryPersistenceStore.getState().setArmed(false)
   useCollectionStore.getState().clearUserLibrary()
   getCollectionEngine().replaceStorageData({ tracks: [], actions: [] })

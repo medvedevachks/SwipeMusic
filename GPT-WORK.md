@@ -80,12 +80,12 @@ MVP-04B2 — DONE, commit `feat: use canonical tracks for user organization`
 MVP-05 — DONE
 MVP-05A — DONE, commit `feat: add playback availability layer`
 MVP-05B — DONE, commit `feat: add playable source selection`
-MVP-06 — PARTIAL
+MVP-06 — DONE
 MVP-06A — DONE, commit `feat: add runtime playback fallback`
-MVP-06B — TODO
+MVP-06B — DONE, commit `feat: add playback fallback user experience`
 ```
 
-Следующий этап: MVP-06B — пользовательский UX поверх generic fallback engine. Connect Provider, покупка подписки и discovery-интеграции в MVP-06A не входят.
+Следующий этап: MVP-07 — стабилизация Yandex. Его не начинать, пока текущее подключение и варианты не обсуждены с владельцем проекта.
 
 ## MVP-01B — Password recovery
 
@@ -224,6 +224,18 @@ MVP-06B — TODO
 - Исчерпанный результат группирует известные не-playable копии: subscription, not connected, auth, unavailable, unknown, unsupported. Это данные для UX, не сам UX.
 - Событие `PlaybackSourceChanged` с причиной `RUNTIME_FALLBACK` публикуется при переключении. Экраны поиска, свайпа, библиотеки и `BottomPlayer` сами fallback не содержат: они приходят в `AudioPlayer.playTrack`.
 - `routeLivePlayback` подключён к этому `playTrack`. Нет canonical mapping или меньше двух известных копий — остаётся прежний source playback. Иначе orchestrator ведёт попытки. Ошибка старта и media error уже начатого playback без pending switch попадают в сессию. Next/Previous сначала отменяют сессию, затем двигают очередь прежним механизмом. Stop и logout отменяют сессию. Pause не отменяет её и не считается ошибкой.
-- UX уведомления, ASK, подписки и подключения провайдера не сделан.
 - VK, Zaycev и Custom не реализованы. Auth, stream и discovery Yandex и Spotify не менялись.
+
+## MVP-06B — Alternative source UX
+
+Сделано на ветке `feature/mvp-06-alternative-source-ux` от `0fd18b2`, commit `feat: add playback fallback user experience`.
+
+- Runtime fallback остаётся generic. UI не ветвится по `sourceId`. Имя источника берётся из существующей metadata.
+- Успешный AUTO показывает неблокирующее уведомление о смене источника и не оставляет ошибку первой копии. Музыка не ставится на паузу, очередь не двигается.
+- ASK показывает подтверждение. Следующая copy стартует только после согласия и только в той же fallback-сессии. Отмена, другой трек, Next и logout делают подтверждение недействительным.
+- Терминальный лист показывает известные SourceCopy и безопасный статус. Подписка, «не подключён» и повторная авторизация ведут на существующий `/sources`. Покупки и нового auth нет.
+- `UNKNOWN` можно проверить снова: кэш availability сбрасывается, playback сам не стартует. `UNSUPPORTED` не предлагает подключение или подписку.
+- Зарегистрированный provider без SourceCopy этой композиции в лист не попадает. Discovery по-прежнему выключен.
+- Ручной выбор другой `PLAYABLE` copy отменяет текущую сессию и играет её через существующий плеер с `preserveQueue`.
+- Ошибка source Track без canonical mapping остаётся у прежнего player error. Logout очищает эфемерный UX. В SQLite он не пишется.
 

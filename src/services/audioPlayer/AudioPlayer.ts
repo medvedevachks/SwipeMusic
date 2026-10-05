@@ -457,6 +457,13 @@ export class AudioPlayer {
     await this.playTrack(track)
   }
 
+  clearOwnedPlaybackError(): void {
+    if (!this.state.error) {
+      return
+    }
+    this.patchState({ error: null })
+  }
+
   stop(): void {
     cancelActiveFallback('stop')
     this.playGeneration += 1

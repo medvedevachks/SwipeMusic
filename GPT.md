@@ -5,8 +5,8 @@
 ## Git
 
 - Репозиторий: https://github.com/r-sh-galimov/SwipeMusic
-- Ветка разработки: `feature/mvp-06-runtime-fallback`
-- Baseline ветки: `335fdfd` (`feat: add playable source selection`) на `feature/mvp-05-playback-availability`
+- Ветка разработки: `feature/mvp-06-alternative-source-ux`
+- Baseline ветки: `0fd18b2` (`feat: add runtime playback fallback`) на `feature/mvp-06-runtime-fallback`
 - Опубликованный `origin/main`: `475fd34`
 - Локальный commit аккаунта: `f4995d3`. Восстановление пароля: `1aa61c9`
 - MVP-02A (серверное хранение библиотеки) зафиксирован коммитом `feat: add server persistence API`
@@ -19,6 +19,7 @@
 - MVP-05A (модель availability и resolver, без fallback) зафиксирован коммитом `feat: add playback availability layer`
 - MVP-05B (одна PLAYABLE SourceCopy до playback, без runtime fallback) зафиксирован коммитом `feat: add playable source selection`
 - MVP-06A (generic runtime fallback и discovery contract, без UX и без discovery-интеграций) зафиксирован коммитом `feat: add runtime playback fallback`
+- MVP-06B (уведомление AUTO, подтверждение ASK и действия только для известной SourceCopy) зафиксирован коммитом `feat: add playback fallback user experience`
 - Локальный clone поверхностный (`grafted`)
 
 ## Стек
@@ -124,7 +125,7 @@ UI
 - Discovery — optional contract `AlternateSourceDiscoveryProvider`. Результат: `FOUND`, `NOT_FOUND`, `AMBIGUOUS`, `UNSUPPORTED`, `ERROR`. `AMBIGUOUS` и неподтверждённый кандидат `SourceCopy` не создают. Production-реестр пуст, автоматический discovery в playback не запускается. Реальных discovery для Yandex, Spotify, Local, VK, Zaycev и Custom нет.
 - Поиск, свайп, библиотека, альбом, очередь и `BottomPlayer` сходятся в `AudioPlayer.playTrack`. Если у source Track нет canonical mapping или известна только одна копия, играет прежний путь. Если известных копий две или больше, `routeLivePlayback` запускает generic orchestrator. Каждая попытка — обычный source Track через `PlaybackResolver` и `AudioPlayer`, очередь при смене копии не двигается. Next, Previous, Stop и logout отменяют активную сессию. Pause fallback не запускает.
 - Ошибка старта playback возвращается в orchestrator. Событие `error` адаптера после успешного старта, когда нет pending switch, тоже передаётся в сессию. Отдельного polling нет.
-- UX смены источника, подтверждение ASK, подписка и подключение провайдера не сделаны. Это MVP-06B.
+- UX fallback эфемерный и не пишется в SQLite. Успешный AUTO показывает неблокирующее «Источник переключён: A → B» и гасит ошибку первой копии. ASK показывает подтверждение и не стартует следующую copy, пока пользователь не согласится. Новый Play, Next, Previous, Stop, закрытие и logout делают старое подтверждение недействительным. Терминальный лист строится только из известных SourceCopy: подписка, не подключён, нужна повторная авторизация, недоступно, не проверено, не поддерживается. Зарегистрированный provider без SourceCopy в лист не попадает. `UNKNOWN` не называется недоступным; повторная проверка сбрасывает кэш availability и не запускает playback. Покупка подписки, новый auth и auto-discovery не входят. Имена провайдеров берутся из уже существующей metadata источника.
 - Склейка поиска, дедуп ленты свайпа и playback каталога не сделаны. У строки «Моя музыка» нет Play.
 - `MediaIndex` — дедупликация индекса устройства. Canonical identity — серверное состояние вошедшего пользователя. Matcher их не связывает и библиотеку сам не склеивает.
 - Пользовательская организация переживает reload, logout/login и перезапуск backend. Source Track id по-прежнему `${sourceId}:${externalId}`. Организация адресуется canonical id.
@@ -137,5 +138,5 @@ UI
 - Смена пароля из уже открытого профиля нет: только сценарий «забыл пароль».
 - Нет экрана Car Mode. Позже он должен использовать `RuntimeFallbackPolicy.AUTO` того же engine.
 - VK и Zaycev не подключены. В fallback они не реализуются и остаются `UNSUPPORTED`, пока нет известной playable copy.
-- Cross-provider fallback engine умеет переключать только известные `PLAYABLE` SourceCopy одной композиции. UX подписки и подключения провайдера не сделан.
-- `npm test`: 145 тестов. 22 auth, 16 server persistence, 5 matcher, 4 canonical identity, 15 canonical library, 8 frontend persistence, 3 catalog UI/domain, 14 frontend canonical organization, 16 playback availability, 15 playable source selection, 16 runtime fallback, 11 live playback integration. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.
+- Cross-provider fallback переключает только известные `PLAYABLE` SourceCopy одной композиции. UX подписки и подключения тоже только для такой известной copy. Отдельной покупки подписки нет.
+- `npm test`: 162 теста. 22 auth, 16 server persistence, 5 matcher, 4 canonical identity, 15 canonical library, 8 frontend persistence, 3 catalog UI/domain, 14 frontend canonical organization, 16 playback availability, 15 playable source selection, 16 runtime fallback, 11 live playback integration, 17 fallback UX. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.

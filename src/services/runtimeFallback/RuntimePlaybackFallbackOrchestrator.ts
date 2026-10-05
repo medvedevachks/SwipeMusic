@@ -72,6 +72,21 @@ export class RuntimePlaybackFallbackOrchestrator {
     }
   }
 
+  /**
+   * ASK оставил ту же сессию на CONFIRMATION_REQUIRED.
+   * Подтверждение продолжает её. Новое поколение или другой статус — ничего не запускает.
+   */
+  confirmPending(port: PlaybackAttemptPort): Promise<RuntimeFallbackResult | null> {
+    const active = this.active
+    if (!active || !this.isCurrent(active)) {
+      return Promise.resolve(null)
+    }
+    if (active.session.status !== RUNTIME_FALLBACK_STATUS.CONFIRMATION_REQUIRED) {
+      return Promise.resolve(null)
+    }
+    return this.attemptNext(active, port, active.session.resumePositionSeconds, false)
+  }
+
   /** Пауза не является ошибкой playback и fallback не запускает. */
   notifyPaused(): void {}
 
@@ -319,7 +334,11 @@ export class RuntimePlaybackFallbackOrchestrator {
     nextPlayableCopy: SourceCopy | null,
   ): RuntimeFallbackResult {
     active.session.status = status
-    if (this.active === active && !isLiveStatus(status)) {
+    if (
+      this.active === active &&
+      !isLiveStatus(status) &&
+      status !== RUNTIME_FALLBACK_STATUS.CONFIRMATION_REQUIRED
+    ) {
       this.active = null
     }
     if (status === RUNTIME_FALLBACK_STATUS.FALLBACK_SUCCEEDED) {
