@@ -8,6 +8,8 @@ import type {
 import type { MusicSourceAdapter, SearchResult } from '../../MusicSourceAdapter'
 import type { SourceType } from '../../../types/source'
 import type { Track } from '../../../types/track'
+import type { TrackAvailabilityProbe } from '../../../types/playbackAvailability'
+import { assessLocalFileAvailability } from '../../../services/playbackAvailability/localProbe'
 import { stripFileExtension, mimeTypeForAudioFileName } from './audioFormats'
 import { scanDirectoryForAudio } from './directoryScanner'
 import {
@@ -328,6 +330,20 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
 
   async getCover(_track: Track): Promise<string | undefined> {
     return undefined
+  }
+
+  /**
+   * Файл playable только если папка выдана и handle этой копии есть.
+   * Object URL не создаётся, плеер не запускается.
+   */
+  async checkTrackAvailability(track: Track): Promise<TrackAvailabilityProbe> {
+    const externalId = this.resolveExternalId(track)
+    const file = this.filesByPath.get(externalId)
+    return assessLocalFileAvailability({
+      accessState: this.accessState,
+      hasDirectoryHandle: this.directoryHandle !== null,
+      hasFileHandle: Boolean(file?.handle),
+    })
   }
 
   private async restoreFromStorage(): Promise<void> {

@@ -1,7 +1,8 @@
 import type { MusicSourceAdapter } from '../../MusicSourceAdapter'
+import { PLAYBACK_AVAILABILITY_REASON, PLAYBACK_AVAILABILITY_STATUS } from '../../../types/playbackAvailability.ts'
 import type { FetchTracksResult } from '../../types'
-import { homeSections } from '../../../services/mockTracks'
-import { createTrack } from '../../normalizeTrack'
+import { homeSections } from '../../../services/mockTracks.ts'
+import { createTrack } from '../../normalizeTrack.ts'
 import type { Track } from '../../../types/track'
 
 const SOURCE_ID = 'mock'
@@ -110,6 +111,19 @@ export function createMockMusicSourceAdapter(): MusicSourceAdapter {
           reason: url ? undefined : 'No demo URL',
         },
       ]
+    },
+
+    async checkTrackAvailability(track) {
+      const known = loadAll().find(
+        (item) => item.id === track.id || item.externalId === track.externalId,
+      )
+      if (track.previewUrl || known?.previewUrl) {
+        return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+      }
+      return {
+        status: PLAYBACK_AVAILABILITY_STATUS.UNAVAILABLE,
+        reason: PLAYBACK_AVAILABILITY_REASON.TRACK_MISSING,
+      }
     },
 
     async getCover(track) {

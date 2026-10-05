@@ -15,7 +15,8 @@
 - MVP-03B (список, создание, открытие, переименование, удаление каталога и снятие трека) зафиксирован коммитом `feat: add universal catalog management UI`. Playback каталога не входит в MVP-03
 - MVP-04A (канонический трек и копии источников, без склейки UI) зафиксирован коммитом `feat: add canonical track identity layer`
 - MVP-04B1 (состояние композиции и canonical-членство каталога) зафиксирован коммитом `feat: add canonical library persistence`
-- MVP-04B2 (frontend-организация через CanonicalTrack) сделан в рабочем дереве, без commit
+- MVP-04B2 (frontend-организация через CanonicalTrack) зафиксирован коммитом `feat: use canonical tracks for user organization`
+- MVP-05A (модель availability и resolver, без fallback) зафиксирован коммитом `feat: add playback availability layer`
 - Локальный clone поверхностный (`grafted`)
 
 ## Стек
@@ -114,6 +115,7 @@ UI
 - Canonical Track — идентичность пользовательской организации: один лайк и один набор каталогов на композицию. Id — `can_<uuid>` пользователя. Он не принадлежит провайдеру и не хранит playback URL.
 - `user_collection_tracks` хранит снимок source track и старый ключ. `user_canonical_library_tracks.liked` — источник истины лайка. `user_catalog_canonical_tracks` — членство каталога. Старая `user_category_tracks` остаётся для совместимости. Новые действия лайка и каталога её не пишут.
 - Склейка поиска, дедуп ленты свайпа, playback fallback и playback каталога не сделаны. У строки «Моя музыка» нет Play.
+- Playback availability — отдельное runtime-состояние SourceCopy, не часть canonical identity и не SQLite. `PLAYABLE` доказывается проверкой. `UNKNOWN` значит, что доказательств ещё нет, и не считается playable. Подключение аккаунта не доказывает доступность конкретного трека. Resolver не выбирает источник и не запускает плеер.
 - `MediaIndex` — дедупликация индекса устройства. Canonical identity — серверное состояние вошедшего пользователя. Matcher их не связывает и библиотеку сам не склеивает.
 - Пользовательская организация переживает reload, logout/login и перезапуск backend. Source Track id по-прежнему `${sourceId}:${externalId}`. Организация адресуется canonical id.
 
@@ -126,4 +128,4 @@ UI
 - Нет Car Mode.
 - VK и Zaycev не подключены.
 - Cross-provider fallback есть только если MediaIndex уже склеил копии. Отдельного UX подписки нет.
-- `npm test`: 87 тестов. 22 auth, 16 server persistence, 5 matcher, 4 canonical identity, 15 canonical library, 8 frontend persistence, 3 catalog UI/domain, 14 frontend canonical organization. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.
+- `npm test`: 103 теста. 22 auth, 16 server persistence, 5 matcher, 4 canonical identity, 15 canonical library, 8 frontend persistence, 3 catalog UI/domain, 14 frontend canonical organization, 16 playback availability. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.

@@ -11,6 +11,7 @@ import {
   sourceRegistry,
 } from './registry'
 import type { FetchTracksParams, FetchTracksResult } from './types'
+import { invalidatePlaybackAvailabilityBySource } from '../services/playbackAvailability/cache'
 
 type SourceManagerListener = (sources: SourceConfig[]) => void
 
@@ -269,6 +270,7 @@ export class SourceManager {
     this.configs.set(id, { ...config, enabled })
     this.syncLegacyRegistry()
     this.persistEnabled()
+    invalidatePlaybackAvailabilityBySource(id)
     this.emit()
   }
 

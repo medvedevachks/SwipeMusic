@@ -1,4 +1,4 @@
-import { ApiMusicAdapter } from '../ApiMusicAdapter'
+import { ApiMusicAdapter } from '../ApiMusicAdapter.ts'
 import type { MusicSourceAdapter } from '../../MusicSourceAdapter'
 
 /** Заготовка VK Музыки. */

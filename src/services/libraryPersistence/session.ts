@@ -1,4 +1,5 @@
 import { clearCanonicalIdentityFlights } from '../canonical/userOrganization.ts'
+import { resetPlaybackAvailability } from '../playbackAvailability/resetPlaybackAvailability.ts'
 import { mapCanonicalLibrary } from '../canonical/mapCanonical.ts'
 import { createDefaultCategories } from '../defaultCategories.ts'
 import { getCollectionEngine } from '../collectionEngine/index.ts'
@@ -18,6 +19,7 @@ function clearLocalLibrary(): void {
   getCollectionEngine().replaceStorageData({ tracks: [], actions: [] })
   useCanonicalLibraryStore.getState().clear()
   clearCanonicalIdentityFlights()
+  resetPlaybackAvailability()
 }
 
 export function applyCanonicalSnapshot(

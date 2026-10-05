@@ -1,4 +1,5 @@
 ﻿import type { Track } from '../types/track'
+import type { TrackAvailabilityProbe } from '../types/playbackAvailability'
 import type { PlaybackCandidate } from '../services/playbackResolver'
 import type {
   FetchTracksParams,
@@ -41,6 +42,12 @@ export interface MusicSourceAdapter extends MusicSource {
    * Без метода — Resolver использует fallback через getStream.
    */
   getPlaybackCandidates?(track: Track): Promise<PlaybackCandidate[]>
+  /**
+   * Можно ли воспроизвести этот source track сейчас.
+   * Нет метода — resolver не считает копию playable.
+   * Метод не запускает плеер и не выбирает источник.
+   */
+  checkTrackAvailability?(track: Track): Promise<TrackAvailabilityProbe>
   getCover(track: Track): Promise<string | undefined>
   dispose(): void | Promise<void>
 }

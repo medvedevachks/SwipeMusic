@@ -76,10 +76,13 @@ MVP-04 — DONE
 MVP-04A — DONE, commit `feat: add canonical track identity layer`
 MVP-04B — DONE
 MVP-04B1 — DONE, commit `feat: add canonical library persistence`
-MVP-04B2 — DONE, без commit
+MVP-04B2 — DONE, commit `feat: use canonical tracks for user organization`
+MVP-05 — PARTIAL
+MVP-05A — DONE, commit `feat: add playback availability layer`
+MVP-05B — TODO
 ```
 
-Следующий этап: MVP-05 — Playback Availability. Склейка поиска, дедуп свайп-ленты, playback fallback и playback каталога не начаты.
+Следующий этап: MVP-05B — подставить уже посчитанную playable SourceCopy перед существующим playback. Fallback, приоритет источников и subscription UX не входят в MVP-05B.
 
 ## MVP-01B — Password recovery
 
@@ -172,7 +175,7 @@ MVP-04B2 — DONE, без commit
 
 ## MVP-04B2 — Frontend canonical organization
 
-Сделано на ветке `feature/mvp-04-canonical-track` от `f0769fc`. Commit не создавался.
+Сделано на ветке `feature/mvp-04-canonical-track` от `f0769fc`. Commit: `feat: use canonical tracks for user organization`.
 
 - После входа рядом с `GET /api/me/library-state` загружается `GET /api/me/canonical-library`. Старый bootstrap остаётся: снимки источников, история, `gestureConfig` и Collection Engine.
 - Лайк, снятие лайка и членство каталога идут через `ensureCanonicalForTrack`, затем PATCH/PUT/DELETE canonical API. Клиент не передаёт `userId`. Новые действия не пишут `user_category_tracks` и не считают `user_collection_tracks.liked` источником истины.
@@ -180,3 +183,15 @@ MVP-04B2 — DONE, без commit
 - История после успешного свайпа хранит source Track, с которым взаимодействовали. Playback, провайдеры и жесты не менялись. У canonical-строки нет Play, fallback нет.
 - Logout очищает canonical state до загрузки следующего пользователя.
 - `npm test`: прежние 73 и 14 тестов frontend canonical organization. Lint и build проходят. Старое предупреждение oxlint в `ProviderAuthPanel.tsx` не исправлялось.
+
+## MVP-05A — Playback availability foundation
+
+Сделано на ветке `feature/mvp-05-playback-availability` от `f1481c8`. Commit: `feat: add playback availability layer`.
+
+- CanonicalTrack остаётся постоянной идентичностью. SourceCopy остаётся копией провайдера. PlaybackAvailability — эфемерная runtime-возможность и не пишется в SQLite.
+- `resolveCanonicalPlaybackAvailability` считает статус каждой копии. Сначала дешёвые условия: копия, регистрация адаптера, поддержка playback, включённость источника и auth. Сетевой probe не вызывается, если уже ясно `NOT_CONNECTED`, `AUTH_REQUIRED` или `UNSUPPORTED`.
+- `UNKNOWN` не равен `UNAVAILABLE` и не считается playable. Подключённый аккаунт без track probe остаётся `UNKNOWN`. Ошибка сети остаётся `UNKNOWN`. No-rights становится `SUBSCRIPTION_REQUIRED`.
+- Local playable только при выданной папке и handle файла. Mock/demo с preview — `PLAYABLE`. VK, Zaycev и custom stub не помечаются playable.
+- Короткий session cache сбрасывается при `invalidatePlaybackAvailabilityBySource` и при logout. Availability store отделён от canonical identity store.
+- PlaybackResolver, очередь и плеер не менялись. Автовыбор источника, приоритет провайдеров и fallback не делались.
+
