@@ -364,7 +364,7 @@ export class SpotifyAdapter implements MusicSourceAdapter {
               { title: 'Перезапустите приложение.' },
             ],
             documentationUrl:
-              'https://github.com/r-sh-galimov/SwipeMusic/blob/develop/docs/providers.md',
+              'https://github.com/medvedevachks/SwipeMusic/blob/main/docs/providers.md',
             documentationLabel: 'Open setup guide',
           },
         }

@@ -1,6 +1,10 @@
 # ROADMAP MVP v1.0
 
-Статусы сняты с кода ветки `main`, коммит `475fd34`. Это не старый план и не обещание, что следующий этап уже начат.
+Канонический репозиторий: https://github.com/medvedevachks/SwipeMusic. Исторический upstream: https://github.com/r-sh-galimov/SwipeMusic.
+
+Защищённый baseline Car MVP: `888f5e2`, ветка `checkpoint/car-mvp-foundation`, tag `car-mvp-foundation`. Стабилизация Yandex отложена. Текущая интеграция заморожена и не переписывается без отдельного решения. VK и Zaycev остаются заготовками до отдельного архитектурного решения.
+
+Таблица ниже фиксирует статус MVP. Она не означает, что следующий этап уже начат.
 
 | Этап | Статус | Почему |
 |---|---|---|
@@ -11,7 +15,7 @@
 | 4. Canonical Track + Source Copies | DONE | MVP-04A, MVP-04B1 и MVP-04B2: лайк и членство каталога на frontend идут через CanonicalTrack. Source Track остаётся идентичностью провайдера, поиска, свайп-ленты, истории и playback. Склейка поиска, дедуп ленты и playback fallback не входят в этот этап. |
 | 5. Playback Availability | DONE | MVP-05A и MVP-05B: availability доказывает PLAYABLE, selector выбирает одну SourceCopy до playback. Явный source сохраняется. Приоритета провайдеров и runtime fallback нет. |
 | 6. Alternative Source / Subscription UX | DONE | MVP-06A и MVP-06B: generic runtime fallback подключён к playback, AUTO неблокирующий, ASK подтверждается, действия только для известной SourceCopy. Покупки подписки и discovery нет. |
-| 7. Yandex stabilization | PARTIAL | Device Flow, поиск, чтение лайков и плейлистов, кандидаты стрима есть в коде. Live не подтверждался. Refresh token не используется. Ручного user token нет. |
+| 7. Yandex stabilization | PARTIAL | Device Flow, поиск, чтение лайков и плейлистов, кандидаты стрима есть в коде. Live не подтверждался. Refresh token не используется. Ручного user token нет. Для Car MVP этот код заморожен: стабилизация отложена. |
 | 8. Local Music stabilization | PARTIAL | Выбор папки, скан, IndexedDB handle, поиск и локальное воспроизведение реализованы. Отдельной стабилизации и QA нет. |
 | 9. Spotify verification | PARTIAL | OAuth PKCE, поиск, sync, preview и Web Playback SDK есть в коде. Нужен `VITE_SPOTIFY_CLIENT_ID`. В этой сессии аккаунт не проверялся. |
 | 10. VK Provider | TODO | `VKMusicAdapter` — пустая заготовка `ApiMusicAdapter`. `isAvailable()` возвращает false. |
@@ -50,4 +54,4 @@ MVP-06A Generic runtime fallback + discovery-ready pipeline = DONE
 MVP-06B Alternative source / subscription UX = DONE
 ```
 
-Следующий этап: MVP-07 — Yandex stabilization. Перед изменениями подключения и авторизации Yandex нужно отдельно обсудить текущее состояние и варианты. Discovery и новые provider integrations в MVP-06 не входят.
+Следующий приоритет: Car MVP. Стабилизация Yandex отложена. VK, Zaycev и Car Mode не входят в этот checkpoint и не начинаются без отдельного решения.

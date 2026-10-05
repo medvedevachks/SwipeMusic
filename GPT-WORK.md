@@ -2,8 +2,10 @@
 
 Документ для передачи контекста другому GPT. Это описание этапа, а не снимок архитектуры. Снимок кода: [GPT.md](GPT.md). Цель продукта: [docs/MVP_V1.md](docs/MVP_V1.md). Статусы этапов: [docs/ROADMAP_MVP_V1.md](docs/ROADMAP_MVP_V1.md).
 
-Репозиторий: https://github.com/r-sh-galimov/SwipeMusic  
-Ветка `main`, коммит `475fd34`.
+Канонический репозиторий: https://github.com/medvedevachks/SwipeMusic  
+Исторический upstream: https://github.com/r-sh-galimov/SwipeMusic
+
+Защищённый Car MVP baseline: commit `888f5e2`, ветка `checkpoint/car-mvp-foundation`, tag `car-mvp-foundation`. Задача, которая ломает существующий Yandex flow, не считается выполненной. Стабилизация Yandex отложена: текущую интеграцию не переписывать без отдельного решения.
 
 ## Что было сделано
 
@@ -85,7 +87,7 @@ MVP-06A — DONE, commit `feat: add runtime playback fallback`
 MVP-06B — DONE, commit `feat: add playback fallback user experience`
 ```
 
-Следующий этап: MVP-07 — стабилизация Yandex. Его не начинать, пока текущее подключение и варианты не обсуждены с владельцем проекта.
+Следующий приоритет: Car MVP. Стабилизация Yandex отложена и не начинается вместе с VK, Zaycev или Car Mode. Текущий Yandex flow остаётся замороженным baseline `888f5e2`.
 
 ## MVP-01B — Password recovery
 

@@ -4,10 +4,11 @@
 
 ## Git
 
-- Репозиторий: https://github.com/r-sh-galimov/SwipeMusic
-- Ветка разработки: `feature/mvp-06-alternative-source-ux`
-- Baseline ветки: `0fd18b2` (`feat: add runtime playback fallback`) на `feature/mvp-06-runtime-fallback`
-- Опубликованный `origin/main`: `475fd34`
+- Канонический репозиторий: https://github.com/medvedevachks/SwipeMusic
+- Исторический upstream: https://github.com/r-sh-galimov/SwipeMusic
+- Защищённый Car MVP baseline: `888f5e2` (`feat: add playback fallback user experience`), ветка `checkpoint/car-mvp-foundation`, tag `car-mvp-foundation`
+- Правило: задача Car MVP, которая ломает текущий Yandex flow, не считается выполненной. Стабилизация Yandex отложена. Auth, токены, сессия, Device Flow, endpoints, proxy, `getStream` и playback candidates Яндекса не переписываются без отдельного решения.
+- Приоритет после MVP-06: Car MVP. VK и Zaycev остаются заготовками, пока их архитектура отдельно не согласована.
 - Локальный commit аккаунта: `f4995d3`. Восстановление пароля: `1aa61c9`
 - MVP-02A (серверное хранение библиотеки) зафиксирован коммитом `feat: add server persistence API`
 - MVP-02B (frontend читает и пишет эту библиотеку) зафиксирован коммитом `feat: persist user library state`
@@ -136,7 +137,9 @@ UI
 - Между устройствами нет live sync: второе устройство видит данные после своего login/reload.
 - Подтверждения email нет.
 - Смена пароля из уже открытого профиля нет: только сценарий «забыл пароль».
-- Нет экрана Car Mode. Позже он должен использовать `RuntimeFallbackPolicy.AUTO` того же engine.
-- VK и Zaycev не подключены. В fallback они не реализуются и остаются `UNSUPPORTED`, пока нет известной playable copy.
+- Нет экрана Car Mode. Позже он должен использовать `RuntimeFallbackPolicy.AUTO` того же engine. Реализация Car Mode ещё не начата.
+- Яндекс Музыка: экспериментальный Device Flow уже в коде и заморожен для Car MVP.
+- Локальные файлы реализованы. Spotify реализован и не является текущим приоритетом Car MVP.
+- VK и Zaycev не подключены. Это заготовки `UNSUPPORTED`. Их реализация требует отдельного архитектурного решения. Custom тоже остаётся заготовкой.
 - Cross-provider fallback переключает только известные `PLAYABLE` SourceCopy одной композиции. UX подписки и подключения тоже только для такой известной copy. Отдельной покупки подписки нет.
 - `npm test`: 162 теста. 22 auth, 16 server persistence, 5 matcher, 4 canonical identity, 15 canonical library, 8 frontend persistence, 3 catalog UI/domain, 14 frontend canonical organization, 16 playback availability, 15 playable source selection, 16 runtime fallback, 11 live playback integration, 17 fallback UX. `viewedTrackIds`, очередь, плеер, MediaIndex, токены провайдеров и handle папки остаются локальными. `collectionId` / `collectionName` тоже локальные и в серверную схему не входят.

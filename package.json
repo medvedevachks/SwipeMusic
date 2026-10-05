@@ -1,6 +1,10 @@
 {
   "name": "swipe-music",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/medvedevachks/SwipeMusic.git"
+  },
   "version": "0.0.0",
   "type": "module",
   "scripts": {
