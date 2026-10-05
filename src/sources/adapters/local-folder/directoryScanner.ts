@@ -1,4 +1,4 @@
-import { isSupportedAudioFileName } from './audioFormats'
+import { isSupportedAudioFileName } from './audioFormats.ts'
 import type { IndexedLocalFile, LocalScanProgress } from './types'
 
 export type DirectoryScanResult = {

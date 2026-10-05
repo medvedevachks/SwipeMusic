@@ -131,6 +131,10 @@ export const useLocalMusicStore = create<LocalMusicStore>((set, get) => {
           libraryGeneration: get().libraryGeneration + 1,
         })
       } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          set({ isBusy: false })
+          return
+        }
         set({
           error:
             error instanceof Error ? error.message : 'Ошибка пересканирования',

@@ -1,5 +1,6 @@
 import { useLocalMusicStore } from '../store/localMusicStore'
 import type { LocalAccessState } from '../sources/adapters/local-folder'
+import { readLocalCapability } from '../sources/adapters/local-folder/localCapability'
 
 function accessLabel(state: LocalAccessState): string {
   switch (state) {
@@ -156,8 +157,8 @@ export function LocalMusicPanel() {
 
       {stats.accessState === 'unsupported' ? (
         <p className="text-sm text-[var(--color-muted)]">
-          Нужен Chromium-браузер с поддержкой File System Access API
-          (Chrome / Edge).
+          {readLocalCapability().message ??
+            'Локальная папка в этом браузере недоступна.'}
         </p>
       ) : null}
     </section>

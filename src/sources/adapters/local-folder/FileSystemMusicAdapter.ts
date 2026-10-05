@@ -1,4 +1,4 @@
-import { createTrack } from '../../normalizeTrack'
+import { createTrack } from '../../normalizeTrack.ts'
 import type {
   FetchTracksParams,
   FetchTracksResult,
@@ -9,18 +9,21 @@ import type { MusicSourceAdapter, SearchResult } from '../../MusicSourceAdapter'
 import type { SourceType } from '../../../types/source'
 import type { Track } from '../../../types/track'
 import type { TrackAvailabilityProbe } from '../../../types/playbackAvailability'
-import { assessLocalFileAvailability } from '../../../services/playbackAvailability/localProbe'
-import { stripFileExtension, mimeTypeForAudioFileName } from './audioFormats'
-import { scanDirectoryForAudio } from './directoryScanner'
+import { assessLocalFileAvailability } from '../../../services/playbackAvailability/localProbe.ts'
+import { stripFileExtension, mimeTypeForAudioFileName } from './audioFormats.ts'
+import { scanDirectoryForAudio } from './directoryScanner.ts'
 import {
   clearLocalLibraryStorage,
   loadDirectoryHandle,
   loadLibrarySnapshot,
   saveDirectoryHandle,
   saveLibrarySnapshot,
-} from './handleStorage'
-import { ObjectUrlCache } from './ObjectUrlCache'
-import { getMediaIndex, indexTracksForSource } from '../../../services/mediaIndex'
+} from './handleStorage.ts'
+import { ObjectUrlCache } from './ObjectUrlCache.ts'
+import {
+  readLocalCapability,
+  type LocalCapability,
+} from './localCapability.ts'
 import type {
   IndexedLocalFile,
   LocalAccessState,
@@ -31,14 +34,68 @@ import type {
   LocalScanProgressListener,
 } from './types'
 
+type LocalIndexedMediaFile = {
+  sourceId: string
+  externalId: string
+  path: string
+  fileName: string
+}
+
+export type LocalLibraryStoragePort = {
+  saveDirectoryHandle(handle: FileSystemDirectoryHandle): Promise<void>
+  loadDirectoryHandle(): Promise<FileSystemDirectoryHandle | null>
+  saveLibrarySnapshot(snapshot: LocalLibrarySnapshot): Promise<void>
+  loadLibrarySnapshot(): Promise<LocalLibrarySnapshot | null>
+  clear(): Promise<void>
+}
+
+export type LocalMediaIndexPort = {
+  indexTracks(
+    sourceId: string,
+    tracks: Track[],
+    files: LocalIndexedMediaFile[],
+  ): Promise<void>
+  clearSource(sourceId: string): Promise<void>
+}
+
 const UNKNOWN_ARTIST = 'Unknown Artist'
 const COVER_COLOR = '#0f766e'
 
-function isFileSystemAccessSupported(): boolean {
+function defaultStorage(): LocalLibraryStoragePort {
+  return {
+    saveDirectoryHandle,
+    loadDirectoryHandle,
+    saveLibrarySnapshot,
+    loadLibrarySnapshot,
+    clear: clearLocalLibraryStorage,
+  }
+}
+
+function defaultMediaIndex(): LocalMediaIndexPort {
+  return {
+    async indexTracks(sourceId, tracks, files) {
+      const { indexTracksForSource } = await import(
+        '../../../services/mediaIndex/sync.ts'
+      )
+      await indexTracksForSource(sourceId, tracks, files)
+    },
+    async clearSource(sourceId) {
+      const { getMediaIndex } = await import(
+        '../../../services/mediaIndex/MediaIndex.ts'
+      )
+      getMediaIndex().replaceSource(sourceId, [])
+    },
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
+}
+
+function isPermissionError(error: unknown): boolean {
   return (
-    typeof window !== 'undefined' &&
-    typeof window.showDirectoryPicker === 'function' &&
-    typeof indexedDB !== 'undefined'
+    error instanceof DOMException &&
+    (error.name === 'NotAllowedError' || error.name === 'SecurityError')
   )
 }
 
@@ -101,11 +158,23 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
   }
   private scanAbort: AbortController | null = null
   private initPromise: Promise<void> | null = null
+  private readonly capability: () => LocalCapability
+  private readonly storage: LocalLibraryStoragePort
+  private readonly mediaIndex: LocalMediaIndexPort
 
-  constructor(options?: { id?: string; label?: string }) {
+  constructor(options?: {
+    id?: string
+    label?: string
+    capability?: () => LocalCapability
+    storage?: LocalLibraryStoragePort
+    mediaIndex?: LocalMediaIndexPort
+  }) {
     this.id = options?.id ?? 'local-folder'
     this.label = options?.label ?? 'Local Music'
-    this.accessState = isFileSystemAccessSupported() ? 'idle' : 'unsupported'
+    this.capability = options?.capability ?? readLocalCapability
+    this.storage = options?.storage ?? defaultStorage()
+    this.mediaIndex = options?.mediaIndex ?? defaultMediaIndex()
+    this.accessState = this.capability().supported ? 'idle' : 'unsupported'
   }
 
   async initialize(): Promise<void> {
@@ -169,12 +238,11 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
 
   /** Выбор папки пользователем + первичное сканирование. */
   async connectFolder(): Promise<LocalLibraryStats> {
-    if (!isFileSystemAccessSupported()) {
+    const capability = this.capability()
+    if (!capability.supported) {
       this.accessState = 'unsupported'
       this.emitStats()
-      throw new Error(
-        'File System Access API не поддерживается в этом браузере',
-      )
+      throw new Error(capability.message ?? 'Локальная папка недоступна.')
     }
 
     const showDirectoryPicker = window.showDirectoryPicker.bind(window)
@@ -194,7 +262,7 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
     this.directoryHandle = handle
     this.folderName = handle.name
     this.accessState = 'granted'
-    await saveDirectoryHandle(handle)
+    await this.storage.saveDirectoryHandle(handle)
 
     await this.runScan(handle)
     return this.getStats()
@@ -242,7 +310,7 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
     this.folderName = null
     this.subdirectoryCount = 0
     this.lastScanAt = null
-    this.accessState = isFileSystemAccessSupported() ? 'idle' : 'unsupported'
+    this.accessState = this.capability().supported ? 'idle' : 'unsupported'
     this.clearIndexedData()
     this.setProgress({
       phase: 'idle',
@@ -250,8 +318,8 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
       totalFiles: 0,
       foundTracks: 0,
     })
-    await clearLocalLibraryStorage()
-    getMediaIndex().replaceSource(this.id, [])
+    await this.storage.clear()
+    await this.mediaIndex.clearSource(this.id)
     this.emitStats()
   }
 
@@ -347,14 +415,14 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
   }
 
   private async restoreFromStorage(): Promise<void> {
-    if (!isFileSystemAccessSupported()) {
+    if (!this.capability().supported) {
       this.accessState = 'unsupported'
       this.emitStats()
       return
     }
 
-    const handle = await loadDirectoryHandle()
-    const snapshot = await loadLibrarySnapshot()
+    const handle = await this.storage.loadDirectoryHandle()
+    const snapshot = await this.storage.loadLibrarySnapshot()
 
     if (!handle) {
       this.accessState = 'idle'
@@ -379,10 +447,12 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
       try {
         await this.runScan(handle)
       } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') {
+        if (isAbortError(error)) {
           return
         }
-        this.accessState = 'prompt'
+        if (isPermissionError(error)) {
+          this.accessState = 'prompt'
+        }
         this.emitStats()
       }
       return
@@ -401,48 +471,34 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
     this.scanAbort?.abort()
     const controller = new AbortController()
     this.scanAbort = controller
-
-    this.clearIndexedData()
+    const hadLibrary = this.tracksById.size > 0
 
     try {
       const result = await scanDirectoryForAudio(handle, {
         signal: controller.signal,
-        onProgress: (progress) => this.setProgress(progress),
+        onProgress: (progress) => {
+          if (this.scanAbort === controller) {
+            this.setProgress(progress)
+          }
+        },
       })
-
-      this.subdirectoryCount = result.subdirectoryCount
-      this.lastScanAt = Date.now()
-      this.folderName = handle.name
-
-      for (const file of result.files) {
-        this.filesByPath.set(file.relativePath, file)
-        const track = this.buildTrackShell(file)
-        this.tracksById.set(track.id, track)
-      }
-
-      const snapshot: LocalLibrarySnapshot = {
-        folderName: handle.name,
-        trackCount: result.files.length,
-        subdirectoryCount: result.subdirectoryCount,
-        lastScanAt: this.lastScanAt,
-        relativePaths: result.files.map((file) => file.relativePath),
-      }
-      await saveLibrarySnapshot(snapshot)
-      this.emitStats()
-
-      // Синхронизация в MediaIndex — Library/Search читают только оттуда.
-      const mediaFiles = result.files.map((file) => ({
-        sourceId: this.id,
-        externalId: file.relativePath,
-        path: file.relativePath,
-        fileName: file.fileName,
-      }))
-      await indexTracksForSource(
-        this.id,
-        [...this.tracksById.values()],
-        mediaFiles,
-      )
+      await this.commitScan(handle, result, controller)
     } catch (error) {
+      if (this.scanAbort !== controller) {
+        throw error
+      }
+      if (!hadLibrary) {
+        await this.mediaIndex.clearSource(this.id)
+      }
+      if (isAbortError(error)) {
+        this.setProgress({
+          phase: 'idle',
+          processedFiles: 0,
+          totalFiles: 0,
+          foundTracks: this.tracksById.size,
+        })
+        throw error
+      }
       this.setProgress({
         phase: 'error',
         processedFiles: this.scanProgress.processedFiles,
@@ -456,6 +512,50 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
         this.scanAbort = null
       }
     }
+  }
+
+  /** Публикует библиотеку только целиком: сначала индекс, затем память адаптера. */
+  private async commitScan(
+    handle: FileSystemDirectoryHandle,
+    result: Awaited<ReturnType<typeof scanDirectoryForAudio>>,
+    controller: AbortController,
+  ): Promise<void> {
+    if (this.scanAbort !== controller || controller.signal.aborted) {
+      throw new DOMException('Scanning aborted', 'AbortError')
+    }
+
+    const tracks = result.files.map((file) => this.buildTrackShell(file))
+    const mediaFiles = result.files.map((file) => ({
+      sourceId: this.id,
+      externalId: file.relativePath,
+      path: file.relativePath,
+      fileName: file.fileName,
+    }))
+    await this.mediaIndex.indexTracks(this.id, tracks, mediaFiles)
+    if (this.scanAbort !== controller) {
+      throw new DOMException('Scanning aborted', 'AbortError')
+    }
+
+    this.clearIndexedData()
+    for (const file of result.files) {
+      this.filesByPath.set(file.relativePath, file)
+    }
+    for (const track of tracks) {
+      this.tracksById.set(track.id, track)
+    }
+
+    this.subdirectoryCount = result.subdirectoryCount
+    this.lastScanAt = Date.now()
+    this.folderName = handle.name
+    const snapshot: LocalLibrarySnapshot = {
+      folderName: handle.name,
+      trackCount: result.files.length,
+      subdirectoryCount: result.subdirectoryCount,
+      lastScanAt: this.lastScanAt,
+      relativePaths: result.files.map((file) => file.relativePath),
+    }
+    await this.storage.saveLibrarySnapshot(snapshot)
+    this.emitStats()
   }
 
   private buildTrackShell(file: IndexedLocalFile): Track {
