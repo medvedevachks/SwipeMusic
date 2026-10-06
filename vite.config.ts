@@ -1,4 +1,6 @@
-import type { Plugin } from 'vite'
+import { existsSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import type { Plugin, ServerOptions } from 'vite'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
@@ -42,8 +44,40 @@ function yandexFetchProxy(): Plugin {
   }
 }
 
+const lanCertPath = resolve('.certs/lan-cert.pem')
+const lanKeyPath = resolve('.certs/lan-key.pem')
+
+function readLanHttps(): ServerOptions['https'] {
+  if (!existsSync(lanCertPath) || !existsSync(lanKeyPath)) {
+    const message = [
+      'LAN HTTPS: не найдены локальные сертификаты.',
+      '',
+      'Ожидаются файлы:',
+      '  .certs/lan-cert.pem',
+      '  .certs/lan-key.pem',
+      '',
+      'npm run dev их не требует и остаётся на http://127.0.0.1:5173.',
+      'Для Android PWA в локальной сети:',
+      '  1. Посмотрите IPv4 через ipconfig и выберите IP своей Wi-Fi или Ethernet сети.',
+      '  2. powershell -ExecutionPolicy Bypass -File .\\scripts\\setup-lan-pwa.ps1 -LanIp <IP>',
+      '',
+      'Если mkcert не установлен, скрипт остановится и покажет:',
+      '  winget install FiloSottile.mkcert',
+    ].join('\n')
+    console.error(`\n${message}\n`)
+    throw new Error(
+      'LAN HTTPS certificates are missing. Run scripts/setup-lan-pwa.ps1 -LanIp <IP>.',
+    )
+  }
+
+  return {
+    cert: readFileSync(lanCertPath),
+    key: readFileSync(lanKeyPath),
+  }
+}
+
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     tailwindcss(),
@@ -59,7 +93,6 @@ export default defineConfig({
         theme_color: '#0f172a',
         background_color: '#ffffff',
         display: 'standalone',
-        orientation: 'portrait',
         start_url: '/',
         scope: '/',
         lang: 'ru',
@@ -101,8 +134,9 @@ export default defineConfig({
     }),
   ],
   server: {
-    host: '127.0.0.1',
+    host: mode === 'lan' ? '0.0.0.0' : '127.0.0.1',
     port: 5173,
+    https: mode === 'lan' ? readLanHttps() : undefined,
     proxy: {
       '/api/auth': {
         target: 'http://127.0.0.1:8787',
@@ -143,4 +177,4 @@ export default defineConfig({
       },
     },
   },
-})
+}))
