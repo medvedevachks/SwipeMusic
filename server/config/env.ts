@@ -1,3 +1,5 @@
+import { parseProviderSessionKey } from '../providers/sessionCrypto.ts'
+
 export type MailTransport = 'console' | 'smtp' | 'memory'
 
 export type SmtpConfig = {
@@ -20,6 +22,7 @@ export type AppConfig = {
   smtp: SmtpConfig | null
   forgotPasswordLimit: number
   forgotPasswordWindowMs: number
+  providerSessionKey: Buffer | null
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -81,6 +84,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     '',
   )
 
+  const providerSessionKey = readProviderSessionKey(env, nodeEnv)
+
   return {
     port: readPort(env.PORT, 8787, 'PORT'),
     nodeEnv,
@@ -100,5 +105,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       15 * MINUTE_MS,
       'FORGOT_PASSWORD_WINDOW_MS',
     ),
+    providerSessionKey,
   }
+}
+
+function readProviderSessionKey(env: NodeJS.ProcessEnv, nodeEnv: string): Buffer | null {
+  const raw = env.PROVIDER_SESSION_KEY?.trim() ?? ''
+  if (raw) {
+    return parseProviderSessionKey(raw)
+  }
+  if (nodeEnv === 'production') {
+    throw new Error('PROVIDER_SESSION_KEY is invalid')
+  }
+  return null
 }

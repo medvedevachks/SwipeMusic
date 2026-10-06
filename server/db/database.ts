@@ -207,6 +207,16 @@ CREATE TABLE IF NOT EXISTS user_collection_canonical_applied (
   PRIMARY KEY (user_id, track_id),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS user_provider_connections (
+  user_id TEXT NOT NULL,
+  provider_id TEXT NOT NULL,
+  encrypted_session TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, provider_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 `
 
 export function openDatabase(databasePath: string): DatabaseSync {

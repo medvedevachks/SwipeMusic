@@ -3,7 +3,18 @@ import type {
   AuthenticationProvider,
   ProviderStatusDescriptor,
 } from '../../../sdk/types'
-import { indexTracksForSource } from '../../../services/mediaIndex'
+import { getMediaIndex, indexTracksForSource } from '../../../services/mediaIndex'
+import { useAuthStore } from '../../../store/authStore'
+import {
+  disconnectYandexAccount,
+  persistNewYandexSession,
+  reconcileYandexConnection,
+} from './reconcileSession'
+import {
+  deleteYandexConnection,
+  readYandexConnection,
+  saveYandexConnection,
+} from './sessionClient'
 import type { PlaybackCandidate } from '../../../services/playbackResolver'
 import type { MusicSourceAdapter, SearchResult } from '../../MusicSourceAdapter'
 import type {
@@ -27,11 +38,21 @@ import type {
 
 const SOURCE_ID = 'yandex-music'
 const SESSION_KEY = 'authSession'
+const OWNER_KEY = 'cacheOwnerUserId'
 const SYNC_KEY = 'syncMeta'
 const PLAYLISTS_KEY = 'playlists'
 const TRACKS_KEY = 'libraryTracks'
 
 type PlaylistCache = Array<{ id: string; name: string; trackIds: string[] }>
+
+const EMPTY_SYNC: YandexSyncMeta = {
+  lastSyncedAt: null,
+  trackCount: 0,
+  playlistCount: 0,
+  displayName: null,
+  uid: null,
+  hasPlus: false,
+}
 
 /**
  * Яндекс Музыка через внутренний API (experimental).
@@ -54,30 +75,36 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
   readonly supportsPagination = true
 
   private readonly storage = createProviderStorage(SOURCE_ID)
-  private session: YandexAuthSession | null = null
   private tracks: Track[] = []
   private playlists: PlaylistCache = []
-  private syncMeta: YandexSyncMeta = {
-    lastSyncedAt: null,
-    trackCount: 0,
-    playlistCount: 0,
-    displayName: null,
-    uid: null,
-    hasPlus: false,
-  }
+  private syncMeta: YandexSyncMeta = { ...EMPTY_SYNC }
   private ready: Promise<void>
   private api: YandexMusicApiClient
   private syncing = false
+  private connected = false
   private pendingDevice: YandexDeviceCode | null = null
   private authAbort: AbortController | null = null
+  private bindGeneration = 0
+  private unsubscribeAuth: (() => void) | null = null
 
   constructor() {
-    this.api = new YandexMusicApiClient(() => this.getValidAccessToken())
-    this.ready = this.hydrate()
+    this.api = new YandexMusicApiClient()
+    this.ready = this.bindAccount()
+    this.unsubscribeAuth = useAuthStore.subscribe((state, previous) => {
+      const nextId = state.user?.id ?? null
+      const prevId = previous.user?.id ?? null
+      if (nextId === prevId) {
+        return
+      }
+      this.connected = false
+      this.clearMemory()
+      void this.bindAccount()
+    })
   }
 
   async initialize(): Promise<void> {
     await this.ready
+    await this.bindAccount()
     pushYandexDevLog({
       stage: 'register',
       message: 'YandexMusicAdapter initialized',
@@ -86,11 +113,13 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
   }
 
   isAvailable(): boolean {
-    return this.session != null && Boolean(this.session.accessToken)
+    return this.connected
   }
 
   async dispose(): Promise<void> {
     this.authAbort?.abort()
+    this.unsubscribeAuth?.()
+    this.unsubscribeAuth = null
   }
 
   async fetchTracks(params?: FetchTracksParams): Promise<FetchTracksResult> {
@@ -254,10 +283,27 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
         },
       })
 
-      this.session = session
+      const profile = await persistNewYandexSession(session, (value) =>
+        saveYandexConnection(value),
+      )
       this.pendingDevice = null
-      await this.storage.setJson(SESSION_KEY, session)
-      await this.refreshAccount()
+      this.connected = true
+      const userId = useAuthStore.getState().user?.id ?? null
+      if (userId) {
+        await this.storage.setJson(OWNER_KEY, userId)
+      }
+      this.applyProfile(profile)
+      try {
+        await this.refreshAccount()
+      } catch (error) {
+        if (error instanceof YandexApiError && error.status === 401) {
+          throw error
+        }
+        pushYandexDevLog({
+          stage: 'error',
+          message: 'account refresh failed',
+        })
+      }
       pushYandexDevLog({
         stage: 'auth',
         message: 'login success',
@@ -273,22 +319,13 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
 
   private async logout(): Promise<void> {
     this.authAbort?.abort()
-    this.session = null
     this.pendingDevice = null
-    this.tracks = []
-    this.playlists = []
-    this.syncMeta = {
-      lastSyncedAt: null,
-      trackCount: 0,
-      playlistCount: 0,
-      displayName: null,
-      uid: null,
-      hasPlus: false,
-    }
-    await this.storage.remove(SESSION_KEY)
-    await this.storage.remove(SYNC_KEY)
-    await this.storage.remove(PLAYLISTS_KEY)
-    await this.storage.remove(TRACKS_KEY)
+    this.connected = false
+    await disconnectYandexAccount({
+      deleteRemote: () => deleteYandexConnection(),
+      removeLegacy: () => this.storage.remove(SESSION_KEY),
+      clearLibrary: () => this.clearStoredLibrary(),
+    })
     pushYandexDevLog({ stage: 'auth', message: 'logout' })
   }
 
@@ -309,6 +346,8 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
         ],
       }
     }
+
+    await this.bindAccount()
 
     if (!this.isAvailable()) {
       return {
@@ -477,37 +516,92 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
       await this.storage.setJson(SYNC_KEY, this.syncMeta)
     } catch (error) {
       if (error instanceof YandexApiError && error.status === 401) {
-        await this.logout()
+        this.connected = false
+        if (error.code === 'UNAUTHENTICATED') {
+          this.clearMemory()
+        } else {
+          await this.storage.remove(SESSION_KEY)
+          await this.clearStoredLibrary()
+          await deleteYandexConnection()
+        }
       }
       throw error
     }
   }
 
-  private async hydrate(): Promise<void> {
-    try {
-      const session =
-        (await this.storage.getJson<YandexAuthSession>(SESSION_KEY)) ?? null
-      this.session = session
-      const sync =
-        (await this.storage.getJson<YandexSyncMeta>(SYNC_KEY)) ?? null
-      if (sync) {
-        this.syncMeta = sync
-      }
-      this.tracks =
-        (await this.storage.getJson<Track[]>(TRACKS_KEY)) ?? []
-      this.playlists =
-        (await this.storage.getJson<PlaylistCache>(PLAYLISTS_KEY)) ?? []
-    } catch {
-      this.session = null
+  private async bindAccount(): Promise<void> {
+    const generation = ++this.bindGeneration
+    const userId = useAuthStore.getState().user?.id ?? null
+    if (!userId) {
+      this.connected = false
+      this.clearMemory()
+      return
+    }
+
+    const outcome = await reconcileYandexConnection({
+      userId,
+      readStatus: () => readYandexConnection(),
+      saveLegacy: (legacy) => saveYandexConnection(legacy),
+      storage: {
+        readLegacy: () => this.storage.getJson<YandexAuthSession>(SESSION_KEY),
+        removeLegacy: () => this.storage.remove(SESSION_KEY),
+        readOwner: async () => {
+          const owner = await this.storage.getJson<string>(OWNER_KEY)
+          return typeof owner === 'string' ? owner : null
+        },
+        writeOwner: (ownerId) => this.storage.setJson(OWNER_KEY, ownerId),
+        clearLibrary: () => this.clearStoredLibrary(),
+      },
+    })
+    if (generation !== this.bindGeneration) {
+      return
+    }
+    this.connected = outcome.connected
+    if (!outcome.connected) {
+      this.clearMemory()
+      return
+    }
+    await this.loadLibraryCache()
+    this.applyProfile(outcome.profile)
+  }
+
+  private applyProfile(
+    profile: { displayName: string | null; hasPlus: boolean; uid: number | null } | null,
+  ): void {
+    if (!profile) {
+      return
+    }
+    this.syncMeta = {
+      ...this.syncMeta,
+      displayName: profile.displayName ?? this.syncMeta.displayName,
+      hasPlus: profile.hasPlus,
+      uid: profile.uid ?? this.syncMeta.uid,
     }
   }
 
-  private async getValidAccessToken(): Promise<string> {
-    await this.ready
-    if (!this.session?.accessToken) {
-      throw new Error('Yandex Music: нет сессии')
+  private clearMemory(): void {
+    this.tracks = []
+    this.playlists = []
+    this.syncMeta = { ...EMPTY_SYNC }
+  }
+
+  private async clearStoredLibrary(): Promise<void> {
+    this.clearMemory()
+    await this.storage.remove(TRACKS_KEY)
+    await this.storage.remove(PLAYLISTS_KEY)
+    await this.storage.remove(SYNC_KEY)
+    const index = getMediaIndex()
+    await index.whenReady()
+    index.replaceSource(SOURCE_ID, [])
+  }
+
+  private async loadLibraryCache(): Promise<void> {
+    const sync = await this.storage.getJson<YandexSyncMeta>(SYNC_KEY)
+    if (sync) {
+      this.syncMeta = { ...EMPTY_SYNC, ...sync }
     }
-    return this.session.accessToken
+    this.tracks = (await this.storage.getJson<Track[]>(TRACKS_KEY)) ?? []
+    this.playlists = (await this.storage.getJson<PlaylistCache>(PLAYLISTS_KEY)) ?? []
   }
 }
 

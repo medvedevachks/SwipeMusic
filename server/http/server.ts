@@ -1,14 +1,15 @@
 import { createServer, type Server } from 'node:http'
-import type { DatabaseSync } from 'node:sqlite'
 import type { ForgotPasswordLimiter } from '../auth/rateLimit.ts'
-import type { AppConfig } from '../config/env.ts'
 import type { MailSender } from '../mail/MailSender.ts'
 import { handleAuthRequest } from './authRoutes.ts'
 import { handleLibraryRequest } from './libraryRoutes.ts'
+import {
+  handleYandexMusicProxy,
+  handleYandexProviderRequest,
+  type YandexRouteContext,
+} from './yandexRoutes.ts'
 
-export type AuthServerOptions = {
-  db: DatabaseSync
-  config: AppConfig
+export type AuthServerOptions = YandexRouteContext & {
   mail: MailSender
   limiter: ForgotPasswordLimiter
 }
@@ -16,9 +17,14 @@ export type AuthServerOptions = {
 export function createAuthServer(options: AuthServerOptions): Server {
   return createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-    const handler = url.pathname.startsWith('/api/me')
-      ? handleLibraryRequest(req, res, options)
-      : handleAuthRequest(req, res, options)
+    const { pathname } = url
+    const handler = pathname.startsWith('/api/yandex-music')
+      ? handleYandexMusicProxy(req, res, options)
+      : pathname.startsWith('/api/me/providers/')
+        ? handleYandexProviderRequest(req, res, options)
+        : pathname.startsWith('/api/me')
+          ? handleLibraryRequest(req, res, options)
+          : handleAuthRequest(req, res, options)
 
     void handler.catch((error: unknown) => {
       if (res.headersSent) {

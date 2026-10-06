@@ -3,8 +3,9 @@ import { loadConfig } from './config/env.ts'
 import { openDatabase } from './db/database.ts'
 import { listenAuthServer } from './http/server.ts'
 import { createMailSender } from './mail/createMailSender.ts'
+import { attachProviderSessionKey } from './providers/sessionKey.ts'
 
-const config = loadConfig()
+const config = attachProviderSessionKey(loadConfig())
 const db = openDatabase(config.databasePath)
 const mail = createMailSender(config)
 const limiter = createForgotPasswordLimiter(

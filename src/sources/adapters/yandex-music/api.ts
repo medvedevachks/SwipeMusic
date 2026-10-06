@@ -1,5 +1,6 @@
 import { md5Hex } from './md5'
 import { pushYandexDevLog } from './devLog'
+import { yandexMusicRequestHeaders } from './requestHeaders'
 import type {
   YandexAccountStatus,
   YandexDownloadInfo,
@@ -12,11 +13,13 @@ const API_BASE = '/api/yandex-music'
 
 export class YandexApiError extends Error {
   readonly status: number
+  readonly code: string
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code = 'UPSTREAM') {
     super(message)
     this.name = 'YandexApiError'
     this.status = status
+    this.code = code
   }
 }
 
@@ -27,11 +30,6 @@ type ApiEnvelope<T> = {
 }
 
 export class YandexMusicApiClient {
-  private readonly getAccessToken: () => Promise<string>
-
-  constructor(getAccessToken: () => Promise<string>) {
-    this.getAccessToken = getAccessToken
-  }
 
   async getAccountStatus(signal?: AbortSignal): Promise<YandexAccountStatus> {
     return this.getJson<YandexAccountStatus>('/account/status', signal)
@@ -210,12 +208,9 @@ export class YandexMusicApiClient {
     signal?: AbortSignal,
     options?: { logHttp?: boolean },
   ): Promise<T> {
-    const token = await this.getAccessToken()
     const response = await fetch(`${API_BASE}${path}`, {
-      headers: {
-        Authorization: `OAuth ${token}`,
-        Accept: 'application/json',
-      },
+      headers: yandexMusicRequestHeaders(),
+      credentials: 'include',
       signal,
     })
 
@@ -233,14 +228,16 @@ export class YandexMusicApiClient {
         response.status === 431
           ? ' (Request Header Fields Too Large — обычно Cookie через proxy; перезапустите dev-сервер)'
           : ''
+      const code = readErrorCode(text)
       pushYandexDevLog({
         stage: 'error',
         message: 'Yandex Music API error',
-        detail: `HTTP ${response.status}${hint}: ${text.slice(0, 240)}`,
+        detail: `HTTP ${response.status}${hint}`,
       })
       throw new YandexApiError(
-        `Yandex Music API ${response.status}${hint}: ${text.slice(0, 120)}`,
+        `Yandex Music API ${response.status}${hint}`,
         response.status,
+        code,
       )
     }
 
@@ -262,6 +259,23 @@ export class YandexMusicApiClient {
     }
     return parsed as T
   }
+}
+
+function readErrorCode(text: string): string {
+  try {
+    const parsed = JSON.parse(text) as { error?: unknown }
+    if (
+      typeof parsed.error === 'string' &&
+      parsed.error.length > 0 &&
+      parsed.error.length < 64 &&
+      !parsed.error.includes(' ')
+    ) {
+      return parsed.error
+    }
+  } catch {
+    return 'UPSTREAM'
+  }
+  return 'UPSTREAM'
 }
 
 function xmlMatch(xml: string, tag: string): string | null {

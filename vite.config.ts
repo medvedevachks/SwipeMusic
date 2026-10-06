@@ -122,7 +122,8 @@ export default defineConfig(({ mode }) => ({
           {
             urlPattern: ({ url }: { url: URL }) =>
               url.pathname.startsWith('/api/auth/') ||
-              url.pathname.startsWith('/api/me/'),
+              url.pathname.startsWith('/api/me/') ||
+              url.pathname.startsWith('/api/yandex-music'),
             handler: 'NetworkOnly',
           },
         ],
@@ -147,19 +148,8 @@ export default defineConfig(({ mode }) => ({
         changeOrigin: true,
       },
       '/api/yandex-music': {
-        target: 'https://api.music.yandex.net',
+        target: 'http://127.0.0.1:8787',
         changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(/^\/api\/yandex-music/, ''),
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq) => {
-            // HTTP 431: браузер шлёт огромные Cookie на localhost → upstream.
-            proxyReq.removeHeader('cookie')
-            proxyReq.removeHeader('Cookie')
-            proxyReq.removeHeader('origin')
-            proxyReq.removeHeader('referer')
-          })
-        },
       },
       '/api/yandex-oauth': {
         target: 'https://oauth.yandex.ru',
