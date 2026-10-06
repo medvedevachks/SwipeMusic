@@ -244,26 +244,31 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
     this.authAbort = new AbortController()
     pushYandexDevLog({ stage: 'auth', message: 'login started (device flow)' })
 
-    const session = await runYandexDeviceAuth({
-      signal: this.authAbort.signal,
-      onCode: (code) => {
-        this.pendingDevice = code
-        void navigator.clipboard.writeText(code.userCode).catch(() => undefined)
-        window.open(code.verificationUrl, '_blank', 'noopener,noreferrer')
-      },
-    })
+    try {
+      const session = await runYandexDeviceAuth({
+        signal: this.authAbort.signal,
+        onCode: (code) => {
+          this.pendingDevice = code
+          void navigator.clipboard.writeText(code.userCode).catch(() => undefined)
+          window.open(code.verificationUrl, '_blank', 'noopener,noreferrer')
+        },
+      })
 
-    this.session = session
-    this.pendingDevice = null
-    await this.storage.setJson(SESSION_KEY, session)
-    await this.refreshAccount()
-    pushYandexDevLog({
-      stage: 'auth',
-      message: 'login success',
-      detail: this.syncMeta.displayName ?? undefined,
-    })
-    const { platformEventBus } = await import('../../../sdk/EventBus')
-    platformEventBus.emit('SourceAuthenticated', { sourceId: SOURCE_ID })
+      this.session = session
+      this.pendingDevice = null
+      await this.storage.setJson(SESSION_KEY, session)
+      await this.refreshAccount()
+      pushYandexDevLog({
+        stage: 'auth',
+        message: 'login success',
+        detail: this.syncMeta.displayName ?? undefined,
+      })
+      const { platformEventBus } = await import('../../../sdk/EventBus')
+      platformEventBus.emit('SourceAuthenticated', { sourceId: SOURCE_ID })
+    } catch (error) {
+      this.pendingDevice = null
+      throw error
+    }
   }
 
   private async logout(): Promise<void> {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   enablePlugin,
   isProviderConnectedStatus,
@@ -12,6 +12,10 @@ import {
 import { getPlayerManager } from '../services/audioPlayer'
 import { sourceManager } from '../sources'
 import { ProviderSupportBadge } from './ProviderSupportBadge'
+import {
+  isProviderActionLocked,
+  watchLoginStatus,
+} from './watchLoginStatus'
 
 type ProviderAuthPanelProps = {
   pluginId: string
@@ -23,6 +27,7 @@ type PanelState = {
   descriptor: ProviderStatusDescriptor | null
   busy: boolean
   actionError: string | null
+  pendingAction: ProviderStatusActionId | null
 }
 
 function severityClass(severity: ProviderStatusSeverity): string {
@@ -114,7 +119,10 @@ export function ProviderAuthPanel({ pluginId, name }: ProviderAuthPanelProps) {
     descriptor: null,
     busy: false,
     actionError: null,
+    pendingAction: null,
   })
+  const pendingActionRef = useRef<ProviderStatusActionId | null>(null)
+  const suppressLoginError = useRef(false)
 
   const resolveAuth = useCallback((): AuthenticationProvider | null => {
     return pluginRegistry.getAuthenticationProvider(pluginId)
@@ -181,7 +189,14 @@ export function ProviderAuthPanel({ pluginId, name }: ProviderAuthPanelProps) {
   }, [refresh])
 
   const runAction = async (actionId: ProviderStatusActionId) => {
-    setState((prev) => ({ ...prev, busy: true, actionError: null }))
+    const previousAction = pendingActionRef.current
+    pendingActionRef.current = actionId
+    setState((prev) => ({
+      ...prev,
+      busy: true,
+      actionError: null,
+      pendingAction: actionId,
+    }))
     try {
       const auth = resolveAuth()
       if (!auth) {
@@ -193,9 +208,24 @@ export function ProviderAuthPanel({ pluginId, name }: ProviderAuthPanelProps) {
           if (!pluginRegistry.isEnabled(pluginId)) {
             enablePlugin(pluginId)
           }
-          await auth.login()
+          suppressLoginError.current = false
+          await watchLoginStatus({
+            login: () => auth.login(),
+            readStatus: () => resolveDescriptor(auth, name),
+            publish: (descriptor) => {
+              setState((prev) => ({
+                ...prev,
+                descriptor,
+                actionError: null,
+              }))
+            },
+            isCancelled: () => suppressLoginError.current,
+          })
           break
         case 'logout':
+          if (previousAction === 'login') {
+            suppressLoginError.current = true
+          }
           await auth.logout()
           getPlayerManager().releaseDevice(pluginId)
           break
@@ -219,16 +249,27 @@ export function ProviderAuthPanel({ pluginId, name }: ProviderAuthPanelProps) {
           break
       }
 
-      await refresh()
+      if (pendingActionRef.current === actionId) {
+        await refresh()
+      }
     } catch (error) {
+      if (pendingActionRef.current !== actionId) {
+        return
+      }
+      pendingActionRef.current = null
       setState((prev) => ({
         ...prev,
         busy: false,
+        pendingAction: null,
         actionError: error instanceof Error ? error.message : String(error),
       }))
       return
     }
-    setState((prev) => ({ ...prev, busy: false }))
+    if (pendingActionRef.current !== actionId) {
+      return
+    }
+    pendingActionRef.current = null
+    setState((prev) => ({ ...prev, busy: false, pendingAction: null }))
   }
 
   const descriptor = state.descriptor
@@ -334,7 +375,12 @@ export function ProviderAuthPanel({ pluginId, name }: ProviderAuthPanelProps) {
               <button
                 type="button"
                 className={actionButtonClass(action.variant)}
-                disabled={state.busy || action.disabled}
+                disabled={isProviderActionLocked(
+                  state.pendingAction,
+                  state.busy,
+                  action.id,
+                  action.disabled,
+                )}
                 onClick={() => {
                   void runAction(action.id)
                 }}
