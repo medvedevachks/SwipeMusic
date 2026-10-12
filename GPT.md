@@ -86,7 +86,7 @@ UI
 - Сессия: `localStorage`, ключ `sm-provider:yandex-music:authSession`, JSON с access/refresh token, без шифрования. IndexedDB и backend для токена нет.
 - Dev-log не пишет значение access token. В ошибку попадают до 240 символов тела ответа.
 - В коде есть: account status, search, чтение лайков, чтение до 30 плейлистов, sync в MediaIndex, stream/preview candidates, disconnect. Live в этой сессии не проверялся.
-- Прокси Vite только в dev: `/api/yandex-music`, `/api/yandex-oauth`, `/api/yandex-fetch`.
+- Прокси `/api/yandex-music`, `/api/yandex-oauth` и `/api/yandex-fetch` обслуживает Node backend. В dev Vite пересылает их на `127.0.0.1:8787`.
 
 `docs/yandex-music.md` и раздел «вариант A» в `docs/providers.md` устарели: там ещё stub.
 

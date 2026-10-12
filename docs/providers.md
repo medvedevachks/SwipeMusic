@@ -217,7 +217,7 @@ UI (`ProviderSupportBadge` / `ProviderAuthPanel` / таблица `/sources`) р
 Ограничения:
 
 - ToS / ломкость endpoints
-- CORS → Vite proxy только в DEV (`/api/yandex-music`, `/api/yandex-oauth`, `/api/yandex-fetch`)
+- CORS закрыт Node backend: `/api/yandex-music`, `/api/yandex-oauth`, `/api/yandex-fetch`. В dev Vite только пересылает их на `127.0.0.1:8787`
 - Полный стрим зависит от аккаунта/подписки и подписи download URL
 - Production static host требует своего reverse-proxy
 

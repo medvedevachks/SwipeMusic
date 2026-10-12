@@ -1,0 +1,17 @@
+# Example only. Replace every <PLACEHOLDER> before use.
+# Do not commit certificates, private keys, or secrets.
+# Backend stays on 127.0.0.1:8787. Do not publish port 8787.
+
+<PUBLIC_IP> {
+	tls <CERT_FILE> <KEY_FILE>
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	handle {
+		root * C:/SwipeMusic/dist
+		try_files {path} /index.html
+		file_server
+	}
+}

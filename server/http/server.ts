@@ -8,23 +8,35 @@ import {
   handleYandexProviderRequest,
   type YandexRouteContext,
 } from './yandexRoutes.ts'
+import { handleHealth, handleYandexFetchProxy, handleYandexOauthProxy } from './yandexEdge.ts'
+import type { HostResolver } from './yandexFetchPolicy.ts'
+import type { YandexUpstream } from '../providers/yandexSession.ts'
 
 export type AuthServerOptions = YandexRouteContext & {
   mail: MailSender
   limiter: ForgotPasswordLimiter
+  yandexOauthUpstream?: YandexUpstream
+  yandexMetadataUpstream?: YandexUpstream
+  resolveMetadataHost?: HostResolver
 }
 
 export function createAuthServer(options: AuthServerOptions): Server {
   return createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const { pathname } = url
-    const handler = pathname.startsWith('/api/yandex-music')
-      ? handleYandexMusicProxy(req, res, options)
-      : pathname.startsWith('/api/me/providers/')
-        ? handleYandexProviderRequest(req, res, options)
-        : pathname.startsWith('/api/me')
-          ? handleLibraryRequest(req, res, options)
-          : handleAuthRequest(req, res, options)
+    const handler = pathname === '/api/health'
+      ? Promise.resolve(handleHealth(req, res))
+      : pathname.startsWith('/api/yandex-oauth')
+        ? handleYandexOauthProxy(req, res, options)
+        : pathname === '/api/yandex-fetch'
+          ? handleYandexFetchProxy(req, res, options)
+          : pathname.startsWith('/api/yandex-music')
+            ? handleYandexMusicProxy(req, res, options)
+            : pathname.startsWith('/api/me/providers/')
+              ? handleYandexProviderRequest(req, res, options)
+              : pathname.startsWith('/api/me')
+                ? handleLibraryRequest(req, res, options)
+                : handleAuthRequest(req, res, options)
 
     void handler.catch((error: unknown) => {
       if (res.headersSent) {
