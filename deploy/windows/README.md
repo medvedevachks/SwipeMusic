@@ -27,11 +27,12 @@ C:\SwipeMusic\
     server\        код backend
     data\
         swipemusic.sqlite
+    secrets\       вне Git: production.env и provider-session.key
     deploy\
         windows\
 ```
 
-База, `PROVIDER_SESSION_KEY` и закрытые ключи сертификатов не кладутся в `dist\`.
+База, `PROVIDER_SESSION_KEY` и закрытые ключи сертификатов не кладутся в `dist\`. Каталог `secrets\` тоже не входит в Git.
 
 ## Секреты
 
@@ -43,7 +44,7 @@ C:\SwipeMusic\
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ```
 
-Напечатанное значение — секрет. Его нельзя коммитить, писать в логи и класть в `dist\`.
+Напечатанное значение — секрет. Его нельзя коммитить, писать в логи и класть в `dist\`. Сохранить его нужно вне Git, в `C:\SwipeMusic\secrets\provider-session.key`. Остальные production-переменные — в `C:\SwipeMusic\secrets\production.env`. В файл окружения ключ не класть: launcher читает `PROVIDER_SESSION_KEY` только из файла ключа и не печатает его.
 
 В `NODE_ENV=production` backend не стартует без валидного `PROVIDER_SESSION_KEY` и без SMTP. Это требование не ослабляется.
 
@@ -71,15 +72,25 @@ SMTP_FROM=<SMTP_FROM>
 
 `/api/yandex-fetch` нужен только для XML download-info. Разрешён один HTTPS-хост: `storage.mds.yandex.net`. Локальные, частные и link-local адреса отклоняются. Редирект на запрещённый хост не выполняется. Cookie и Authorization браузера на upstream не уходят.
 
+## Запуск backend
+
+Секреты лежат вне Git, в `C:\SwipeMusic\secrets`.
+
+```text
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\start-backend.ps1
+```
+
+Скрипт находит корень репозитория относительно себя, загружает `production.env`, проверяет, что ключ — это base64 на 32 байта, и запускает каноническую команду `node --experimental-strip-types server/index.ts`. Backend по-прежнему слушает только `127.0.0.1`. Пути к секретам можно переопределить параметрами `-EnvFile` и `-ProviderKeyFile`.
+
 ## Порядок запуска
 
 Команды выполняет оператор на сервере, не этот репозиторный шаг.
 
 1. Получить нужную ветку или релиз: `git checkout <deployment-branch-or-release>`.
 2. Установить зависимости: `npm ci`.
-3. Записать окружение и секреты по `deploy/windows/env.example`. Файл с секретами не коммитить.
+3. Записать окружение и секреты вне Git, в `C:\SwipeMusic\secrets`, по `deploy/windows/env.example`. Туда же положить `provider-session.key`. Эти файлы не коммитить.
 4. Собрать frontend: `npm run build`. Результат — `dist\`.
-5. Запустить backend: `npm run start:server`. Процесс слушает `127.0.0.1:8787`.
+5. Запустить backend: `powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\start-backend.ps1`. Процесс слушает `127.0.0.1:8787`.
 6. Проверить локально: `http://127.0.0.1:8787/api/health` отвечает `{"ok":true}`.
 7. Поставить Caddy и взять за основу `deploy/windows/Caddyfile.example`. В Caddyfile путь `C:/SwipeMusic/dist` — это `C:\SwipeMusic\dist`.
 8. Подставить свои файлы HTTPS-сертификата вместо `<CERT_FILE>` и `<KEY_FILE>`. Закрытый ключ не класть в `dist\` и не коммитить.
