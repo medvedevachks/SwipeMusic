@@ -76,11 +76,17 @@ SMTP_FROM=<SMTP_FROM>
 
 Секреты лежат вне Git, в `C:\SwipeMusic\secrets`.
 
+Сначала проверка, затем запуск. `preflight.ps1` только читает базу, окружение, ключ, сборку, порт и git status. Он не пишет файлы, не ставит службы и не трогает Caddy. Пароль SMTP и ключ провайдера не печатаются.
+
 ```text
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\preflight.ps1
+
 powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\start-backend.ps1
 ```
 
-Скрипт находит корень репозитория относительно себя, загружает `production.env`, проверяет, что ключ — это base64 на 32 байта, и запускает каноническую команду `node --experimental-strip-types server/index.ts`. Backend по-прежнему слушает только `127.0.0.1`. Пути к секретам можно переопределить параметрами `-EnvFile` и `-ProviderKeyFile`.
+Пока SMTP не заполнен, первая команда сообщает `PRE-FLIGHT: NOT READY`. Это ожидаемый результат, а не аварийный след. Когда SMTP заполнен и остальные проверки проходят, она сообщает `PRE-FLIGHT: READY`. Backend запускают после READY.
+
+`start-backend.ps1` находит корень репозитория относительно себя, загружает `production.env`, проверяет, что ключ — это canonical base64 на 32 байта, и запускает каноническую команду `node --experimental-strip-types server/index.ts`. Backend по-прежнему слушает только `127.0.0.1`. Пути к секретам можно переопределить параметрами `-EnvFile` и `-ProviderKeyFile`.
 
 ## Порядок запуска
 
@@ -90,7 +96,15 @@ powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\start-back
 2. Установить зависимости: `npm ci`.
 3. Записать окружение и секреты вне Git, в `C:\SwipeMusic\secrets`, по `deploy/windows/env.example`. Туда же положить `provider-session.key`. Эти файлы не коммитить.
 4. Собрать frontend: `npm run build`. Результат — `dist\`.
-5. Запустить backend: `powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\start-backend.ps1`. Процесс слушает `127.0.0.1:8787`.
+5. Проверить готовность и только потом запустить backend. Процесс слушает `127.0.0.1:8787`.
+
+```text
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\preflight.ps1
+
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\start-backend.ps1
+```
+
+Пока первая команда печатает `PRE-FLIGHT: NOT READY`, backend не запускать. После заполнения SMTP ожидается `PRE-FLIGHT: READY`.
 6. Проверить локально: `http://127.0.0.1:8787/api/health` отвечает `{"ok":true}`.
 7. Поставить Caddy и взять за основу `deploy/windows/Caddyfile.example`. В Caddyfile путь `C:/SwipeMusic/dist` — это `C:\SwipeMusic\dist`.
 8. Подставить свои файлы HTTPS-сертификата вместо `<CERT_FILE>` и `<KEY_FILE>`. Закрытый ключ не класть в `dist\` и не коммитить.
