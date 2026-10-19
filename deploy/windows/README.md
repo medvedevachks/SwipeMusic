@@ -90,6 +90,38 @@ powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\start-back
 
 `start-backend.ps1` находит корень репозитория относительно себя, загружает `production.env`, проверяет, что ключ — это canonical base64 на 32 байта, и запускает каноническую команду `node --experimental-strip-types server/index.ts`. Backend по-прежнему слушает только `127.0.0.1`. Пути к секретам можно переопределить параметрами `-EnvFile` и `-ProviderKeyFile`.
 
+## Канонический порядок
+
+Tracked-код на production вручную не редактируется. `data\` и `secrets\` не проходят через Git. Порт 8787 наружу не публикуется. Backend слушает только `127.0.0.1:8787`. SMTP-провайдер задаётся только переменными `SMTP_*`. Gmail, Brevo и любой другой совместимый relay не требуют правок application code.
+
+Production backend считается готовым только после трёх результатов: `PRE-FLIGHT: READY`, `BACKEND SMOKE TEST: PASS` и `SMTP TEST: PASS`.
+
+DEV PC / Cursor:
+
+```text
+npm test
+npm run lint
+npm run build
+commit
+push
+```
+
+Windows Server:
+
+```text
+git status --short
+git pull --ff-only
+git rev-parse HEAD
+npm ci
+npm run build
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\preflight.ps1
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\start-backend.ps1
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\test-backend.ps1
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\test-smtp.ps1
+```
+
+`npm ci` нужен, когда изменились dependencies или lockfile. `npm run build` нужен, когда изменился frontend. `test-backend.ps1` только читает уже запущенный процесс. `test-smtp.ps1` без `-SendTest` письмо не отправляет: проверяет параметры, DNS и TCP. Пока нет `SMTP_PASSWORD`, он пишет `[WAIT] SMTP credentials`. Реальная отправка одного письма: `test-smtp.ps1 -SendTest -To <email>`.
+
 ## Сертификат Let's Encrypt на IP
 
 Команды ниже оператор запускает на Windows Server позже. Этот шаг репозитория их не выполняет: Posh-ACME не ставится, сертификат не запрашивается, firewall и NAT не меняются, Caddy не устанавливается и не перезагружается.
@@ -127,7 +159,15 @@ powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\start-back
 ```
 
 Пока первая команда печатает `PRE-FLIGHT: NOT READY`, backend не запускать. После заполнения SMTP ожидается `PRE-FLIGHT: READY`.
-6. Проверить локально: `http://127.0.0.1:8787/api/health` отвечает `{"ok":true}`.
+6. Проверить запущенный backend и SMTP. Backend должен слушать только `127.0.0.1:8787`.
+
+```text
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\test-backend.ps1
+
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\test-smtp.ps1
+```
+
+Ожидаются `BACKEND SMOKE TEST: PASS` и `SMTP TEST: PASS`. Письмо по умолчанию не отправляется.
 7. Поставить Caddy и взять за основу `deploy/windows/Caddyfile.example`. В Caddyfile путь `C:/SwipeMusic/dist` — это `C:\SwipeMusic\dist`. Caddy не запускать, пока не получен IP-сертификат: на время HTTP-01 порт 80 нужен WebSelfHost.
 8. Подставить `C:\SwipeMusic\secrets\certs\fullchain.pem` и `privkey.pem` вместо `<CERT_FILE>` и `<KEY_FILE>`. Как их получить, описано выше; этот шаг репозитория сертификат не запрашивает. Закрытый ключ не класть в `dist\` и не коммитить.
 9. Настроить NAT только для портов 80 и 443 на этот Windows Server. Порт 8787 не публиковать.
