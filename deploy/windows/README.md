@@ -94,7 +94,15 @@ powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\start-back
 
 Tracked-код на production вручную не редактируется. `data\` и `secrets\` не проходят через Git. Порт 8787 наружу не публикуется. Backend слушает только `127.0.0.1:8787`. SMTP-провайдер задаётся только переменными `SMTP_*`. Gmail, Brevo и любой другой совместимый relay не требуют правок application code.
 
-Production backend считается готовым только после трёх результатов: `PRE-FLIGHT: READY`, `BACKEND SMOKE TEST: PASS` и `SMTP TEST: PASS`.
+Production backend считается готовым только после трёх результатов:
+
+```text
+PRE-FLIGHT: READY
+BACKEND SMOKE TEST: PASS
+SMTP TEST: PASS  # именно test-smtp.ps1 -SendTest -To <email>
+```
+
+`SMTP TEST: PASS` даёт только `test-smtp.ps1 -SendTest -To <email>` после успешной отправки письма через Nodemailer. `SMTP DIAGNOSTIC: PASS` подтверждает конфигурацию, DNS и TCP и не заменяет эту отправку.
 
 DEV PC / Cursor:
 
@@ -120,7 +128,7 @@ powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\test-backe
 powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\test-smtp.ps1
 ```
 
-`npm ci` нужен, когда изменились dependencies или lockfile. `npm run build` нужен, когда изменился frontend. `test-backend.ps1` только читает уже запущенный процесс. `test-smtp.ps1` без `-SendTest` письмо не отправляет: проверяет параметры, DNS и TCP. Пока нет `SMTP_PASSWORD`, он пишет `[WAIT] SMTP credentials`. Реальная отправка одного письма: `test-smtp.ps1 -SendTest -To <email>`.
+`npm ci` нужен, когда изменились dependencies или lockfile. `npm run build` нужен, когда изменился frontend. `test-backend.ps1` только читает уже запущенный процесс. `test-smtp.ps1` без `-SendTest` письмо не отправляет: это диагностика параметров, DNS и TCP. Если они корректны, итог `SMTP DIAGNOSTIC: PASS`. Пока нет `SMTP_PASSWORD`, скрипт пишет `[WAIT] SMTP credentials` и `SMTP DIAGNOSTIC: NOT READY`. Финальное подтверждение SMTP — только `test-smtp.ps1 -SendTest -To <email>` и строка `SMTP TEST: PASS`.
 
 ## Сертификат Let's Encrypt на IP
 
@@ -167,7 +175,11 @@ powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\test-backe
 powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\test-smtp.ps1
 ```
 
-Ожидаются `BACKEND SMOKE TEST: PASS` и `SMTP TEST: PASS`. Письмо по умолчанию не отправляется.
+Ожидаются `BACKEND SMOKE TEST: PASS` и, для команды без `-SendTest`, `SMTP DIAGNOSTIC: PASS`. Это ещё не подтверждение SMTP. Финальный результат `SMTP TEST: PASS` даёт только реальная отправка:
+
+```text
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\test-smtp.ps1 -SendTest -To <email>
+```
 7. Поставить Caddy и взять за основу `deploy/windows/Caddyfile.example`. В Caddyfile путь `C:/SwipeMusic/dist` — это `C:\SwipeMusic\dist`. Caddy не запускать, пока не получен IP-сертификат: на время HTTP-01 порт 80 нужен WebSelfHost.
 8. Подставить `C:\SwipeMusic\secrets\certs\fullchain.pem` и `privkey.pem` вместо `<CERT_FILE>` и `<KEY_FILE>`. Как их получить, описано выше; этот шаг репозитория сертификат не запрашивает. Закрытый ключ не класть в `dist\` и не коммитить.
 9. Настроить NAT только для портов 80 и 443 на этот Windows Server. Порт 8787 не публиковать.

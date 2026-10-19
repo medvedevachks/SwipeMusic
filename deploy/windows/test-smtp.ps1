@@ -4,9 +4,10 @@
   Проверяет универсальные SMTP-параметры production.env.
 
 .DESCRIPTION
-  По умолчанию письмо не отправляет. -SendTest отправляет одно тестовое
-  письмо через общий Nodemailer transport, без привязки к конкретному relay.
-  SMTP_PASSWORD не печатает.
+  Без -SendTest это только диагностика конфигурации, DNS и TCP.
+  Успех этой проверки — SMTP DIAGNOSTIC: PASS, не подтверждение SMTP.
+  SMTP TEST: PASS печатается только после -SendTest -To и успешной
+  отправки через Nodemailer. SMTP_PASSWORD не печатает.
 #>
 param(
   [string]$EnvFile = 'C:\SwipeMusic\secrets\production.env',
@@ -158,7 +159,8 @@ try {
 
   if ($SendTest) {
     if ($credentialStatus -eq 'WAIT') {
-      $sendStatus = $null
+      $sendStatus = 'FAIL'
+      $sendDetail = 'SMTP credentials не заданы, письмо не отправлено.'
     } elseif ([string]::IsNullOrWhiteSpace($To) -or $To.Trim() -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
       $sendStatus = 'FAIL'
       $sendDetail = 'Для -SendTest укажите -To с адресом получателя.'
@@ -256,23 +258,35 @@ try {
     if ($sendDetail) { Write-OperatorLine $sendDetail }
   }
 
-  $failed = $configStatus -ne 'OK' -or $dnsStatus -eq 'FAIL' -or $tcpStatus -eq 'FAIL' -or $sendStatus -eq 'FAIL'
+  $diagnosticFailed = $configStatus -ne 'OK' -or $dnsStatus -eq 'FAIL' -or $tcpStatus -eq 'FAIL'
   $waiting = $credentialStatus -eq 'WAIT'
   Write-OperatorLine ''
-  if (-not $failed -and -not $waiting -and ($dnsStatus -eq 'OK') -and ($tcpStatus -eq 'OK') -and (-not $SendTest -or $sendStatus -eq 'OK')) {
-    Write-OperatorLine 'SMTP TEST: PASS'
-    exit 0
-  }
-  if ($waiting -and -not $failed) {
-    Write-OperatorLine 'SMTP TEST: NOT READY'
+  if ($SendTest) {
+    if ($sendStatus -eq 'OK') {
+      Write-OperatorLine 'SMTP TEST: PASS'
+      exit 0
+    }
+    Write-OperatorLine 'SMTP TEST: FAIL'
     exit 1
   }
-  Write-OperatorLine 'SMTP TEST: FAIL'
+  if ($waiting -and -not $diagnosticFailed) {
+    Write-OperatorLine 'SMTP DIAGNOSTIC: NOT READY'
+    exit 1
+  }
+  if (-not $diagnosticFailed -and $dnsStatus -eq 'OK' -and $tcpStatus -eq 'OK') {
+    Write-OperatorLine 'SMTP DIAGNOSTIC: PASS'
+    exit 0
+  }
+  Write-OperatorLine 'SMTP DIAGNOSTIC: FAIL'
   exit 1
 } catch {
   Write-OperatorLine '[FAIL] SMTP test'
   Write-OperatorLine 'Проверка не завершилась. Пароль SMTP не выводится.'
   Write-OperatorLine ''
-  Write-OperatorLine 'SMTP TEST: FAIL'
+  if ($SendTest) {
+    Write-OperatorLine 'SMTP TEST: FAIL'
+  } else {
+    Write-OperatorLine 'SMTP DIAGNOSTIC: FAIL'
+  }
   exit 1
 }
