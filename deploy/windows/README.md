@@ -90,6 +90,26 @@ powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\start-back
 
 `start-backend.ps1` находит корень репозитория относительно себя, загружает `production.env`, проверяет, что ключ — это canonical base64 на 32 байта, и запускает каноническую команду `node --experimental-strip-types server/index.ts`. Backend по-прежнему слушает только `127.0.0.1`. Пути к секретам можно переопределить параметрами `-EnvFile` и `-ProviderKeyFile`.
 
+## Сертификат Let's Encrypt на IP
+
+Команды ниже оператор запускает на Windows Server позже. Этот шаг репозитория их не выполняет: Posh-ACME не ставится, сертификат не запрашивается, firewall и NAT не меняются, Caddy не устанавливается и не перезагружается.
+
+Нужен Posh-ACME не ниже 4.31.1. IP-сертификат Let's Encrypt запрашивается только с профилем `shortlived` и плагином `WebSelfHost` на стандартном порту 80. Реальный публичный IP в Git не записывается. Самоподписанные сертификаты и локальный CA Caddy не используются.
+
+Пока идёт проверка HTTP-01, внешний TCP 80 должен быть доступен из интернета на этот сервер. Скрипты сами правило firewall и проброс NAT не создают. Если порт 80 уже занят, запрос останавливается и не останавливает IIS или Caddy. Для http.sys без прав администратора может понадобиться URL reservation на `http://+:80/.well-known/acme-challenge/`; скрипт её не создаёт.
+
+```text
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\install-poshacme.ps1
+
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\check-acme-readiness.ps1
+
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\request-ip-certificate.ps1 -PublicIp <PUBLIC_IP> -Staging
+
+powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\request-ip-certificate.ps1 -PublicIp <PUBLIC_IP>
+```
+
+Сначала staging (`LE_STAGE`), затем production (`LE_PROD`). Проверка готовности ничего не создаёт. Если каталога `C:\SwipeMusic\secrets\certs` ещё нет, она пишет `[WAIT]` и `ACME PRE-FLIGHT: NOT READY`. После успешного запроса скрипт кладёт только `fullchain.pem` и `privkey.pem` в этот каталог и не печатает закрытый ключ. Каталог внутри `secrets\` и в Git не входит. Эти два файла позже подставляются вместо `<CERT_FILE>` и `<KEY_FILE>`.
+
 ## Порядок запуска
 
 Команды выполняет оператор на сервере, не этот репозиторный шаг.
@@ -108,8 +128,8 @@ powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\start-back
 
 Пока первая команда печатает `PRE-FLIGHT: NOT READY`, backend не запускать. После заполнения SMTP ожидается `PRE-FLIGHT: READY`.
 6. Проверить локально: `http://127.0.0.1:8787/api/health` отвечает `{"ok":true}`.
-7. Поставить Caddy и взять за основу `deploy/windows/Caddyfile.example`. В Caddyfile путь `C:/SwipeMusic/dist` — это `C:\SwipeMusic\dist`.
-8. Подставить свои файлы HTTPS-сертификата вместо `<CERT_FILE>` и `<KEY_FILE>`. Закрытый ключ не класть в `dist\` и не коммитить.
+7. Поставить Caddy и взять за основу `deploy/windows/Caddyfile.example`. В Caddyfile путь `C:/SwipeMusic/dist` — это `C:\SwipeMusic\dist`. Caddy не запускать, пока не получен IP-сертификат: на время HTTP-01 порт 80 нужен WebSelfHost.
+8. Подставить `C:\SwipeMusic\secrets\certs\fullchain.pem` и `privkey.pem` вместо `<CERT_FILE>` и `<KEY_FILE>`. Как их получить, описано выше; этот шаг репозитория сертификат не запрашивает. Закрытый ключ не класть в `dist\` и не коммитить.
 9. Настроить NAT только для портов 80 и 443 на этот Windows Server. Порт 8787 не публиковать.
 10. Снаружи открыть `https://<PUBLIC_IP>`, проверить вход, обновление страниц `/sources`, `/login`, `/reset-password` и сценарий Яндекса.
 
