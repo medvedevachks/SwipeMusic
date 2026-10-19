@@ -7,6 +7,8 @@
   Только чтение: база, секреты, сборка, порт 8787 и git status.
   Не пишет файлы, не ставит службы, не запускает backend и Caddy.
   Не печатает provider key, PROVIDER_SESSION_KEY и SMTP_PASSWORD.
+  Сверяет DATABASE_PATH, PORT, APP_PUBLIC_URL, MAIL_TRANSPORT,
+  отсутствие ключа в production.env, launcher и gitignore runtime-путей.
 #>
 param(
   [string]$DatabasePath = 'C:\SwipeMusic\data\swipemusic.sqlite',
@@ -132,6 +134,88 @@ function Test-IgnoredRuntimePath {
   return $false
 }
 
+function Get-NormalizedAbsolutePath {
+  param([AllowNull()][string]$Path)
+  if ([string]::IsNullOrWhiteSpace($Path)) {
+    return $null
+  }
+  $trimmed = $Path.Trim()
+  if ($trimmed.Length -ge 2 -and $trimmed.StartsWith('"') -and $trimmed.EndsWith('"')) {
+    $trimmed = $trimmed.Substring(1, $trimmed.Length - 2).Trim()
+  }
+  $trimmed = $trimmed.Replace('/', '\')
+  if ($trimmed -notmatch '^[A-Za-z]:\\' -and -not $trimmed.StartsWith('\\')) {
+    return $null
+  }
+  try {
+    $full = [System.IO.Path]::GetFullPath($trimmed)
+  } catch {
+    return $null
+  }
+  if ([string]::IsNullOrWhiteSpace($full)) {
+    return $null
+  }
+  return $full.TrimEnd('\')
+}
+
+function Test-SameWindowsPath {
+  param([AllowNull()][string]$Left, [AllowNull()][string]$Right)
+  $leftPath = Get-NormalizedAbsolutePath -Path $Left
+  $rightPath = Get-NormalizedAbsolutePath -Path $Right
+  if ($null -eq $leftPath -or $null -eq $rightPath) {
+    return $false
+  }
+  return [string]::Equals($leftPath, $rightPath, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-AppPublicUrl {
+  param([AllowNull()][string]$Value)
+  $trimmed = $Value.Trim()
+  $uri = $null
+  if (-not [Uri]::TryCreate($trimmed, [UriKind]::Absolute, [ref]$uri)) {
+    return 'APP_PUBLIC_URL должен быть абсолютным URL.'
+  }
+  if (-not $uri.Scheme.Equals('https', [System.StringComparison]::OrdinalIgnoreCase)) {
+    return 'APP_PUBLIC_URL должен использовать https.'
+  }
+  if (-not [string]::IsNullOrEmpty($uri.Query)) {
+    return 'APP_PUBLIC_URL не должен содержать query.'
+  }
+  if (-not [string]::IsNullOrEmpty($uri.Fragment)) {
+    return 'APP_PUBLIC_URL не должен содержать fragment.'
+  }
+  if (-not [string]::IsNullOrEmpty($uri.UserInfo)) {
+    return 'APP_PUBLIC_URL не должен содержать учётные данные.'
+  }
+  $hostName = $uri.IdnHost
+  if ([string]::IsNullOrWhiteSpace($hostName)) {
+    $hostName = $uri.Host
+  }
+  if ([string]::IsNullOrWhiteSpace($hostName)) {
+    return 'APP_PUBLIC_URL должен содержать хост.'
+  }
+  $hostCompare = $hostName.Trim().TrimStart('[').TrimEnd(']')
+  if (
+    $hostCompare.Equals('localhost', [System.StringComparison]::OrdinalIgnoreCase) -or
+    $hostCompare.EndsWith('.localhost', [System.StringComparison]::OrdinalIgnoreCase)
+  ) {
+    return 'APP_PUBLIC_URL не должен указывать на localhost.'
+  }
+  $parsedIp = $null
+  if ([System.Net.IPAddress]::TryParse($hostCompare, [ref]$parsedIp)) {
+    if ([System.Net.IPAddress]::IsLoopback($parsedIp)) {
+      return 'APP_PUBLIC_URL не должен указывать на 127.0.0.1.'
+    }
+  }
+  return $null
+}
+
+function Test-GitPathIgnored {
+  param([string]$Repo, [string]$RelativePath)
+  & git -C $Repo check-ignore -q -- $RelativePath
+  return ($LASTEXITCODE -eq 0)
+}
+
 try {
   if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $scriptDir = Split-Path -Parent $PSCommandPath
@@ -192,6 +276,15 @@ try {
     $frontendDetail = 'Не найдено: ' + ($missingFiles -join ', ')
   }
 
+  $launcherStatus = 'FAIL'
+  $launcherDetail = $null
+  $launcherPath = Join-Path $repoRoot 'deploy\windows\start-backend.ps1'
+  if (Test-Path -LiteralPath $launcherPath -PathType Leaf) {
+    $launcherStatus = 'OK'
+  } else {
+    $launcherDetail = 'Не найден deploy/windows/start-backend.ps1'
+  }
+
   $envStatus = 'FAIL'
   $envDetail = $null
   $smtpStatus = 'WAIT'
@@ -219,12 +312,41 @@ try {
       }
     }
 
+    $envProblems = @()
     if ($missingNames.Count -gt 0) {
-      $envDetail = 'Не заполнены: ' + ($missingNames -join ', ')
-    } elseif ($envMap['NODE_ENV'].Trim() -ne 'production') {
-      $envDetail = 'NODE_ENV должен быть production.'
-    } else {
+      $envProblems += 'Не заполнены: ' + ($missingNames -join ', ')
+    }
+    if ($envMap.ContainsKey('NODE_ENV') -and -not (Test-UnfilledValue -Value $envMap['NODE_ENV']) -and $envMap['NODE_ENV'].Trim() -ne 'production') {
+      $envProblems += 'NODE_ENV должен быть production.'
+    }
+    if ($envMap.ContainsKey('PROVIDER_SESSION_KEY')) {
+      $envProblems += 'PROVIDER_SESSION_KEY нельзя хранить в production.env.'
+    }
+    if ($envMap.ContainsKey('MAIL_TRANSPORT') -and -not (Test-UnfilledValue -Value $envMap['MAIL_TRANSPORT']) -and $envMap['MAIL_TRANSPORT'].Trim() -ne 'smtp') {
+      $envProblems += 'production требует MAIL_TRANSPORT=smtp.'
+    }
+    if ($envMap.ContainsKey('PORT') -and -not (Test-UnfilledValue -Value $envMap['PORT'])) {
+      $configuredPort = 0
+      $portIsInteger = [int]::TryParse($envMap['PORT'].Trim(), [ref]$configuredPort)
+      if (-not $portIsInteger -or $configuredPort -ne 8787) {
+        $envProblems += 'PORT должен быть 8787.'
+      }
+    }
+    if ($envMap.ContainsKey('DATABASE_PATH') -and -not (Test-UnfilledValue -Value $envMap['DATABASE_PATH'])) {
+      if (-not (Test-SameWindowsPath -Left $envMap['DATABASE_PATH'] -Right $databasePath)) {
+        $envProblems += 'DATABASE_PATH должен указывать на проверяемую базу.'
+      }
+    }
+    if ($envMap.ContainsKey('APP_PUBLIC_URL') -and -not (Test-UnfilledValue -Value $envMap['APP_PUBLIC_URL'])) {
+      $urlProblem = Test-AppPublicUrl -Value $envMap['APP_PUBLIC_URL']
+      if ($urlProblem) {
+        $envProblems += $urlProblem
+      }
+    }
+    if ($envProblems.Count -eq 0) {
       $envStatus = 'OK'
+    } else {
+      $envDetail = $envProblems -join ' '
     }
 
     $transport = $null
@@ -319,10 +441,30 @@ try {
           if (($code -eq '??') -and (Test-IgnoredRuntimePath -Path $path)) { continue }
           $gitDirty += $text
         }
-        if ($gitDirty.Count -eq 0) {
-          $gitStatus = 'OK'
-        } else {
+        $ignoredRuntime = @(
+          'data/swipemusic.sqlite',
+          'secrets/provider-session.key',
+          'secrets/production.env'
+        )
+        $notIgnored = @()
+        foreach ($runtimePath in $ignoredRuntime) {
+          if (-not (Test-GitPathIgnored -Repo $repoRoot -RelativePath $runtimePath)) {
+            $notIgnored += $runtimePath
+          }
+        }
+        if ($gitDirty.Count -gt 0) {
           $gitDetail = 'git status --short не пустой.'
+        }
+        if ($notIgnored.Count -gt 0) {
+          $ignoreDetail = 'Git не игнорирует: ' + ($notIgnored -join ', ')
+          if ($gitDetail) {
+            $gitDetail = $gitDetail + ' ' + $ignoreDetail
+          } else {
+            $gitDetail = $ignoreDetail
+          }
+        }
+        if ($gitDirty.Count -eq 0 -and $notIgnored.Count -eq 0) {
+          $gitStatus = 'OK'
         }
       }
     }
@@ -340,6 +482,9 @@ try {
 
   Write-OperatorLine "[$frontendStatus] Frontend build"
   if ($frontendDetail) { Write-OperatorLine $frontendDetail }
+
+  Write-OperatorLine "[$launcherStatus] Backend launcher"
+  if ($launcherDetail) { Write-OperatorLine $launcherDetail }
 
   Write-OperatorLine "[$envStatus] Production environment"
   if ($envDetail) { Write-OperatorLine $envDetail }
@@ -363,6 +508,7 @@ try {
     $providerStatus,
     $nodeStatus,
     $frontendStatus,
+    $launcherStatus,
     $envStatus,
     $smtpStatus,
     $portStatus,

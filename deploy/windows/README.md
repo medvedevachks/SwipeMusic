@@ -76,7 +76,9 @@ SMTP_FROM=<SMTP_FROM>
 
 Секреты лежат вне Git, в `C:\SwipeMusic\secrets`.
 
-Сначала проверка, затем запуск. `preflight.ps1` только читает базу, окружение, ключ, сборку, порт и git status. Он не пишет файлы, не ставит службы и не трогает Caddy. Пароль SMTP и ключ провайдера не печатаются.
+Сначала проверка, затем запуск. `preflight.ps1` только читает базу, окружение, ключ, сборку, порт и git status. Он не пишет файлы, не ставит службы и не трогает Caddy. Пароль SMTP, `PROVIDER_SESSION_KEY` и содержимое `provider-session.key` не печатаются.
+
+Проверка дополнительно требует, чтобы `DATABASE_PATH` после нормализации абсолютного Windows-пути совпал с `C:\SwipeMusic\data\swipemusic.sqlite`, `PORT` был целым `8787`, а `MAIL_TRANSPORT` оставался `smtp`. `APP_PUBLIC_URL` должен быть абсолютным `https` без query, fragment, localhost и `127.0.0.1`; подходит и домен, и IP. Реальный публичный адрес в репозиторий не записывается. Строка `PROVIDER_SESSION_KEY` в `production.env` запрещена: ключ читается только из `provider-session.key`. Рядом должен лежать `deploy/windows/start-backend.ps1`. Git должен игнорировать `data/swipemusic.sqlite`, `secrets/provider-session.key` и `secrets/production.env`.
 
 ```text
 powershell -ExecutionPolicy Bypass -File C:\SwipeMusic\deploy\windows\preflight.ps1
