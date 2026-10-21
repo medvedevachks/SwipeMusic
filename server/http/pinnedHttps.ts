@@ -16,6 +16,135 @@ export class UpstreamTooLargeError extends Error {
   }
 }
 
+export const DEFAULT_UPSTREAM_TIMEOUT_MS = 8_000
+
+export type UpstreamDeadline = {
+  signal: AbortSignal
+  promise: Promise<never>
+  stop: () => void
+}
+
+/**
+ * Один срок на весь upstream-вызов: DNS, заголовки и чтение тела.
+ * stop() снимает таймер и не отменяет уже завершённый успех.
+ * Срабатывание срока прерывает signal, чтобы оборвать сокет и чтение.
+ */
+export function createUpstreamDeadline(ms: number): UpstreamDeadline {
+  const controller = new AbortController()
+  let rejectDeadline: (error: UpstreamTimeoutError) => void = () => {}
+  const promise = new Promise<never>((_resolve, reject) => {
+    rejectDeadline = reject
+  })
+  promise.catch(() => {})
+  const timer = setTimeout(() => {
+    controller.abort()
+    rejectDeadline(new UpstreamTimeoutError())
+  }, ms)
+  timer.unref()
+  return {
+    signal: controller.signal,
+    promise,
+    stop: () => clearTimeout(timer),
+  }
+}
+
+export function withDeadline<T>(work: Promise<T>, deadline: UpstreamDeadline): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const finish = (fn: () => void) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      fn()
+    }
+    work.then(
+      (value) => finish(() => resolve(value)),
+      (error: unknown) => finish(() => reject(error)),
+    )
+    deadline.promise.then(
+      () => {},
+      (error: unknown) => finish(() => reject(error)),
+    )
+  })
+}
+
+export function normalizeUpstreamError(error: unknown, signal: AbortSignal): unknown {
+  if (
+    signal.aborted &&
+    error instanceof Error &&
+    (error.name === 'AbortError' || error.name === 'TimeoutError')
+  ) {
+    return new UpstreamTimeoutError()
+  }
+  return error
+}
+
+function declaredLength(response: Response): number | null {
+  const raw = response.headers.get('content-length')
+  if (!raw || !/^\d+$/.test(raw)) {
+    return null
+  }
+  const length = Number(raw)
+  return Number.isSafeInteger(length) ? length : null
+}
+
+export async function readResponseLimited(
+  response: Response,
+  max: number,
+  signal?: AbortSignal,
+): Promise<Buffer | 'too-large'> {
+  if (signal?.aborted) {
+    throw new UpstreamTimeoutError()
+  }
+  const length = declaredLength(response)
+  if (length !== null && length > max) {
+    void response.body?.cancel().catch(() => {})
+    return 'too-large'
+  }
+  const reader = response.body?.getReader()
+  if (!reader) {
+    return Buffer.alloc(0)
+  }
+  const onAbort = () => {
+    void reader.cancel(new UpstreamTimeoutError()).catch(() => {})
+  }
+  signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    const chunks: Uint8Array[] = []
+    let size = 0
+    while (true) {
+      if (signal?.aborted) {
+        throw new UpstreamTimeoutError()
+      }
+      let step: ReadableStreamReadResult<Uint8Array>
+      try {
+        step = await reader.read()
+      } catch (error) {
+        if (signal?.aborted) {
+          throw new UpstreamTimeoutError()
+        }
+        throw error
+      }
+      if (signal?.aborted) {
+        throw new UpstreamTimeoutError()
+      }
+      if (step.done) {
+        break
+      }
+      size += step.value.byteLength
+      if (size > max) {
+        void reader.cancel().catch(() => {})
+        return 'too-large'
+      }
+      chunks.push(step.value)
+    }
+    return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)))
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
+  }
+}
+
 function allowedMetadataHost(hostname: string): boolean {
   return hostname.toLowerCase().replace(/\.$/, '') === YANDEX_METADATA_HOST
 }

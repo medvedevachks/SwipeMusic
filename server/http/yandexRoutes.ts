@@ -7,15 +7,33 @@ import {
   type YandexUpstream,
 } from '../providers/yandexSession.ts'
 import { readJsonBody, requireUserId, sendJson } from './currentUser.ts'
+import {
+  createUpstreamDeadline,
+  DEFAULT_UPSTREAM_TIMEOUT_MS,
+  normalizeUpstreamError,
+  readResponseLimited,
+  UpstreamTimeoutError,
+  withDeadline,
+} from './pinnedHttps.ts'
 
 export type YandexRouteContext = {
   db: DatabaseSync
   config: AppConfig
   yandexUpstream?: YandexUpstream
+  upstreamTimeoutMs?: number
+  musicBodyLimit?: number
 }
 
 const PREFIX = '/api/yandex-music'
 const UPSTREAM_ORIGIN = 'https://api.music.yandex.net'
+
+/**
+ * Один ответ api.music.yandex.net.
+ * likes/tracks — ссылки на треки, около 200 байт на лайк: 100 тысяч лайков ≈ 20 МиБ.
+ * Плейлист приходит целиком, с объектами треков; пачка /tracks — по 50 id, поиск — страница.
+ * 32 МиБ хватает на такую библиотеку и плейлист в несколько тысяч треков.
+ */
+export const MAX_MUSIC_UPSTREAM_BODY = 32 * 1024 * 1024
 
 function upstreamOf(context: YandexRouteContext): YandexUpstream {
   return context.yandexUpstream ?? ((url, init) => fetch(url, init))
@@ -119,45 +137,58 @@ export async function handleYandexMusicProxy(
   }
 
   const method = req.method ?? 'GET'
-  const deadline = fixedUpstreamDeadline()
-  let upstreamResponse: Response
+  const deadline = createUpstreamDeadline(context.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS)
+  const limit = context.musicBodyLimit ?? MAX_MUSIC_UPSTREAM_BODY
   try {
-    upstreamResponse = await upstreamOf(context)(`${UPSTREAM_ORIGIN}${relative}${url.search}`, {
-      method,
-      headers: {
-        Authorization: `OAuth ${accessToken}`,
-        Accept: 'application/json',
-      },
-      signal: deadline.signal,
+    const upstreamResponse = await withDeadline(
+      upstreamOf(context)(`${UPSTREAM_ORIGIN}${relative}${url.search}`, {
+        method,
+        headers: {
+          Authorization: `OAuth ${accessToken}`,
+          Accept: 'application/json',
+        },
+        signal: deadline.signal,
+      }),
+      deadline,
+    )
+
+    if (upstreamResponse.status === 401) {
+      void upstreamResponse.body?.cancel().catch(() => {})
+      service.invalidate(userId)
+      sendJson(res, 401, { error: 'YANDEX_AUTH_REQUIRED' })
+      return
+    }
+
+    const payload = await withDeadline(
+      readResponseLimited(upstreamResponse, limit, deadline.signal),
+      deadline,
+    )
+    if (payload === 'too-large') {
+      sendJson(res, 502, { error: 'UPSTREAM' })
+      return
+    }
+    const text = payload.toString('utf8').split(accessToken).join('[redacted]')
+    const contentType = upstreamResponse.headers.get('content-type') ?? 'application/json; charset=utf-8'
+    res.writeHead(upstreamResponse.status, {
+      'Content-Type': contentType,
+      'Cache-Control': 'no-store',
+      'Content-Length': Buffer.byteLength(text),
     })
-  } catch {
+    res.end(text)
+  } catch (error) {
+    if (res.headersSent) {
+      res.end()
+      return
+    }
+    const normalized = normalizeUpstreamError(error, deadline.signal)
+    if (normalized instanceof UpstreamTimeoutError) {
+      sendJson(res, 504, { error: 'UPSTREAM_TIMEOUT' })
+      return
+    }
     sendJson(res, 502, { error: 'UPSTREAM' })
-    return
   } finally {
     deadline.stop()
   }
-
-  if (upstreamResponse.status === 401) {
-    service.invalidate(userId)
-    sendJson(res, 401, { error: 'YANDEX_AUTH_REQUIRED' })
-    return
-  }
-
-  const text = (await upstreamResponse.text()).split(accessToken).join('[redacted]')
-  const contentType = upstreamResponse.headers.get('content-type') ?? 'application/json; charset=utf-8'
-  res.writeHead(upstreamResponse.status, {
-    'Content-Type': contentType,
-    'Cache-Control': 'no-store',
-    'Content-Length': Buffer.byteLength(text),
-  })
-  res.end(text)
-}
-
-function fixedUpstreamDeadline(): { signal: AbortSignal; stop: () => void } {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 8_000)
-  timer.unref()
-  return { signal: controller.signal, stop: () => clearTimeout(timer) }
 }
 
 function yandexRelativePath(pathname: string): string | null {

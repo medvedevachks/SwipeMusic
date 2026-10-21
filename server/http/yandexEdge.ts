@@ -10,9 +10,14 @@ import {
 import type { YandexRouteContext } from './yandexRoutes.ts'
 import type { YandexUpstream } from '../providers/yandexSession.ts'
 import {
+  DEFAULT_UPSTREAM_TIMEOUT_MS,
   UpstreamTimeoutError,
   UpstreamTooLargeError,
+  createUpstreamDeadline,
   fetchPinnedMetadata,
+  normalizeUpstreamError,
+  readResponseLimited,
+  withDeadline,
 } from './pinnedHttps.ts'
 
 const OAUTH_PATHS = new Map<string, string>([
@@ -22,7 +27,6 @@ const OAUTH_PATHS = new Map<string, string>([
 
 const MAX_OAUTH_BODY = 16_384
 const MAX_METADATA_BODY = 1_048_576
-const DEFAULT_UPSTREAM_TIMEOUT_MS = 8_000
 
 export type MetadataHop = {
   url: URL
@@ -36,22 +40,11 @@ type EdgeContext = YandexRouteContext & {
   yandexMetadataUpstream?: YandexUpstream
   metadataTransport?: MetadataTransport
   resolveMetadataHost?: HostResolver
-  upstreamTimeoutMs?: number
   metadataBodyLimit?: number
 }
 
 function oauthUpstream(context: EdgeContext): YandexUpstream {
   return context.yandexOauthUpstream ?? ((url, init) => fetch(url, init))
-}
-
-function startDeadline(ms: number): { signal: AbortSignal; stop: () => void } {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), ms)
-  timer.unref()
-  return {
-    signal: controller.signal,
-    stop: () => clearTimeout(timer),
-  }
 }
 
 export function handleHealth(req: IncomingMessage, res: ServerResponse): void {
@@ -89,10 +82,9 @@ export async function handleYandexOauthProxy(
     return
   }
 
-  const deadline = startDeadline(timeoutMs(context))
-  let upstream: Response
+  const deadline = createUpstreamDeadline(timeoutMs(context))
   try {
-    upstream = await withDeadline(
+    const upstream = await withDeadline(
       oauthUpstream(context)(upstreamUrl, {
         method: 'POST',
         headers: {
@@ -102,21 +94,22 @@ export async function handleYandexOauthProxy(
         body: new Uint8Array(body),
         signal: deadline.signal,
       }),
-      timeoutMs(context),
+      deadline,
     )
+    const payload = await withDeadline(
+      readResponseLimited(upstream, MAX_OAUTH_BODY, deadline.signal),
+      deadline,
+    )
+    if (payload === 'too-large') {
+      sendJson(res, 502, { error: 'UPSTREAM' })
+      return
+    }
+    writeUpstream(res, upstream.status, upstream.headers.get('content-type'), payload)
   } catch (error) {
-    sendUpstreamFailure(res, error)
-    return
+    sendUpstreamFailure(res, normalizeUpstreamError(error, deadline.signal))
   } finally {
     deadline.stop()
   }
-
-  const payload = await readResponseLimited(upstream, MAX_OAUTH_BODY)
-  if (payload === 'too-large') {
-    sendJson(res, 502, { error: 'UPSTREAM' })
-    return
-  }
-  writeUpstream(res, upstream.status, upstream.headers.get('content-type'), payload)
 }
 
 export async function handleYandexFetchProxy(
@@ -137,56 +130,53 @@ export async function handleYandexFetchProxy(
   const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1')
   const rawTarget = requestUrl.searchParams.get('url') ?? ''
   const resolveHost = context.resolveMetadataHost ?? resolveHostAddresses
-  let target = await validateMetadataTarget(rawTarget, resolveHost)
-  if (!target.ok) {
-    sendJson(res, 400, { error: 'FORBIDDEN_TARGET' })
-    return
-  }
-
   const limit = context.metadataBodyLimit ?? MAX_METADATA_BODY
-  const deadline = startDeadline(timeoutMs(context))
-  let response: Response | null = null
+  const deadline = createUpstreamDeadline(timeoutMs(context))
   try {
-  for (let hop = 0; hop <= YANDEX_FETCH_MAX_REDIRECTS; hop += 1) {
-    try {
+    let target = await withDeadline(validateMetadataTarget(rawTarget, resolveHost), deadline)
+    if (!target.ok) {
+      sendJson(res, 400, { error: 'FORBIDDEN_TARGET' })
+      return
+    }
+
+    let response: Response | null = null
+    for (let hop = 0; hop <= YANDEX_FETCH_MAX_REDIRECTS; hop += 1) {
       response = await withDeadline(
         dispatchMetadata(context, target, limit, deadline.signal),
-        timeoutMs(context),
+        deadline,
       )
-    } catch (error) {
-      sendUpstreamFailure(res, error)
-      return
+      if (![301, 302, 303, 307, 308].includes(response.status)) {
+        break
+      }
+      void response.body?.cancel().catch(() => {})
+      if (hop === YANDEX_FETCH_MAX_REDIRECTS) {
+        sendJson(res, 400, { error: 'FORBIDDEN_TARGET' })
+        return
+      }
+      const next = await withDeadline(
+        nextRedirectTarget(target.url, response.headers.get('location'), resolveHost),
+        deadline,
+      )
+      if (!next.ok) {
+        sendJson(res, 400, { error: 'FORBIDDEN_TARGET' })
+        return
+      }
+      target = next
+      response = null
     }
-    if (![301, 302, 303, 307, 308].includes(response.status)) {
-      break
-    }
-    if (hop === YANDEX_FETCH_MAX_REDIRECTS) {
-      sendJson(res, 400, { error: 'FORBIDDEN_TARGET' })
-      return
-    }
-    const next = await nextRedirectTarget(
-      target.url,
-      response.headers.get('location'),
-      resolveHost,
-    )
-    if (!next.ok) {
-      sendJson(res, 400, { error: 'FORBIDDEN_TARGET' })
-      return
-    }
-    target = next
-    response = null
-  }
 
-  if (!response) {
-    sendJson(res, 502, { error: 'UPSTREAM' })
-    return
-  }
-  const payload = await readResponseLimited(response, limit)
-  if (payload === 'too-large') {
-    sendJson(res, 502, { error: 'UPSTREAM' })
-    return
-  }
-  writeUpstream(res, response.status, response.headers.get('content-type'), payload)
+    if (!response) {
+      sendJson(res, 502, { error: 'UPSTREAM' })
+      return
+    }
+    const payload = await withDeadline(readResponseLimited(response, limit, deadline.signal), deadline)
+    if (payload === 'too-large') {
+      sendJson(res, 502, { error: 'UPSTREAM' })
+      return
+    }
+    writeUpstream(res, response.status, response.headers.get('content-type'), payload)
+  } catch (error) {
+    sendUpstreamFailure(res, normalizeUpstreamError(error, deadline.signal))
   } finally {
     deadline.stop()
   }
@@ -218,6 +208,10 @@ function dispatchMetadata(
 }
 
 function sendUpstreamFailure(res: ServerResponse, error: unknown): void {
+  if (res.headersSent) {
+    res.end()
+    return
+  }
   if (error instanceof UpstreamTimeoutError || (error instanceof Error && error.name === 'TimeoutError')) {
     sendJson(res, 504, { error: 'UPSTREAM_TIMEOUT' })
     return
@@ -227,22 +221,6 @@ function sendUpstreamFailure(res: ServerResponse, error: unknown): void {
     return
   }
   sendJson(res, 502, { error: 'UPSTREAM' })
-}
-
-function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new UpstreamTimeoutError()), ms)
-    promise.then(
-      (value) => {
-        clearTimeout(timer)
-        resolve(value)
-      },
-      (error: unknown) => {
-        clearTimeout(timer)
-        reject(error)
-      },
-    )
-  })
 }
 
 function writeUpstream(
@@ -275,29 +253,4 @@ function readLimited(req: IncomingMessage, max: number): Promise<Buffer | 'too-l
     req.on('end', () => resolve(Buffer.concat(chunks)))
     req.on('error', reject)
   })
-}
-
-async function readResponseLimited(
-  response: Response,
-  max: number,
-): Promise<Buffer | 'too-large'> {
-  const reader = response.body?.getReader()
-  if (!reader) {
-    return Buffer.alloc(0)
-  }
-  const chunks: Uint8Array[] = []
-  let size = 0
-  while (true) {
-    const step = await reader.read()
-    if (step.done) {
-      break
-    }
-    size += step.value.byteLength
-    if (size > max) {
-      await reader.cancel()
-      return 'too-large'
-    }
-    chunks.push(step.value)
-  }
-  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)))
 }
