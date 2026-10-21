@@ -53,8 +53,11 @@ export function readJsonBody(req: IncomingMessage): Promise<unknown> {
     req.on('data', (chunk: Buffer) => {
       size += chunk.length
       if (size > 1_000_000) {
+        req.pause()
         reject(new Error('BODY_TOO_LARGE'))
-        req.destroy()
+        setImmediate(() => {
+          req.destroy()
+        })
         return
       }
       chunks.push(chunk)

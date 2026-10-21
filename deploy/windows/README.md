@@ -15,6 +15,8 @@ Internet
 → SQLite / Yandex
 ```
 
+Production-процесс — `node --experimental-strip-types server/index.ts`. Для этого нужен Node.js 22 или новее; на DEV проверен Node 22.23.3. Этот процесс не запускает Vite и не раздаёт файлы репозитория. Пример Caddy отдаёт только `C:\SwipeMusic\dist`. Живой Caddyfile на сервере этим репозиторием не проверяется.
+
 В development Vite только пересылает `/api/*` на тот же backend. Отдельного Vite-прокси для Яндекса больше нет.
 
 ## Клиентский IP и лимиты входа
