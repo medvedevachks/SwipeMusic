@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import type { DatabaseSync } from 'node:sqlite'
+import { createRelaxedAuthGuards } from '../../auth/guards.ts'
 import { createForgotPasswordLimiter } from '../../auth/rateLimit.ts'
 import { loadConfig } from '../../config/env.ts'
 import { openDatabase } from '../../db/database.ts'
@@ -148,6 +149,7 @@ before(async () => {
     config,
     mail: createMemoryMailSender(),
     limiter: createForgotPasswordLimiter(20, 60_000),
+    ...createRelaxedAuthGuards(),
   })
   const address = server.address()
   if (!address || typeof address === 'string') {
@@ -465,6 +467,7 @@ test('canonical state and catalogs survive closing and reopening sqlite', async 
     config: reopenConfig,
     mail: createMemoryMailSender(),
     limiter: createForgotPasswordLimiter(20, 60_000),
+    ...createRelaxedAuthGuards(),
   })
   const address = reopenServer.address()
   if (!address || typeof address === 'string') {
@@ -510,6 +513,7 @@ test('canonical state and catalogs survive closing and reopening sqlite', async 
       config: reopenConfig,
       mail: createMemoryMailSender(),
       limiter: createForgotPasswordLimiter(20, 60_000),
+      ...createRelaxedAuthGuards(),
     })
     const nextAddress = reopenServer.address()
     if (!nextAddress || typeof nextAddress === 'string') {

@@ -1,5 +1,12 @@
 import { createServer, type Server } from 'node:http'
-import type { ForgotPasswordLimiter } from '../auth/rateLimit.ts'
+import {
+  createLoginRateLimiter,
+  createRegisterRateLimiter,
+  type ForgotPasswordLimiter,
+  type LoginRateLimiter,
+  type RegisterRateLimiter,
+} from '../auth/rateLimit.ts'
+import { createPasswordWorkLimiter, type PasswordWorkLimiter } from '../auth/passwordWork.ts'
 import type { MailSender } from '../mail/MailSender.ts'
 import { handleAuthRequest } from './authRoutes.ts'
 import { handleLibraryRequest } from './libraryRoutes.ts'
@@ -15,12 +22,20 @@ import type { YandexUpstream } from '../providers/yandexSession.ts'
 export type AuthServerOptions = YandexRouteContext & {
   mail: MailSender
   limiter: ForgotPasswordLimiter
+  loginLimiter?: LoginRateLimiter
+  registerLimiter?: RegisterRateLimiter
+  passwordWork?: PasswordWorkLimiter
   yandexOauthUpstream?: YandexUpstream
   yandexMetadataUpstream?: YandexUpstream
   resolveMetadataHost?: HostResolver
 }
 
 export function createAuthServer(options: AuthServerOptions): Server {
+  const loginLimiter = options.loginLimiter ?? createLoginRateLimiter()
+  const registerLimiter = options.registerLimiter ?? createRegisterRateLimiter()
+  const passwordWork = options.passwordWork ?? createPasswordWorkLimiter(4)
+  const authOptions = { ...options, loginLimiter, registerLimiter, passwordWork }
+
   return createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const { pathname } = url
@@ -36,7 +51,7 @@ export function createAuthServer(options: AuthServerOptions): Server {
               ? handleYandexProviderRequest(req, res, options)
               : pathname.startsWith('/api/me')
                 ? handleLibraryRequest(req, res, options)
-                : handleAuthRequest(req, res, options)
+                : handleAuthRequest(req, res, authOptions)
 
     void handler.catch((error: unknown) => {
       if (res.headersSent) {

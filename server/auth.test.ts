@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { loadConfig } from './config/env.ts'
 import { openDatabase } from './db/database.ts'
+import { createRelaxedAuthGuards } from './auth/guards.ts'
 import { createForgotPasswordLimiter } from './auth/rateLimit.ts'
 import { listenAuthServer } from './http/server.ts'
 import { FORGOT_PASSWORD_MESSAGE } from './http/authRoutes.ts'
@@ -63,7 +64,13 @@ async function api(
 }
 
 before(async () => {
-  server = await listenAuthServer({ db, config, mail: mailbox, limiter })
+  server = await listenAuthServer({
+    db,
+    config,
+    mail: mailbox,
+    limiter,
+    ...createRelaxedAuthGuards(),
+  })
   const address = server.address()
   if (!address || typeof address === 'string') {
     throw new Error('auth test server has no port')

@@ -4,6 +4,7 @@ import type { Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
+import { createRelaxedAuthGuards } from './auth/guards.ts'
 import { createForgotPasswordLimiter } from './auth/rateLimit.ts'
 import { loadConfig } from './config/env.ts'
 import { openDatabase } from './db/database.ts'
@@ -101,7 +102,13 @@ function categoryPayload(id: string, extra: Record<string, unknown> = {}) {
 }
 
 before(async () => {
-  server = await listenAuthServer({ db, config, mail: mailbox, limiter })
+  server = await listenAuthServer({
+    db,
+    config,
+    mail: mailbox,
+    limiter,
+    ...createRelaxedAuthGuards(),
+  })
   const address = server.address()
   if (!address || typeof address === 'string') {
     throw new Error('library test server has no port')
@@ -666,6 +673,7 @@ test('reopening the sqlite file restores the same library', async () => {
     config: reopenConfig,
     mail: createMemoryMailSender(),
     limiter: createForgotPasswordLimiter(20, 60_000),
+    ...createRelaxedAuthGuards(),
   })
   const address = reopenServer.address()
   if (!address || typeof address === 'string') {
@@ -717,6 +725,7 @@ test('reopening the sqlite file restores the same library', async () => {
       config: reopenConfig,
       mail: createMemoryMailSender(),
       limiter: createForgotPasswordLimiter(20, 60_000),
+      ...createRelaxedAuthGuards(),
     })
     const nextAddress = reopenServer.address()
     if (!nextAddress || typeof nextAddress === 'string') {

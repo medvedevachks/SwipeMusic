@@ -6,7 +6,11 @@
 	tls <CERT_FILE> <KEY_FILE>
 
 	handle /api/* {
-		reverse_proxy 127.0.0.1:8787
+		# Replace any client-supplied value with the TCP peer Caddy actually sees.
+		# Backend trusts X-Swipe-Client-Ip only from a loopback proxy.
+		reverse_proxy 127.0.0.1:8787 {
+			header_up X-Swipe-Client-Ip {http.request.remote.host}
+		}
 	}
 
 	handle {

@@ -1,22 +1,70 @@
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
+import { promisify } from 'node:util'
+import type { PasswordWorkLimiter } from './passwordWork.ts'
 
 const SCRYPT_N = 16384
 const SCRYPT_R = 8
 const SCRYPT_P = 1
 const KEY_LENGTH = 32
+const SALT_LENGTH = 16
+const FALLBACK_SALT = Buffer.alloc(SALT_LENGTH, 0x5a)
 
-function derive(password: string, salt: Buffer, keyLength: number): Buffer {
-  return scryptSync(password, salt, keyLength, {
-    N: SCRYPT_N,
-    r: SCRYPT_R,
-    p: SCRYPT_P,
-  })
+const scryptAsync = promisify(scrypt) as (
+  password: string,
+  salt: Buffer,
+  keyLength: number,
+  options: { N: number; r: number; p: number },
+) => Promise<Buffer>
+
+type ParsedHash = {
+  salt: Buffer
+  key: Buffer
+}
+
+function derive(
+  password: string,
+  salt: Buffer,
+  keyLength: number,
+  work: PasswordWorkLimiter,
+): Promise<Buffer> {
+  return work.run(() =>
+    scryptAsync(password, salt, keyLength, {
+      N: SCRYPT_N,
+      r: SCRYPT_R,
+      p: SCRYPT_P,
+    }),
+  )
+}
+
+function parseStoredHash(stored: string): ParsedHash | null {
+  const parts = stored.split('$')
+  if (parts.length !== 7 || parts[0] !== 'scrypt' || parts[1] !== 'v1') {
+    return null
+  }
+
+  const n = Number(parts[2])
+  const r = Number(parts[3])
+  const p = Number(parts[4])
+  if (n !== SCRYPT_N || r !== SCRYPT_R || p !== SCRYPT_P) {
+    return null
+  }
+
+  const salt = Buffer.from(parts[5] ?? '', 'base64url')
+  const key = Buffer.from(parts[6] ?? '', 'base64url')
+  if (salt.length !== SALT_LENGTH || key.length !== KEY_LENGTH) {
+    return null
+  }
+
+  return { salt, key }
 }
 
 /** Версионируемый hash: scrypt$v1$N$r$p$salt$key */
-export function hashPassword(password: string): string {
-  const salt = randomBytes(16)
-  const key = derive(password, salt, KEY_LENGTH)
+export async function hashPassword(
+  password: string,
+  work: PasswordWorkLimiter,
+): Promise<string> {
+  const salt = randomBytes(SALT_LENGTH)
+  const key = await derive(password, salt, KEY_LENGTH, work)
   return [
     'scrypt',
     'v1',
@@ -28,32 +76,28 @@ export function hashPassword(password: string): string {
   ].join('$')
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
-  const parts = stored.split('$')
-  if (parts.length !== 7 || parts[0] !== 'scrypt' || parts[1] !== 'v1') {
+export async function verifyPassword(
+  password: string,
+  stored: string,
+  work: PasswordWorkLimiter,
+): Promise<boolean> {
+  const parsed = parseStoredHash(stored)
+  if (!parsed) {
+    await derive(password, FALLBACK_SALT, KEY_LENGTH, work)
     return false
   }
 
-  const n = Number(parts[2])
-  const r = Number(parts[3])
-  const p = Number(parts[4])
-  if (n !== SCRYPT_N || r !== SCRYPT_R || p !== SCRYPT_P) {
+  const actual = await derive(password, parsed.salt, KEY_LENGTH, work)
+  if (actual.length !== parsed.key.length) {
     return false
   }
 
-  const salt = Buffer.from(parts[5] ?? '', 'base64url')
-  const expected = Buffer.from(parts[6] ?? '', 'base64url')
-  if (salt.length === 0 || expected.length === 0) {
-    return false
-  }
-
-  const actual = derive(password, salt, expected.length)
-  if (actual.length !== expected.length) {
-    return false
-  }
-
-  return timingSafeEqual(actual, expected)
+  return timingSafeEqual(actual, parsed.key)
 }
 
-/** Фиктивный hash, чтобы ответ на неизвестный email не был быстрее проверки пароля. */
-export const DUMMY_PASSWORD_HASH = hashPassword('dummy-password-not-a-secret')
+/**
+ * Фиктивный hash прежнего формата. Проверка неизвестного email
+ * выполняет такой же async scrypt, как проверка реального пароля.
+ */
+export const DUMMY_PASSWORD_HASH =
+  'scrypt$v1$16384$8$1$fhx_YOtWKGhIFOtmIl-T4g$IAdSndYZMpEnPWcM1qPiuRjuOdyIasJjzPGXhcZHiyo'

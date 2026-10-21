@@ -7,7 +7,7 @@ import {
   AuthSubmit,
 } from '../components/auth/AuthForm'
 import { AuthApiError } from '../services/auth/types'
-import { authFormError } from '../services/auth/messages'
+import { authFormError, authRateLimitMessage } from '../services/auth/messages'
 import { useAuthStore } from '../store/authStore'
 
 export default function Login() {
@@ -29,7 +29,10 @@ export default function Login() {
       navigate('/', { replace: true })
     } catch (error) {
       if (error instanceof AuthApiError) {
-        if (error.code === 'INVALID_CREDENTIALS') {
+        const limited = authRateLimitMessage(error)
+        if (limited) {
+          setFormError(limited)
+        } else if (error.code === 'INVALID_CREDENTIALS') {
           setFormError('Неверный email или пароль')
         } else if (error.code === 'VALIDATION') {
           setFields(error.fields)

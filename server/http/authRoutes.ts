@@ -1,8 +1,13 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DatabaseSync } from 'node:sqlite'
 import { DUMMY_PASSWORD_HASH, hashPassword, verifyPassword } from '../auth/password.ts'
+import { PasswordBusyError, type PasswordWorkLimiter } from '../auth/passwordWork.ts'
 import { createPasswordResetRepository } from '../auth/passwordReset.ts'
-import type { ForgotPasswordLimiter } from '../auth/rateLimit.ts'
+import type {
+  ForgotPasswordLimiter,
+  LoginRateLimiter,
+  RegisterRateLimiter,
+} from '../auth/rateLimit.ts'
 import {
   createSessionRepository,
   SESSION_COOKIE,
@@ -20,6 +25,7 @@ import {
 } from '../auth/validation.ts'
 import type { AppConfig } from '../config/env.ts'
 import type { MailSender } from '../mail/MailSender.ts'
+import { resolveClientIp } from './clientIp.ts'
 import {
   readCookie,
   serializeClearSessionCookie,
@@ -34,16 +40,35 @@ type AuthContext = {
   config: AppConfig
   mail: MailSender
   limiter: ForgotPasswordLimiter
+  loginLimiter: LoginRateLimiter
+  registerLimiter: RegisterRateLimiter
+  passwordWork: PasswordWorkLimiter
 }
 
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
+function sendJson(
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  extraHeaders: Record<string, string> = {},
+): void {
   const payload = JSON.stringify(body)
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'Content-Length': Buffer.byteLength(payload),
+    ...extraHeaders,
   })
   res.end(payload)
+}
+
+function sendRateLimited(res: ServerResponse, retryAfterSeconds: number): void {
+  sendJson(res, 429, { error: 'RATE_LIMITED' }, {
+    'Retry-After': String(retryAfterSeconds),
+  })
+}
+
+function sendBusy(res: ServerResponse): void {
+  sendJson(res, 503, { error: 'BUSY' }, { 'Retry-After': '1' })
 }
 
 function readBody(req: IncomingMessage): Promise<unknown> {
@@ -83,7 +108,7 @@ function sessionToken(req: IncomingMessage): string | null {
 }
 
 function clientIp(req: IncomingMessage): string {
-  return req.socket.remoteAddress ?? 'unknown'
+  return resolveClientIp(req.socket.remoteAddress, req.headers)
 }
 
 export async function handleAuthRequest(
@@ -119,7 +144,23 @@ export async function handleAuthRequest(
       return
     }
 
-    const passwordHash = hashPassword(parsed.value.password)
+    const registration = context.registerLimiter.consume(clientIp(req))
+    if (!registration.allowed) {
+      sendRateLimited(res, registration.retryAfterSeconds)
+      return
+    }
+
+    let passwordHash: string
+    try {
+      passwordHash = await hashPassword(parsed.value.password, context.passwordWork)
+    } catch (error) {
+      if (error instanceof PasswordBusyError) {
+        sendBusy(res)
+        return
+      }
+      throw error
+    }
+
     try {
       const user = users.create(parsed.value, passwordHash)
       const { token } = sessions.create(user.id)
@@ -150,9 +191,24 @@ export async function handleAuthRequest(
       return
     }
 
+    const loginAttempt = context.loginLimiter.consume(clientIp(req), parsed.value.email)
+    if (!loginAttempt.allowed) {
+      sendRateLimited(res, loginAttempt.retryAfterSeconds)
+      return
+    }
+
     const user = users.findByEmail(parsed.value.email)
     const hash = user?.passwordHash ?? DUMMY_PASSWORD_HASH
-    const passwordOk = verifyPassword(parsed.value.password, hash)
+    let passwordOk = false
+    try {
+      passwordOk = await verifyPassword(parsed.value.password, hash, context.passwordWork)
+    } catch (error) {
+      if (error instanceof PasswordBusyError) {
+        sendBusy(res)
+        return
+      }
+      throw error
+    }
     if (!user || !passwordOk) {
       sendJson(res, 401, { error: 'INVALID_CREDENTIALS' })
       return
@@ -234,7 +290,17 @@ export async function handleAuthRequest(
       return
     }
 
-    const passwordHash = hashPassword(parsed.value.password)
+    let passwordHash: string
+    try {
+      passwordHash = await hashPassword(parsed.value.password, context.passwordWork)
+    } catch (error) {
+      if (error instanceof PasswordBusyError) {
+        sendBusy(res)
+        return
+      }
+      throw error
+    }
+
     context.db.exec('BEGIN')
     try {
       const marked = resets.markUsed(reset.id)

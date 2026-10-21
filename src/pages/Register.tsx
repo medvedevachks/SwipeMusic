@@ -7,7 +7,7 @@ import {
   AuthSubmit,
 } from '../components/auth/AuthForm'
 import { AuthApiError } from '../services/auth/types'
-import { authFormError } from '../services/auth/messages'
+import { authFormError, authRateLimitMessage } from '../services/auth/messages'
 import { useAuthStore } from '../store/authStore'
 
 export default function Register() {
@@ -31,7 +31,10 @@ export default function Register() {
       navigate('/', { replace: true })
     } catch (error) {
       if (error instanceof AuthApiError) {
-        if (error.code === 'EMAIL_TAKEN') {
+        const limited = authRateLimitMessage(error)
+        if (limited) {
+          setFormError(limited)
+        } else if (error.code === 'EMAIL_TAKEN') {
           setFormError('Этот email уже зарегистрирован')
         } else if (error.code === 'VALIDATION') {
           setFields(error.fields)

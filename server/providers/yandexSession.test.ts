@@ -5,6 +5,7 @@ import type { Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
+import { createRelaxedAuthGuards } from '../auth/guards.ts'
 import { createForgotPasswordLimiter } from '../auth/rateLimit.ts'
 import { loadConfig } from '../config/env.ts'
 import { openDatabase } from '../db/database.ts'
@@ -100,6 +101,7 @@ before(async () => {
     config,
     mail: createMemoryMailSender(),
     limiter,
+    ...createRelaxedAuthGuards(),
     yandexUpstream,
   })
   const address = server.address()
