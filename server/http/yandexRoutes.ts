@@ -119,6 +119,7 @@ export async function handleYandexMusicProxy(
   }
 
   const method = req.method ?? 'GET'
+  const deadline = fixedUpstreamDeadline()
   let upstreamResponse: Response
   try {
     upstreamResponse = await upstreamOf(context)(`${UPSTREAM_ORIGIN}${relative}${url.search}`, {
@@ -127,10 +128,13 @@ export async function handleYandexMusicProxy(
         Authorization: `OAuth ${accessToken}`,
         Accept: 'application/json',
       },
+      signal: deadline.signal,
     })
   } catch {
     sendJson(res, 502, { error: 'UPSTREAM' })
     return
+  } finally {
+    deadline.stop()
   }
 
   if (upstreamResponse.status === 401) {
@@ -147,6 +151,13 @@ export async function handleYandexMusicProxy(
     'Content-Length': Buffer.byteLength(text),
   })
   res.end(text)
+}
+
+function fixedUpstreamDeadline(): { signal: AbortSignal; stop: () => void } {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 8_000)
+  timer.unref()
+  return { signal: controller.signal, stop: () => clearTimeout(timer) }
 }
 
 function yandexRelativePath(pathname: string): string | null {

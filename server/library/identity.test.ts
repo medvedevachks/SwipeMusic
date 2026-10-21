@@ -47,7 +47,10 @@ async function api(
   path: string,
   options: { method?: string; body?: unknown; cookie?: string | null } = {},
 ): Promise<ApiResult> {
-  const headers: Record<string, string> = { Accept: 'application/json' }
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+    Origin: 'http://127.0.0.1:5173',
+  }
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json'
   }

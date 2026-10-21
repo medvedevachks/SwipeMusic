@@ -95,7 +95,10 @@ async function request(
     headers?: Record<string, string>
   } = {},
 ): Promise<{ status: number; text: string; headers: Headers }> {
-  const headers: Record<string, string> = { ...(options.headers ?? {}) }
+  const headers: Record<string, string> = {
+    Origin: 'http://127.0.0.1:5173',
+    ...(options.headers ?? {}),
+  }
   if (options.cookie) {
     headers.Cookie = options.cookie
   }

@@ -57,6 +57,7 @@ async function startServer(options: {
   return async (path, init = {}) => {
     const headers: Record<string, string> = {
       Accept: 'application/json',
+      Origin: 'http://127.0.0.1:5173',
       ...(init.headers ?? {}),
     }
     if (init.body !== undefined) {

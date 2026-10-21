@@ -30,7 +30,7 @@ export async function resolveHostAddresses(hostname: string): Promise<string[]> 
 }
 
 export type FetchTarget =
-  | { ok: true; url: URL }
+  | { ok: true; url: URL; address: string }
   | { ok: false }
 
 function normalizeHost(hostname: string): string {
@@ -79,17 +79,14 @@ export async function validateMetadataTarget(
   if (url.protocol !== 'https:') {
     return { ok: false }
   }
+  if (url.port !== '' && url.port !== '443') {
+    return { ok: false }
+  }
   if (url.username || url.password) {
     return { ok: false }
   }
-  if (isBlockedHostname(url.hostname)) {
+  if (isBlockedHostname(url.hostname) || isIP(url.hostname) !== 0) {
     return { ok: false }
-  }
-  if (isIP(url.hostname) !== 0) {
-    if (isForbiddenAddress(url.hostname) || !isAllowedMetadataHost(url.hostname)) {
-      return { ok: false }
-    }
-    return { ok: true, url }
   }
   if (!isAllowedMetadataHost(url.hostname)) {
     return { ok: false }
@@ -103,7 +100,11 @@ export async function validateMetadataTarget(
   if (addresses.length === 0 || addresses.some((address) => isForbiddenAddress(address))) {
     return { ok: false }
   }
-  return { ok: true, url }
+  const address = addresses[0]
+  if (!address) {
+    return { ok: false }
+  }
+  return { ok: true, url, address }
 }
 
 export async function nextRedirectTarget(

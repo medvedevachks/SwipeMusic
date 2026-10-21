@@ -1,3 +1,7 @@
+import { existsSync, readFileSync } from 'node:fs'
+import { isIP } from 'node:net'
+import { join } from 'node:path'
+import { canonicalHttpOrigin, PRODUCTION_APP_ORIGIN } from '../http/originPolicy.ts'
 import { parseProviderSessionKey } from '../providers/sessionCrypto.ts'
 
 export type MailTransport = 'console' | 'smtp' | 'memory'
@@ -23,6 +27,7 @@ export type AppConfig = {
   forgotPasswordLimit: number
   forgotPasswordWindowMs: number
   providerSessionKey: Buffer | null
+  allowedOrigins: string[]
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -106,7 +111,82 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       'FORGOT_PASSWORD_WINDOW_MS',
     ),
     providerSessionKey,
+    allowedOrigins: collectAllowedOrigins(env, nodeEnv, appPublicUrl),
   }
+}
+
+const DEV_BROWSER_ORIGINS = [
+  'http://127.0.0.1:5173',
+  'http://localhost:5173',
+  'https://127.0.0.1:5173',
+  'https://localhost:5173',
+]
+
+function collectAllowedOrigins(
+  env: NodeJS.ProcessEnv,
+  nodeEnv: string,
+  appPublicUrl: string,
+): string[] {
+  const origins = new Set<string>()
+  origins.add(PRODUCTION_APP_ORIGIN)
+  const configured = canonicalHttpOrigin(appPublicUrl)
+  if (configured) {
+    origins.add(configured)
+  }
+  if (nodeEnv !== 'production') {
+    for (const origin of DEV_BROWSER_ORIGINS) {
+      origins.add(origin)
+    }
+    const lanOrigin = readDevelopmentLanOrigin(nodeEnv)
+    if (lanOrigin) {
+      origins.add(lanOrigin)
+    }
+  }
+  for (const origin of parseExtraOrigins(env.APP_ALLOWED_ORIGINS)) {
+    origins.add(origin)
+  }
+  return [...origins]
+}
+
+function parseExtraOrigins(raw: string | undefined): string[] {
+  if (!raw || raw.trim().length === 0) {
+    return []
+  }
+  return raw.split(',').map((item) => item.trim()).filter((item) => item.length > 0).map((item) => {
+    if (item.includes('*')) {
+      throw new Error('APP_ALLOWED_ORIGINS is invalid')
+    }
+    const origin = canonicalHttpOrigin(item)
+    if (!origin) {
+      throw new Error('APP_ALLOWED_ORIGINS is invalid')
+    }
+    return origin
+  })
+}
+
+function readDevelopmentLanOrigin(nodeEnv: string): string | null {
+  if (nodeEnv !== 'development') {
+    return null
+  }
+  const path = join(process.cwd(), '.certs', 'lan-origin.txt')
+  if (!existsSync(path)) {
+    return null
+  }
+  const text = readFileSync(path, 'utf8').trim()
+  const origin = canonicalHttpOrigin(text)
+  if (!origin) {
+    return null
+  }
+  let url: URL
+  try {
+    url = new URL(origin)
+  } catch {
+    return null
+  }
+  if (url.protocol !== 'https:' || url.port !== '5173' || isIP(url.hostname) !== 4) {
+    return null
+  }
+  return origin
 }
 
 function readProviderSessionKey(env: NodeJS.ProcessEnv, nodeEnv: string): Buffer | null {

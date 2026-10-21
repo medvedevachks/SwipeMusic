@@ -9,6 +9,11 @@ import {
 } from './yandexFetchPolicy.ts'
 import type { YandexRouteContext } from './yandexRoutes.ts'
 import type { YandexUpstream } from '../providers/yandexSession.ts'
+import {
+  UpstreamTimeoutError,
+  UpstreamTooLargeError,
+  fetchPinnedMetadata,
+} from './pinnedHttps.ts'
 
 const OAUTH_PATHS = new Map<string, string>([
   ['/api/yandex-oauth/device/code', 'https://oauth.yandex.ru/device/code'],
@@ -17,19 +22,36 @@ const OAUTH_PATHS = new Map<string, string>([
 
 const MAX_OAUTH_BODY = 16_384
 const MAX_METADATA_BODY = 1_048_576
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 8_000
+
+export type MetadataHop = {
+  url: URL
+  address: string
+}
+
+export type MetadataTransport = (hop: MetadataHop, init: RequestInit) => Promise<Response>
 
 type EdgeContext = YandexRouteContext & {
   yandexOauthUpstream?: YandexUpstream
   yandexMetadataUpstream?: YandexUpstream
+  metadataTransport?: MetadataTransport
   resolveMetadataHost?: HostResolver
+  upstreamTimeoutMs?: number
+  metadataBodyLimit?: number
 }
 
 function oauthUpstream(context: EdgeContext): YandexUpstream {
   return context.yandexOauthUpstream ?? ((url, init) => fetch(url, init))
 }
 
-function metadataUpstream(context: EdgeContext): YandexUpstream {
-  return context.yandexMetadataUpstream ?? ((url, init) => fetch(url, init))
+function startDeadline(ms: number): { signal: AbortSignal; stop: () => void } {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ms)
+  timer.unref()
+  return {
+    signal: controller.signal,
+    stop: () => clearTimeout(timer),
+  }
 }
 
 export function handleHealth(req: IncomingMessage, res: ServerResponse): void {
@@ -67,19 +89,26 @@ export async function handleYandexOauthProxy(
     return
   }
 
+  const deadline = startDeadline(timeoutMs(context))
   let upstream: Response
   try {
-    upstream = await oauthUpstream(context)(upstreamUrl, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new Uint8Array(body),
-    })
-  } catch {
-    sendJson(res, 502, { error: 'UPSTREAM' })
+    upstream = await withDeadline(
+      oauthUpstream(context)(upstreamUrl, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new Uint8Array(body),
+        signal: deadline.signal,
+      }),
+      timeoutMs(context),
+    )
+  } catch (error) {
+    sendUpstreamFailure(res, error)
     return
+  } finally {
+    deadline.stop()
   }
 
   const payload = await readResponseLimited(upstream, MAX_OAUTH_BODY)
@@ -114,17 +143,18 @@ export async function handleYandexFetchProxy(
     return
   }
 
-  const upstreamFetch = metadataUpstream(context)
+  const limit = context.metadataBodyLimit ?? MAX_METADATA_BODY
+  const deadline = startDeadline(timeoutMs(context))
   let response: Response | null = null
+  try {
   for (let hop = 0; hop <= YANDEX_FETCH_MAX_REDIRECTS; hop += 1) {
     try {
-      response = await upstreamFetch(target.url.toString(), {
-        method: 'GET',
-        redirect: 'manual',
-        headers: { Accept: 'application/xml, text/xml, application/json;q=0.5' },
-      })
-    } catch {
-      sendJson(res, 502, { error: 'UPSTREAM' })
+      response = await withDeadline(
+        dispatchMetadata(context, target, limit, deadline.signal),
+        timeoutMs(context),
+      )
+    } catch (error) {
+      sendUpstreamFailure(res, error)
       return
     }
     if (![301, 302, 303, 307, 308].includes(response.status)) {
@@ -151,12 +181,68 @@ export async function handleYandexFetchProxy(
     sendJson(res, 502, { error: 'UPSTREAM' })
     return
   }
-  const payload = await readResponseLimited(response, MAX_METADATA_BODY)
+  const payload = await readResponseLimited(response, limit)
   if (payload === 'too-large') {
     sendJson(res, 502, { error: 'UPSTREAM' })
     return
   }
   writeUpstream(res, response.status, response.headers.get('content-type'), payload)
+  } finally {
+    deadline.stop()
+  }
+}
+
+function timeoutMs(context: EdgeContext): number {
+  return context.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS
+}
+
+function dispatchMetadata(
+  context: EdgeContext,
+  target: { url: URL; address: string },
+  limit: number,
+  signal: AbortSignal,
+): Promise<Response> {
+  const init: RequestInit = {
+    method: 'GET',
+    redirect: 'manual',
+    headers: { Accept: 'application/xml, text/xml, application/json;q=0.5' },
+    signal,
+  }
+  if (context.metadataTransport) {
+    return context.metadataTransport(target, init)
+  }
+  if (context.yandexMetadataUpstream) {
+    return context.yandexMetadataUpstream(target.url.toString(), init)
+  }
+  return fetchPinnedMetadata(target.url, target.address, timeoutMs(context), limit, signal)
+}
+
+function sendUpstreamFailure(res: ServerResponse, error: unknown): void {
+  if (error instanceof UpstreamTimeoutError || (error instanceof Error && error.name === 'TimeoutError')) {
+    sendJson(res, 504, { error: 'UPSTREAM_TIMEOUT' })
+    return
+  }
+  if (error instanceof UpstreamTooLargeError) {
+    sendJson(res, 502, { error: 'UPSTREAM' })
+    return
+  }
+  sendJson(res, 502, { error: 'UPSTREAM' })
+}
+
+function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new UpstreamTimeoutError()), ms)
+    promise.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
 }
 
 function writeUpstream(

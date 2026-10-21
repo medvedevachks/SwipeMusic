@@ -106,8 +106,13 @@ $caRoot = (& mkcert -CAROOT).Trim()
 $publicCa = Join-Path $caRoot 'rootCA.pem'
 $privateCa = Join-Path $caRoot 'rootCA-key.pem'
 
+$originFile = Join-Path $certDir 'lan-origin.txt'
+Set-Content -LiteralPath $originFile -Value "https://${LanIp}:5173" -Encoding ascii -NoNewline
+
 Write-Host ''
 Write-Host "HTTPS URL: https://${LanIp}:5173"
+Write-Host "Dev origin записан явно: $originFile"
+Write-Host 'Production этот файл не читает. Другие origin задаются только через APP_ALLOWED_ORIGINS, без wildcard.'
 Write-Host "Каталог CA: $caRoot"
 Write-Host ''
 Write-Host 'На Android нужен только публичный корневой сертификат:'

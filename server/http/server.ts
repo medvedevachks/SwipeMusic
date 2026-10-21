@@ -15,6 +15,7 @@ import {
   handleYandexProviderRequest,
   type YandexRouteContext,
 } from './yandexRoutes.ts'
+import { evaluateOrigin } from './originPolicy.ts'
 import { handleHealth, handleYandexFetchProxy, handleYandexOauthProxy } from './yandexEdge.ts'
 import type { HostResolver } from './yandexFetchPolicy.ts'
 import type { YandexUpstream } from '../providers/yandexSession.ts'
@@ -37,6 +38,23 @@ export function createAuthServer(options: AuthServerOptions): Server {
   const authOptions = { ...options, loginLimiter, registerLimiter, passwordWork }
 
   return createServer((req, res) => {
+    const originDecision = evaluateOrigin({
+      method: req.method ?? 'GET',
+      origin: req.headers.origin,
+      secFetchSite: req.headers['sec-fetch-site'],
+      allowedOrigins: options.config.allowedOrigins,
+    })
+    if (!originDecision.ok) {
+      const payload = JSON.stringify({ error: 'FORBIDDEN_ORIGIN' })
+      res.writeHead(403, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Content-Length': Buffer.byteLength(payload),
+      })
+      res.end(payload)
+      return
+    }
+
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const { pathname } = url
     const handler = pathname === '/api/health'
