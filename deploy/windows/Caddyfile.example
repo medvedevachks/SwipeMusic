@@ -1,10 +1,11 @@
-# Example only. Replace every <PLACEHOLDER> before use.
+# Domain site for https://app.swipe-music.site.
+# Caddy obtains and renews the HTTPS certificate itself.
+# Do not add a manual `tls <cert> <key>` pair: that disables automatic HTTPS.
 # Do not commit certificates, private keys, or secrets.
 # Backend stays on 127.0.0.1:8787. Do not publish port 8787.
+# Ports 80 and 443 must reach this host so Caddy can answer ACME and serve the site.
 
-<PUBLIC_IP> {
-	tls <CERT_FILE> <KEY_FILE>
-
+app.swipe-music.site {
 	handle /api/* {
 		# Replace any client-supplied value with the TCP peer Caddy actually sees.
 		# Backend trusts X-Swipe-Client-Ip only from a loopback proxy.

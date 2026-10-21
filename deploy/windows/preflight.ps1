@@ -9,6 +9,8 @@
   Не печатает provider key, PROVIDER_SESSION_KEY и SMTP_PASSWORD.
   Сверяет DATABASE_PATH, PORT, APP_PUBLIC_URL, MAIL_TRANSPORT,
   отсутствие ключа в production.env, launcher и gitignore runtime-путей.
+  Отсутствие файла SQLite — WAIT и не блокирует первый запуск:
+  backend создаёт базу сам.
 #>
 param(
   [string]$DatabasePath = 'C:\SwipeMusic\data\swipemusic.sqlite',
@@ -228,14 +230,15 @@ try {
   $envFile = $EnvFile
   $providerKeyFile = $ProviderKeyFile
 
-  $databaseStatus = 'FAIL'
-  $databaseDetail = 'Файл базы не найден.'
+  $databaseStatus = 'WAIT'
+  $databaseDetail = 'Файл базы ещё не создан. Первый запуск backend создаст его и каталог data.'
   if (Test-Path -LiteralPath $databasePath -PathType Leaf) {
     $databaseLength = (Get-Item -LiteralPath $databasePath).Length
     if ($databaseLength -gt 0) {
       $databaseStatus = 'OK'
       $databaseDetail = $null
     } else {
+      $databaseStatus = 'FAIL'
       $databaseDetail = 'Файл базы пуст.'
     }
   }
@@ -504,7 +507,6 @@ try {
   }
 
   $ready = @(
-    $databaseStatus,
     $providerStatus,
     $nodeStatus,
     $frontendStatus,
@@ -514,6 +516,9 @@ try {
     $portStatus,
     $gitStatus
   ) | Where-Object { $_ -ne 'OK' }
+  if ($databaseStatus -eq 'FAIL') {
+    $ready += 'FAIL'
+  }
 
   Write-OperatorLine ''
   if ($ready.Count -eq 0) {
