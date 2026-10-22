@@ -41,8 +41,9 @@ function Get-ListeningLocals {
   }
   foreach ($line in @($lines)) {
     if ($line -match '^\s*TCP\s+(\S+)\s+\S+\s+LISTENING\s+\d+\s*$') {
-      if ($Matches[1] -match ":$Port$") {
-        $locals += $Matches[1]
+      $localAddress = $Matches[1]
+      if ($localAddress -match ":$Port$") {
+        $locals += $localAddress
       }
     }
   }
