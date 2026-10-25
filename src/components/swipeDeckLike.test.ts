@@ -348,6 +348,10 @@ function heartPhase(): string {
   return dom.document.querySelector('[data-heart]')?.getAttribute('data-heart') ?? ''
 }
 
+function heartSize(): string {
+  return dom.document.querySelector('[data-heart]')?.getAttribute('data-heart-size') ?? ''
+}
+
 async function slowLeft(distance: number): Promise<void> {
   const card = dom.document.querySelector('article.cursor-grab')
   if (!card) {
@@ -508,6 +512,8 @@ test('LIKE сохраняет трек, возвращает карточку и
   assert.equal(cardMotion(), 'return')
   assert.equal(noticeText(), 'В избранном')
   assert.equal(heartPhase(), 'fly')
+  assert.equal(heartSize(), '152')
+  assert.ok(dom.document.querySelector('.swipe-heart'))
   assert.equal(likePatches, 1)
   assert.deepEqual(navigated, [])
   assert.deepEqual(played, [])
@@ -611,6 +617,7 @@ test('медленный короткий LEFT доходит до сохран�
   assert.equal(likePatches, 1)
   assert.equal(noticeText(), 'В избранном')
   assert.equal(heartPhase(), 'fly')
+  assert.equal(heartSize(), '152')
   assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
   assert.equal(playerState().queueIndex, 0)
   assert.equal(playerState().currentTime, 37.5)

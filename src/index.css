@@ -58,23 +58,45 @@ body {
   font-family: var(--font-display);
 }
 
+.swipe-heart {
+  width: 9.5rem;
+  height: 9.5rem;
+  pointer-events: none;
+  filter: drop-shadow(0 14px 22px rgba(225, 29, 72, 0.42));
+}
+
+.swipe-heart-rest {
+  transform: translate3d(-50%, 0, 0) scale(1);
+  opacity: 1;
+}
+
 @keyframes swipe-heart-fly {
-  from {
+  0% {
+    transform: translate3d(-50%, 4%, 0) scale(0.92);
+    opacity: 0;
+  }
+  14% {
+    transform: translate3d(-50%, 0, 0) scale(1.16);
+    opacity: 1;
+  }
+  30% {
     transform: translate3d(-50%, 0, 0) scale(1);
     opacity: 1;
   }
-  to {
-    transform: translate3d(calc(-50% - 42vw), -8%, 0) scale(1.35);
+  100% {
+    transform: translate3d(calc(-50% - 52vw), -8%, 0) scale(1.24);
     opacity: 0;
   }
 }
 
 .swipe-heart-fly {
-  animation: swipe-heart-fly 560ms ease-in forwards;
+  animation: swipe-heart-fly 980ms cubic-bezier(0.2, 0.75, 0.28, 1) forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .swipe-heart-fly {
     animation: none;
+    transform: translate3d(-50%, 0, 0) scale(1);
+    opacity: 1;
   }
 }

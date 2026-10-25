@@ -98,7 +98,7 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
     const [gestureNotice, setGestureNotice] = useState<string | null>(null)
     const [cardMotion, setCardMotion] = useState<'idle' | 'return'>('idle')
     const [heart, setHeart] = useState<{
-      phase: 'pending' | 'fly' | 'rest'
+      phase: 'fly' | 'rest'
       token: number
     } | null>(null)
     const lockedRef = useRef(false)
@@ -355,20 +355,23 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
           }
           setDragDirection(direction)
           setDragProgress(progress)
-          // Horizontal: лёгкий tilt; vertical: почти без rotation.
+          // Лайк только чуть сдвигается. Полный ход оставлен skip/previous/catalog.
+          const likeDrag = mx < 0 && Math.abs(mx) >= Math.abs(my)
           const horizontal = Math.abs(mx) >= Math.abs(my)
           frontApi.set({
-            x: mx,
-            y: my,
-            rot: horizontal ? mx / 20 : my / 90,
-            scale: 1.03,
+            x: likeDrag ? mx * 0.12 : mx,
+            y: likeDrag ? my * 0.08 : my,
+            rot: likeDrag ? mx / 90 : horizontal ? mx / 20 : my / 90,
+            scale: likeDrag ? 1 : 1.03,
             opacity: 1,
           })
-          backApi.set({
-            scale: 0.97 + Math.min(Math.hypot(mx, my) / 1800, 0.03),
-            y: 14 - Math.min(Math.hypot(mx, my) / 40, 10),
-            opacity: 1,
-          })
+          if (!likeDrag) {
+            backApi.set({
+              scale: 0.97 + Math.min(Math.hypot(mx, my) / 1800, 0.03),
+              y: 14 - Math.min(Math.hypot(mx, my) / 40, 10),
+              opacity: 1,
+            })
+          }
           return
         }
 
@@ -400,6 +403,19 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
           })
         }
 
+        const settleLikeCard = () => {
+          clearDragVisual()
+          void frontApi.start({
+            x: 0,
+            y: 0,
+            rot: 0,
+            scale: 1,
+            opacity: 1,
+            config: { tension: 420, friction: 38, clamp: true },
+          })
+          backApi.set({ x: 0, y: 14, rot: 0, scale: 0.96, opacity: 1 })
+        }
+
         if (last && decision && passed) {
           if (decision.action === 'previous' && !decision.canGoPrevious) {
             springBack()
@@ -410,10 +426,9 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
             lockedRef.current = true
             cardMotionRef.current = 'return'
             setCardMotion('return')
-            springBack()
+            settleLikeCard()
             const token = heartTokenRef.current + 1
             heartTokenRef.current = token
-            setHeart({ phase: 'pending', token })
             const result = classifySwipeTrack(decision.track, 'like')
             const saved = result.kind === 'applied' ? result.saved : undefined
             window.requestAnimationFrame(() => {
@@ -592,27 +607,39 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
           {heart ? (
             <div
               key={heart.token}
-              className={`pointer-events-none absolute left-1/2 top-[22%] z-30 ${
-                heart.phase === 'fly' ? 'swipe-heart-fly' : '-translate-x-1/2'
+              className={`swipe-heart absolute left-1/2 top-[14%] z-30 ${
+                heart.phase === 'fly' ? 'swipe-heart-fly' : 'swipe-heart-rest'
               }`}
               data-heart={heart.phase}
-              onAnimationEnd={() => {
+              data-heart-size="152"
+              onAnimationEnd={(event) => {
+                if (event.target !== event.currentTarget) {
+                  return
+                }
                 setHeart((currentHeart) =>
                   currentHeart?.phase === 'fly' ? null : currentHeart,
                 )
               }}
             >
-              <svg
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                className={`h-24 w-24 drop-shadow-lg ${
-                  heart.phase === 'pending'
-                    ? 'fill-transparent stroke-rose-500'
-                    : 'fill-rose-500 stroke-rose-500'
-                }`}
-                strokeWidth="1.6"
-              >
-                <path d="M12 20.6s-6.7-4.3-9.2-8.4C1 9.2 1.9 5.6 5.2 4.4c2.1-.8 4.1-.1 5.4 1.6.4.5 1.4.5 1.8 0 1.3-1.7 3.3-2.4 5.4-1.6 3.3 1.2 4.2 4.8 2.4 7.8-2.5 4.1-9.2 8.4-9.2 8.4z" />
+              <svg viewBox="0 0 120 120" aria-hidden="true" className="h-full w-full">
+                <defs>
+                  <radialGradient id="swipeHeartGlow" cx="50%" cy="46%" r="52%">
+                    <stop offset="0%" stopColor="#fb7185" stopOpacity="0.95" />
+                    <stop offset="58%" stopColor="#e11d48" stopOpacity="0.28" />
+                    <stop offset="100%" stopColor="#e11d48" stopOpacity="0" />
+                  </radialGradient>
+                  <linearGradient id="swipeHeartFill" x1="30" y1="18" x2="78" y2="102">
+                    <stop offset="0%" stopColor="#fecdd3" />
+                    <stop offset="28%" stopColor="#fb7185" />
+                    <stop offset="100%" stopColor="#9f1239" />
+                  </linearGradient>
+                </defs>
+                <circle cx="60" cy="58" r="46" fill="url(#swipeHeartGlow)" />
+                <path
+                  fill="url(#swipeHeartFill)"
+                  d="M60 96.5S28.2 76 16.4 56.6C8.6 43.8 12.8 27 28.2 21.4c9.8-3.6 19.2-1 25.4 7.2 1.8 2.4 6.2 2.4 8 0 6.2-8.2 15.6-10.8 25.4-7.2C103.2 27 107.4 43.8 99.6 56.6 87.8 76 60 96.5 60 96.5z"
+                />
+                <ellipse cx="42" cy="40" rx="11" ry="6.5" fill="#fff" opacity="0.55" />
               </svg>
             </div>
           ) : null}
