@@ -410,7 +410,11 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
       {
         from: () => [front.x.get(), front.y.get()],
         filterTaps: true,
-        preventScroll: true,
+        // На touchscreen `true` ставит preventScrollAxis: 'y'. DragEngine
+        // тогда отменяет жест, как только ось становится вертикальной,
+        // и UP/DOWN не доходят до commit. Карточка уже с touch-action: none,
+        // поэтому страница не скроллится от жеста на ней, а остальной экран скроллится.
+        preventScroll: false,
       },
     )
 

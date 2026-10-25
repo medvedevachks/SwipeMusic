@@ -160,6 +160,9 @@ function installDom(window: Window): void {
   element.releasePointerCapture ??= () => undefined
   element.hasPointerCapture ??= () => false
   installGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  if (!('ontouchstart' in window)) {
+    Object.defineProperty(window, 'ontouchstart', { value: null, configurable: true })
+  }
 }
 
 function track(externalId: string, title: string): Track {
@@ -280,36 +283,66 @@ function frontTitle(): string {
   return node?.textContent?.trim() ?? ''
 }
 
-function pointer(type: string, x: number, y: number, buttons: number): Event {
+function pointer(
+  type: string,
+  x: number,
+  y: number,
+  buttons: number,
+  pointerType: 'mouse' | 'touch',
+): Event {
   return new dom.PointerEvent(type, {
     bubbles: true,
     cancelable: true,
     clientX: x,
     clientY: y,
     pointerId: 1,
-    pointerType: 'mouse',
+    pointerType,
     button: 0,
     buttons,
     isPrimary: true,
   })
 }
 
-async function swipe(direction: Direction): Promise<void> {
+async function swipe(
+  direction: Direction,
+  options?: { pointerType?: 'mouse' | 'touch'; distance?: number },
+): Promise<void> {
   const card = dom.document.querySelector('article.cursor-grab')
   if (!card) {
     throw new Error(`нет карточки, экран: ${dom.document.body.textContent}`)
   }
+  const distance = options?.distance ?? 180
+  const pointerType = options?.pointerType ?? 'mouse'
   const delta: Record<Direction, [number, number]> = {
-    left: [-180, 0],
-    right: [180, 0],
-    up: [0, -180],
-    down: [0, 180],
+    left: [-distance, 0],
+    right: [distance, 0],
+    up: [0, -distance],
+    down: [0, distance],
   }
   const [dx, dy] = delta[direction]
   await react.act(async () => {
-    card.dispatchEvent(pointer('pointerdown', 220, 220, 1))
-    card.dispatchEvent(pointer('pointermove', 220 + dx, 220 + dy, 1))
-    card.dispatchEvent(pointer('pointerup', 220 + dx, 220 + dy, 0))
+    card.dispatchEvent(pointer('pointerdown', 220, 220, 1, pointerType))
+    card.dispatchEvent(pointer('pointermove', 220 + dx, 220 + dy, 1, pointerType))
+    card.dispatchEvent(pointer('pointerup', 220 + dx, 220 + dy, 0, pointerType))
+    await new Promise((resolve) => setTimeout(resolve, 280))
+  })
+}
+
+async function drag(
+  dx: number,
+  dy: number,
+  pointerType: 'mouse' | 'touch',
+): Promise<void> {
+  const card = dom.document.querySelector('article.cursor-grab')
+  if (!card) {
+    throw new Error(`нет карточки, экран: ${dom.document.body.textContent}`)
+  }
+  await react.act(async () => {
+    card.dispatchEvent(pointer('pointerdown', 220, 220, 1, pointerType))
+    if (dx !== 0 || dy !== 0) {
+      card.dispatchEvent(pointer('pointermove', 220 + dx, 220 + dy, 1, pointerType))
+    }
+    card.dispatchEvent(pointer('pointerup', 220 + dx, 220 + dy, 0, pointerType))
     await new Promise((resolve) => setTimeout(resolve, 280))
   })
 }
@@ -550,5 +583,87 @@ test('кнопка плеера после LIKE по-прежнему приво
   assert.equal(frontTitle(), 'Море')
   assert.deepEqual(played, [])
   assert.equal(playerState().currentTime, 9)
+})
+
+test('сенсорный UP переключает трек один раз', { timeout: 20_000 }, async () => {
+  resetLibrary()
+  installRemote()
+  await seedPlayback(0, 37.5, true)
+  await renderDeck({ tracks }, { remount: true })
+
+  await swipe('up', { pointerType: 'touch' })
+
+  assert.equal(frontTitle(), 'Река')
+  assert.deepEqual(navigated, ['yandex-music:102'])
+  assert.deepEqual(played, ['yandex-music:102'])
+  assert.equal(playerState().currentTrack?.id, 'yandex-music:102')
+  assert.equal(playerState().queueIndex, 1)
+})
+
+test('сенсорный DOWN возвращает предыдущую карточку и не срабатывает на первой', { timeout: 20_000 }, async () => {
+  resetLibrary()
+  installRemote()
+  await seedPlayback(0, 18, true)
+  await renderDeck({ tracks }, { remount: true })
+
+  await swipe('down', { pointerType: 'touch' })
+  assert.equal(frontTitle(), 'Город')
+  assert.deepEqual(navigated, [])
+  assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
+  assert.equal(playerState().currentTime, 18)
+
+  await seedPlayback(1, 22, true)
+  await renderDeck({ tracks })
+  assert.equal(frontTitle(), 'Река')
+
+  await swipe('down', { pointerType: 'touch' })
+  assert.equal(frontTitle(), 'Город')
+  assert.deepEqual(navigated, ['yandex-music:101'])
+  assert.deepEqual(played, ['yandex-music:101'])
+  assert.equal(playerState().queueIndex, 0)
+})
+
+test('сенсорные LEFT и RIGHT не ломают лайк и каталог', { timeout: 20_000 }, async () => {
+  resetLibrary()
+  installRemote()
+  await seedPlayback(0, 37.5, true)
+  await renderDeck({ tracks }, { remount: true })
+
+  await swipe('left', { pointerType: 'touch' })
+  assert.equal(frontTitle(), 'Река')
+  assert.deepEqual(navigated, [])
+  assert.deepEqual(played, [])
+  assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
+  assert.equal(playerState().currentTime, 37.5)
+
+  await renderDeck({ tracks }, { remount: true })
+  await seedPlayback(0, 37.5, true)
+  await swipe('right', { pointerType: 'touch' })
+  assert.equal(frontTitle(), 'Город')
+  assert.deepEqual(categorized, ['yandex-music:101'])
+  assert.deepEqual(navigated, [])
+  assert.equal(playerState().currentTime, 37.5)
+})
+
+test('короткое касание и диагональ не дают ложный или двойной свайп', { timeout: 20_000 }, async () => {
+  resetLibrary()
+  installRemote()
+  await seedPlayback(0, 37.5, true)
+  await renderDeck({ tracks }, { remount: true })
+
+  await drag(8, -6, 'touch')
+  assert.equal(frontTitle(), 'Город')
+  assert.deepEqual(navigated, [])
+  assert.deepEqual(played, [])
+
+  await drag(36, -160, 'touch')
+  assert.equal(frontTitle(), 'Река')
+  assert.deepEqual(navigated, ['yandex-music:102'])
+  assert.deepEqual(played, ['yandex-music:102'])
+
+  const card = dom.document.querySelector('article.cursor-grab')
+  assert.ok(card)
+  assert.equal(dom.getComputedStyle(card).touchAction, 'none')
+  assert.notEqual(dom.getComputedStyle(dom.document.body).touchAction, 'none')
 })
 })
