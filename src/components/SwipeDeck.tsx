@@ -43,8 +43,8 @@ type SwipeDeckProps = {
   playerTrackId?: string | null
   onCategorize: (track: Track) => void
   /**
-   * После skip / previous / like колода сменила активный трек —
-   * Global Player должен переключиться на него.
+   * Skip и previous сменили карточку вместе с воспроизведением.
+   * Like сюда не приходит: карточка уходит вперёд, текущий трек играет дальше.
    */
   onDeckNavigate: (track: Track) => void
   playback?: PlaybackState | null
@@ -206,28 +206,27 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
       [goNext, goPrevious],
     )
 
-    /** Global Player → колода: текущий playing трек всегда на карточке (если есть в deck). */
+    /**
+     * Колода следует за плеером только когда сменился сам трек плеера
+     * (кнопки Next/Previous или skip/previous колоды).
+     * Like уводит карточку вперёд и не меняет playerTrackId: обновление
+     * списка или повторный рендер не должны возвращать карточку назад.
+     */
     useEffect(() => {
-      if (!playerTrackId || tracks.length === 0) {
-        prevPlayerTrackIdRef.current = playerTrackId
-        return
-      }
-
       if (ignorePlayerSyncRef.current) {
         ignorePlayerSyncRef.current = false
         prevPlayerTrackIdRef.current = playerTrackId
         return
       }
 
-      const playerIndex = tracks.findIndex((track) => track.id === playerTrackId)
-      if (playerIndex < 0) {
-        prevPlayerTrackIdRef.current = playerTrackId
+      const playerChanged = prevPlayerTrackIdRef.current !== playerTrackId
+      prevPlayerTrackIdRef.current = playerTrackId
+      if (!playerChanged || !playerTrackId || tracks.length === 0) {
         return
       }
 
-      prevPlayerTrackIdRef.current = playerTrackId
-
-      if (playerIndex === indexRef.current) {
+      const playerIndex = tracks.findIndex((track) => track.id === playerTrackId)
+      if (playerIndex < 0 || playerIndex === indexRef.current) {
         return
       }
 
@@ -296,8 +295,8 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
           return
         }
 
-        // like / skip → следующая карточка + Global Player
-        goNext(true)
+        // Like меняет только карточку. Skip по-прежнему зовёт плеер.
+        goNext(action !== 'like')
       },
       [goNext, goPrevious, onCategorize],
     )

@@ -14,7 +14,7 @@
     "start:server": "node --experimental-strip-types server/index.ts",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "node --experimental-strip-types --test server/auth.test.ts server/library.test.ts server/library/identity/match.test.ts server/library/identity.test.ts server/library/canonical/library.test.ts src/services/libraryPersistence/libraryPersistence.test.ts src/services/catalogs/selectCatalogs.test.ts src/services/canonical/canonicalOrganization.test.ts src/services/playbackAvailability/playbackAvailability.test.ts src/services/playbackAvailability/playableSourceSelection.test.ts src/services/runtimeFallback/runtimeFallback.test.ts src/services/runtimeFallback/livePlayback.test.ts src/services/runtimeFallback/fallbackUx.test.ts src/sources/adapters/local-folder/localFiles.test.ts src/components/watchLoginStatus.test.ts server/providers/yandexSession.test.ts src/sources/adapters/yandex-music/yandexSession.test.ts server/http/deployEdge.test.ts server/auth/password.test.ts server/auth/authHardening.test.ts src/services/auth/messages.test.ts server/http/originPolicy.test.ts server/http/yandexSsrf.test.ts server/http/upstreamLimits.test.ts server/http/accessBoundary.test.ts",
+    "test": "node --experimental-strip-types --test server/auth.test.ts server/library.test.ts server/library/identity/match.test.ts server/library/identity.test.ts server/library/canonical/library.test.ts src/services/libraryPersistence/libraryPersistence.test.ts src/services/catalogs/selectCatalogs.test.ts src/services/canonical/canonicalOrganization.test.ts src/services/playbackAvailability/playbackAvailability.test.ts src/services/playbackAvailability/playableSourceSelection.test.ts src/services/runtimeFallback/runtimeFallback.test.ts src/services/runtimeFallback/livePlayback.test.ts src/services/runtimeFallback/fallbackUx.test.ts src/sources/adapters/local-folder/localFiles.test.ts src/components/watchLoginStatus.test.ts server/providers/yandexSession.test.ts src/sources/adapters/yandex-music/yandexSession.test.ts server/http/deployEdge.test.ts server/auth/password.test.ts server/auth/authHardening.test.ts src/services/auth/messages.test.ts server/http/originPolicy.test.ts server/http/yandexSsrf.test.ts server/http/upstreamLimits.test.ts server/http/accessBoundary.test.ts src/components/swipeDeckLike.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -33,6 +33,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.1.0",
+    "happy-dom": "^21.0.4",
     "oxlint": "^1.79.0",
     "typescript": "~6.0.2",
     "vite": "^8.2.4",
