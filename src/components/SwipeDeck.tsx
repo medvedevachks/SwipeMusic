@@ -17,8 +17,10 @@ import {
   resolveSwipeAction,
   SWIPE_FLY_DISTANCE,
   SWIPE_THRESHOLD,
+  SWIPE_VERTICAL_THRESHOLD,
 } from '../services/swipeEngine'
 import { classifySwipeTrack } from '../services/swipeClassification'
+import { SAVE_FAILED_MESSAGE } from '../services/libraryPersistence/statusStore'
 import type { GestureConfig, SwipeDirection } from '../types/gesture'
 import type { SwipeAction } from '../types/swipe'
 import type { Track } from '../types/track'
@@ -44,7 +46,7 @@ type SwipeDeckProps = {
   onCategorize: (track: Track) => void
   /**
    * Skip и previous сменили карточку вместе с воспроизведением.
-   * Like сюда не приходит: карточка уходит вперёд, текущий трек играет дальше.
+   * Like сюда не приходит: карточка остаётся, текущий трек играет дальше.
    */
   onDeckNavigate: (track: Track) => void
   playback?: PlaybackState | null
@@ -93,7 +95,11 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
       null,
     )
     const [dragProgress, setDragProgress] = useState(0)
+    const [gestureNotice, setGestureNotice] = useState<string | null>(null)
+    const [cardMotion, setCardMotion] = useState<'idle' | 'return'>('idle')
     const lockedRef = useRef(false)
+    const cardMotionRef = useRef<'idle' | 'return'>('idle')
+    const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const awaitingCategoryRef = useRef(false)
     const prevResolveKeyRef = useRef(categoryResolveKey)
     const prevCancelKeyRef = useRef(categoryCancelKey)
@@ -121,10 +127,24 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
       indexRef.current = index
     }, [index])
 
+    const showNotice = useCallback((message: string) => {
+      if (noticeTimerRef.current) {
+        clearTimeout(noticeTimerRef.current)
+      }
+      setGestureNotice(message)
+      noticeTimerRef.current = setTimeout(() => {
+        noticeTimerRef.current = null
+        setGestureNotice(null)
+      }, 1600)
+    }, [])
+
     useEffect(() => {
       return () => {
         if (commitTimerRef.current) {
           clearTimeout(commitTimerRef.current)
+        }
+        if (noticeTimerRef.current) {
+          clearTimeout(noticeTimerRef.current)
         }
       }
     }, [])
@@ -208,9 +228,9 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
 
     /**
      * Колода следует за плеером только когда сменился сам трек плеера
-     * (кнопки Next/Previous или skip/previous колоды).
-     * Like уводит карточку вперёд и не меняет playerTrackId: обновление
-     * списка или повторный рендер не должны возвращать карточку назад.
+     * (кнопки Next/Previous, skip/previous или естественный конец трека).
+     * Like не меняет индекс и playerTrackId, поэтому сохранение и
+     * обновление списка не сдвигают карточку.
      */
     useEffect(() => {
       if (ignorePlayerSyncRef.current) {
@@ -295,8 +315,12 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
           return
         }
 
-        // Like меняет только карточку. Skip по-прежнему зовёт плеер.
-        goNext(action !== 'like')
+        if (action === 'like') {
+          // Like классифицируется в обработчике жеста и не двигает колоду.
+          return
+        }
+
+        goNext(true)
       },
       [goNext, goPrevious, onCategorize],
     )
@@ -319,6 +343,10 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
           : null
 
         if (active) {
+          if (cardMotionRef.current !== 'idle') {
+            cardMotionRef.current = 'idle'
+            setCardMotion('idle')
+          }
           setDragDirection(direction)
           setDragProgress(progress)
           // Horizontal: лёгкий tilt; vertical: почти без rotation.
@@ -342,20 +370,51 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
         const flick = Math.hypot(vx, vy) > 0.35
         const passed =
           Math.abs(mx) > SWIPE_THRESHOLD ||
-          Math.abs(my) > SWIPE_THRESHOLD ||
+          Math.abs(my) > SWIPE_VERTICAL_THRESHOLD ||
           (flick && (Math.abs(mx) > 32 || Math.abs(my) > 32))
+
+        const springBack = () => {
+          clearDragVisual()
+          void frontApi.start({
+            x: 0,
+            y: 0,
+            rot: 0,
+            scale: 1,
+            opacity: 1,
+            config: { tension: 320, friction: 24 },
+          })
+          void backApi.start({
+            y: 14,
+            scale: 0.96,
+            opacity: 1,
+            config: { tension: 280, friction: 24 },
+          })
+        }
 
         if (last && decision && passed) {
           if (decision.action === 'previous' && !decision.canGoPrevious) {
-            clearDragVisual()
-            void frontApi.start({
-              x: 0,
-              y: 0,
-              rot: 0,
-              scale: 1,
-              opacity: 1,
-              config: { tension: 320, friction: 24 },
+            springBack()
+            return
+          }
+
+          if (decision.action === 'like') {
+            lockedRef.current = true
+            cardMotionRef.current = 'return'
+            setCardMotion('return')
+            springBack()
+            const result = classifySwipeTrack(decision.track, 'like')
+            const saved = result.kind === 'applied' ? result.saved : undefined
+            window.requestAnimationFrame(() => {
+              lockedRef.current = false
             })
+            void saved?.then(
+              (ok) => {
+                showNotice(ok ? 'В избранном' : SAVE_FAILED_MESSAGE)
+              },
+              () => {
+                showNotice(SAVE_FAILED_MESSAGE)
+              },
+            )
             return
           }
 
@@ -454,7 +513,18 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
     }
 
     return (
-      <div className="relative mx-auto mb-6 w-full max-w-sm px-[4.5rem] pb-8 pt-7">
+      <div
+        className="relative mx-auto mb-6 w-full max-w-sm px-[4.5rem] pb-8 pt-7"
+        data-card-motion={cardMotion}
+      >
+        {gestureNotice ? (
+          <p
+            role="status"
+            className="pointer-events-none absolute left-1/2 top-1 z-20 max-w-[16rem] -translate-x-1/2 rounded-full bg-[var(--color-surface)] px-3 py-1 text-center text-xs font-medium text-[var(--color-fg)] shadow"
+          >
+            {gestureNotice}
+          </p>
+        ) : null}
         <SwipeDirectionHints
           gestureConfig={gestureConfig}
           activeDirection={dragDirection}

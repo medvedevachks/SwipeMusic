@@ -5,7 +5,7 @@ import type { SwipeAction } from '../../types/swipe'
 import type { Track } from '../../types/track'
 
 export type ClassifySwipeResult =
-  | { kind: 'applied'; action: SwipeAction }
+  | { kind: 'applied'; action: SwipeAction; saved?: Promise<boolean> }
   | { kind: 'needsCategory'; action: 'categorize' }
 
 /**
@@ -24,9 +24,8 @@ export function classifySwipeTrack(
 
   switch (action) {
     case 'like':
-      // Жест остаётся мгновенным. Сохранение — canonical like, история пишется после успеха.
-      void commitSwipeLike(track)
-      return { kind: 'applied', action }
+      // Классификация без навигации. Подтверждение показывает вызывающий код после ответа.
+      return { kind: 'applied', action, saved: commitSwipeLike(track) }
 
     case 'skip':
       // «Дальше» / skip classification — не playback Skip.

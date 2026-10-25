@@ -93,6 +93,8 @@ const played: string[] = []
 const navigated: string[] = []
 const categorized: string[] = []
 let deckKey = 0
+let likePatches = 0
+let likeShouldFail = false
 
 let dom: Window
 let server: ViteDevServer
@@ -219,6 +221,10 @@ function installRemote(): void {
       return identityFor(known ?? tracks[0]!)
     },
     async patchCanonicalLiked(id: string, liked: boolean) {
+      likePatches += 1
+      if (likeShouldFail) {
+        throw new Error('like failed')
+      }
       const current = canonicalStore.getState().itemsById[id]
       if (!current) {
         throw new Error(`missing canonical ${id}`)
@@ -252,6 +258,16 @@ function resetLibrary(): void {
   played.length = 0
   navigated.length = 0
   categorized.length = 0
+  likePatches = 0
+  likeShouldFail = false
+}
+
+function noticeText(): string {
+  return dom.document.querySelector('[role="status"]')?.textContent?.trim() ?? ''
+}
+
+function cardMotion(): string {
+  return dom.document.querySelector('[data-card-motion]')?.getAttribute('data-card-motion') ?? ''
 }
 
 async function seedPlayback(index: number, currentTime: number, playing: boolean): Promise<void> {
@@ -456,7 +472,7 @@ after(async () => {
 })
 
 describe('SwipeDeck playback', { concurrency: false }, () => {
-test('LIKE сохраняет трек, двигает карточку и не трогает воспроизведение', { timeout: 20_000 }, async () => {
+test('LIKE сохраняет трек, возвращает карточку и не трогает воспроизведение', { timeout: 20_000 }, async () => {
   resetLibrary()
   installRemote()
   await seedPlayback(0, 37.5, true)
@@ -465,7 +481,9 @@ test('LIKE сохраняет трек, двигает карточку и не 
 
   await swipe('left')
 
-  assert.equal(frontTitle(), 'Река')
+  assert.equal(frontTitle(), 'Город')
+  assert.equal(cardMotion(), 'return')
+  assert.equal(noticeText(), 'В избранном')
   assert.deepEqual(navigated, [])
   assert.deepEqual(played, [])
   assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
@@ -481,7 +499,7 @@ test('LIKE сохраняет трек, двигает карточку и не 
   await renderDeck({ tracks: tracks.map((item) => ({ ...item })) })
   await new Promise((resolve) => setTimeout(resolve, 30))
 
-  assert.equal(frontTitle(), 'Река')
+  assert.equal(frontTitle(), 'Город')
   assert.deepEqual(navigated, [])
   assert.deepEqual(played, [])
   assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
@@ -498,13 +516,78 @@ test('LIKE на паузе не запускает музыку', { timeout: 20_
 
   await swipe('left')
 
-  assert.equal(frontTitle(), 'Река')
+  assert.equal(frontTitle(), 'Город')
+  assert.equal(noticeText(), 'В избранном')
   assert.deepEqual(played, [])
   assert.equal(playerState().playing, false)
   assert.equal(playerState().paused, true)
   assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
   assert.equal(playerState().currentTime, 12)
   assert.equal(playerState().queueIndex, 0)
+})
+
+test('повторный LIKE не создаёт второй canonical patch', { timeout: 20_000 }, async () => {
+  resetLibrary()
+  installRemote()
+  await seedPlayback(0, 37.5, true)
+  await renderDeck({ tracks }, { remount: true })
+
+  await swipe('left')
+  await swipe('left')
+
+  assert.equal(frontTitle(), 'Город')
+  assert.equal(likePatches, 1)
+  assert.equal(collectionStore.getState().history.length, 1)
+  assert.equal(noticeText(), 'В избранном')
+  assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
+  assert.equal(playerState().currentTime, 37.5)
+  assert.equal(playerState().queueIndex, 0)
+  assert.deepEqual(navigated, [])
+})
+
+test('ошибка сохранения LIKE не сообщает об успехе', { timeout: 20_000 }, async () => {
+  resetLibrary()
+  installRemote()
+  likeShouldFail = true
+  await seedPlayback(0, 37.5, true)
+  await renderDeck({ tracks }, { remount: true })
+
+  await swipe('left')
+
+  assert.equal(frontTitle(), 'Город')
+  assert.equal(cardMotion(), 'return')
+  assert.equal(noticeText(), 'Не удалось сохранить изменения.')
+  assert.equal(canonicalStore.getState().itemsById.can_x?.state.liked ?? false, false)
+  assert.equal(collectionStore.getState().history.length, 0)
+  assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
+  assert.equal(playerState().currentTime, 37.5)
+  assert.equal(playerState().playing, true)
+  assert.deepEqual(navigated, [])
+  assert.deepEqual(played, [])
+})
+
+test('короткий UP и DOWN переключают карточку один раз', { timeout: 20_000 }, async () => {
+  resetLibrary()
+  installRemote()
+  await seedPlayback(0, 37.5, true)
+  await renderDeck({ tracks }, { remount: true })
+
+  await swipe('up', { distance: 56, pointerType: 'touch' })
+  assert.equal(frontTitle(), 'Река')
+  assert.deepEqual(navigated, ['yandex-music:102'])
+  assert.deepEqual(played, ['yandex-music:102'])
+  assert.equal(playerState().queueIndex, 1)
+
+  await swipe('down', { distance: 56, pointerType: 'touch' })
+  assert.equal(frontTitle(), 'Город')
+  assert.deepEqual(navigated, ['yandex-music:102', 'yandex-music:101'])
+  assert.deepEqual(played, ['yandex-music:102', 'yandex-music:101'])
+  assert.equal(playerState().queueIndex, 0)
+
+  await swipe('down', { distance: 56, pointerType: 'touch' })
+  assert.equal(frontTitle(), 'Город')
+  assert.deepEqual(navigated, ['yandex-music:102', 'yandex-music:101'])
+  assert.equal(playerState().currentTime, 0)
 })
 
 test('SKIP по-прежнему переключает воспроизведение', { timeout: 20_000 }, async () => {
@@ -566,7 +649,7 @@ test('кнопка плеера после LIKE по-прежнему приво
   await seedPlayback(0, 37.5, true)
   await renderDeck({ tracks }, { remount: true })
   await swipe('left')
-  assert.equal(frontTitle(), 'Река')
+  assert.equal(frontTitle(), 'Город')
   assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
 
   await react.act(async () => {
@@ -630,7 +713,9 @@ test('сенсорные LEFT и RIGHT не ломают лайк и катал�
   await renderDeck({ tracks }, { remount: true })
 
   await swipe('left', { pointerType: 'touch' })
-  assert.equal(frontTitle(), 'Река')
+  assert.equal(frontTitle(), 'Город')
+  assert.equal(cardMotion(), 'return')
+  assert.equal(noticeText(), 'В избранном')
   assert.deepEqual(navigated, [])
   assert.deepEqual(played, [])
   assert.equal(playerState().currentTrack?.id, 'yandex-music:101')

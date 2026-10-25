@@ -6,6 +6,7 @@ import type { Track } from '../../types/track.ts'
 import { libraryClient } from '../libraryPersistence/client.ts'
 import { runLibraryMutation } from '../libraryPersistence/mutations.ts'
 import { sourceTrackKeyOf, snapshotFromTrack } from './mapCanonical.ts'
+import { isSourceCopyLiked } from './selectors.ts'
 
 /**
  * Удалённые операции канонической организации.
@@ -36,6 +37,7 @@ const defaultRemote: CanonicalRemote = {
 
 let remote: CanonicalRemote = defaultRemote
 const identityFlights = new Map<string, Promise<CanonicalLibraryItem>>()
+const likeFlights = new Map<string, Promise<boolean>>()
 
 export function setCanonicalRemote(next: CanonicalRemote | null): void {
   remote = next ?? defaultRemote
@@ -43,6 +45,7 @@ export function setCanonicalRemote(next: CanonicalRemote | null): void {
 
 export function clearCanonicalIdentityFlights(): void {
   identityFlights.clear()
+  likeFlights.clear()
 }
 
 export async function ensureCanonicalForTrack(track: Track): Promise<CanonicalLibraryItem> {
@@ -113,13 +116,32 @@ export async function removeCanonicalFromCatalog(
   return saved === true
 }
 
-export async function commitSwipeLike(track: Track): Promise<boolean> {
+async function persistSwipeLike(track: Track): Promise<boolean> {
   const item = await likeSourceTrack(track, true)
   if (!item) {
     return false
   }
   useCollectionStore.getState().recordHistory({ track, action: 'like' })
   return true
+}
+
+/** Лайк свайпа идемпотентен: повтор жеста не пишет вторую запись и не шлёт второй patch. */
+export function commitSwipeLike(track: Track): Promise<boolean> {
+  const key = sourceTrackKeyOf(track)
+  if (isSourceCopyLiked(useCanonicalLibraryStore.getState(), key)) {
+    return Promise.resolve(true)
+  }
+  const current = likeFlights.get(key)
+  if (current) {
+    return current
+  }
+  const pending = persistSwipeLike(track).finally(() => {
+    if (likeFlights.get(key) === pending) {
+      likeFlights.delete(key)
+    }
+  })
+  likeFlights.set(key, pending)
+  return pending
 }
 
 export async function commitCatalogChoice(
