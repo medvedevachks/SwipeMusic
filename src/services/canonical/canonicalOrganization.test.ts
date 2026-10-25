@@ -29,6 +29,7 @@ import {
   canonicalItemForTrack,
   canonicalTracksInCatalog,
   isSourceCopyLiked,
+  likedCanonicalItems,
   likedSourceKeys,
   listCanonicalItems,
   projectCanonicalMeta,
@@ -284,6 +285,8 @@ test('canonical liked state is projected onto every source copy', () => {
       'spotify:202': 'can_x',
     },
   }
+  assert.equal(likedCanonicalItems([item]).length, 1)
+  assert.equal(likedCanonicalItems([{ ...item, state: { ...item.state, liked: false } }]).length, 0)
   assert.equal(isSourceCopyLiked(lookup, 'yandex-music:101'), true)
   assert.equal(isSourceCopyLiked(lookup, 'spotify:202'), true)
   const yandex = projectCanonicalMeta(defaultTrackMeta(sourceTrack('yandex-music', '101', 'Город')), item)

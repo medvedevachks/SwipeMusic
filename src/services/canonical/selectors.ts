@@ -14,6 +14,12 @@ export function listCanonicalItems(
   return [...items].sort(byTitle)
 }
 
+export function likedCanonicalItems(
+  items: readonly CanonicalLibraryItem[],
+): CanonicalLibraryItem[] {
+  return items.filter((item) => item.state.liked).sort(byTitle)
+}
+
 export function canonicalTracksInCatalog(
   items: readonly CanonicalLibraryItem[],
   catalogId: string,

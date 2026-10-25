@@ -97,9 +97,14 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
     const [dragProgress, setDragProgress] = useState(0)
     const [gestureNotice, setGestureNotice] = useState<string | null>(null)
     const [cardMotion, setCardMotion] = useState<'idle' | 'return'>('idle')
+    const [heart, setHeart] = useState<{
+      phase: 'pending' | 'fly' | 'rest'
+      token: number
+    } | null>(null)
     const lockedRef = useRef(false)
     const cardMotionRef = useRef<'idle' | 'return'>('idle')
     const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const heartTokenRef = useRef(0)
     const awaitingCategoryRef = useRef(false)
     const prevResolveKeyRef = useRef(categoryResolveKey)
     const prevCancelKeyRef = useRef(categoryCancelKey)
@@ -135,6 +140,7 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
       noticeTimerRef.current = setTimeout(() => {
         noticeTimerRef.current = null
         setGestureNotice(null)
+        setHeart((current) => (current?.phase === 'rest' ? null : current))
       }, 1600)
     }, [])
 
@@ -368,9 +374,12 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
 
         // Gesture ended
         const flick = Math.hypot(vx, vy) > 0.35
+        const likeDistance =
+          decision?.action === 'like' && Math.abs(mx) > SWIPE_VERTICAL_THRESHOLD
         const passed =
           Math.abs(mx) > SWIPE_THRESHOLD ||
           Math.abs(my) > SWIPE_VERTICAL_THRESHOLD ||
+          likeDistance ||
           (flick && (Math.abs(mx) > 32 || Math.abs(my) > 32))
 
         const springBack = () => {
@@ -402,19 +411,34 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
             cardMotionRef.current = 'return'
             setCardMotion('return')
             springBack()
+            const token = heartTokenRef.current + 1
+            heartTokenRef.current = token
+            setHeart({ phase: 'pending', token })
             const result = classifySwipeTrack(decision.track, 'like')
             const saved = result.kind === 'applied' ? result.saved : undefined
             window.requestAnimationFrame(() => {
               lockedRef.current = false
             })
-            void saved?.then(
-              (ok) => {
-                showNotice(ok ? 'В избранном' : SAVE_FAILED_MESSAGE)
-              },
-              () => {
+            const finishLike = (ok: boolean) => {
+              if (heartTokenRef.current !== token) {
+                return
+              }
+              if (!ok) {
+                setHeart(null)
                 showNotice(SAVE_FAILED_MESSAGE)
-              },
-            )
+                return
+              }
+              const reduceMotion = window.matchMedia?.(
+                '(prefers-reduced-motion: reduce)',
+              ).matches
+              setHeart({ phase: reduceMotion ? 'rest' : 'fly', token })
+              showNotice('В избранном')
+            }
+            if (!saved) {
+              finishLike(false)
+              return
+            }
+            void saved.then(finishLike, () => finishLike(false))
             return
           }
 
@@ -531,7 +555,8 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
           progress={dragProgress}
         />
 
-        <div className="relative z-[1] h-[420px] max-h-[48vh] touch-none overflow-hidden">
+        <div className="relative z-[1]">
+        <div className="relative h-[420px] max-h-[48vh] touch-none overflow-hidden">
           {next && (
             <SwipeCard
               key={`back-${next.id}`}
@@ -563,6 +588,34 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
             zIndex={2}
             playback={playbackForCard}
           />
+        </div>
+          {heart ? (
+            <div
+              key={heart.token}
+              className={`pointer-events-none absolute left-1/2 top-[22%] z-30 ${
+                heart.phase === 'fly' ? 'swipe-heart-fly' : '-translate-x-1/2'
+              }`}
+              data-heart={heart.phase}
+              onAnimationEnd={() => {
+                setHeart((currentHeart) =>
+                  currentHeart?.phase === 'fly' ? null : currentHeart,
+                )
+              }}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                className={`h-24 w-24 drop-shadow-lg ${
+                  heart.phase === 'pending'
+                    ? 'fill-transparent stroke-rose-500'
+                    : 'fill-rose-500 stroke-rose-500'
+                }`}
+                strokeWidth="1.6"
+              >
+                <path d="M12 20.6s-6.7-4.3-9.2-8.4C1 9.2 1.9 5.6 5.2 4.4c2.1-.8 4.1-.1 5.4 1.6.4.5 1.4.5 1.8 0 1.3-1.7 3.3-2.4 5.4-1.6 3.3 1.2 4.2 4.8 2.4 7.8-2.5 4.1-9.2 8.4-9.2 8.4z" />
+              </svg>
+            </div>
+          ) : null}
         </div>
       </div>
     )

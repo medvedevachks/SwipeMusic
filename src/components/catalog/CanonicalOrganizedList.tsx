@@ -1,6 +1,7 @@
 import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore'
 import {
   formatSourceCopyCount,
+  likedCanonicalItems,
   listCanonicalItems,
 } from '../../services/canonical/selectors'
 import { getSourceDisplayName } from '../../utils/sourceDisplay'
@@ -9,9 +10,41 @@ import { getSourceDisplayName } from '../../utils/sourceDisplay'
 export function CanonicalOrganizedList() {
   const itemsById = useCanonicalLibraryStore((state) => state.itemsById)
   const items = listCanonicalItems(Object.values(itemsById))
+  const favorites = likedCanonicalItems(items)
 
   return (
     <section className="space-y-3" aria-label="Моя музыка">
+      <div className="space-y-1">
+        <h2 className="font-display text-lg font-semibold text-[var(--color-fg)]">
+          Избранное
+        </h2>
+        <p className="text-sm text-[var(--color-muted)]">
+          Лайки Swipe Music. Это не папка «Мне нравится» Яндекс Музыки.
+        </p>
+      </div>
+      {favorites.length === 0 ? (
+        <p className="rounded-2xl border border-dashed border-[var(--color-border)] px-4 py-6 text-sm text-[var(--color-muted)]">
+          В избранном пока ничего нет
+        </p>
+      ) : (
+        <ul className="space-y-2" aria-label="Избранное">
+          {favorites.map((item) => (
+            <li
+              key={item.canonicalTrack.id}
+              className="flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-[var(--color-fg)]">
+                  {item.canonicalTrack.title}
+                </span>
+                <span className="block truncate text-xs text-[var(--color-muted)]">
+                  {item.canonicalTrack.artist}
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="space-y-1">
         <h2 className="font-display text-lg font-semibold text-[var(--color-fg)]">
           Моя музыка

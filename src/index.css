@@ -57,3 +57,24 @@ body {
 .font-display {
   font-family: var(--font-display);
 }
+
+@keyframes swipe-heart-fly {
+  from {
+    transform: translate3d(-50%, 0, 0) scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: translate3d(calc(-50% - 42vw), -8%, 0) scale(1.35);
+    opacity: 0;
+  }
+}
+
+.swipe-heart-fly {
+  animation: swipe-heart-fly 560ms ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .swipe-heart-fly {
+    animation: none;
+  }
+}

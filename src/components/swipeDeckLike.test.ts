@@ -344,6 +344,29 @@ async function swipe(
   })
 }
 
+function heartPhase(): string {
+  return dom.document.querySelector('[data-heart]')?.getAttribute('data-heart') ?? ''
+}
+
+async function slowLeft(distance: number): Promise<void> {
+  const card = dom.document.querySelector('article.cursor-grab')
+  if (!card) {
+    throw new Error(`нет карточки, экран: ${dom.document.body.textContent}`)
+  }
+  const steps = 4
+  await react.act(async () => {
+    card.dispatchEvent(pointer('pointerdown', 220, 220, 1, 'touch'))
+    for (let step = 1; step <= steps; step += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 45))
+      const x = 220 - (distance * step) / steps
+      card.dispatchEvent(pointer('pointermove', x, 220, 1, 'touch'))
+    }
+    await new Promise((resolve) => setTimeout(resolve, 45))
+    card.dispatchEvent(pointer('pointerup', 220 - distance, 220, 0, 'touch'))
+    await new Promise((resolve) => setTimeout(resolve, 280))
+  })
+}
+
 async function drag(
   dx: number,
   dy: number,
@@ -484,6 +507,8 @@ test('LIKE сохраняет трек, возвращает карточку и
   assert.equal(frontTitle(), 'Город')
   assert.equal(cardMotion(), 'return')
   assert.equal(noticeText(), 'В избранном')
+  assert.equal(heartPhase(), 'fly')
+  assert.equal(likePatches, 1)
   assert.deepEqual(navigated, [])
   assert.deepEqual(played, [])
   assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
@@ -557,11 +582,38 @@ test('ошибка сохранения LIKE не сообщает об успе
   assert.equal(frontTitle(), 'Город')
   assert.equal(cardMotion(), 'return')
   assert.equal(noticeText(), 'Не удалось сохранить изменения.')
+  assert.equal(heartPhase(), '')
   assert.equal(canonicalStore.getState().itemsById.can_x?.state.liked ?? false, false)
   assert.equal(collectionStore.getState().history.length, 0)
   assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
   assert.equal(playerState().currentTime, 37.5)
   assert.equal(playerState().playing, true)
+  assert.deepEqual(navigated, [])
+  assert.deepEqual(played, [])
+})
+
+test('медленный короткий LEFT доходит до сохранения, слишком короткий нет', { timeout: 20_000 }, async () => {
+  resetLibrary()
+  installRemote()
+  await seedPlayback(0, 37.5, true)
+  await renderDeck({ tracks }, { remount: true })
+
+  await slowLeft(36)
+  assert.equal(frontTitle(), 'Город')
+  assert.equal(likePatches, 0)
+  assert.equal(noticeText(), '')
+  assert.equal(heartPhase(), '')
+  assert.equal(playerState().currentTime, 37.5)
+  assert.deepEqual(navigated, [])
+
+  await slowLeft(56)
+  assert.equal(frontTitle(), 'Город')
+  assert.equal(likePatches, 1)
+  assert.equal(noticeText(), 'В избранном')
+  assert.equal(heartPhase(), 'fly')
+  assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
+  assert.equal(playerState().queueIndex, 0)
+  assert.equal(playerState().currentTime, 37.5)
   assert.deepEqual(navigated, [])
   assert.deepEqual(played, [])
 })

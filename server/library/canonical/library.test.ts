@@ -688,3 +688,43 @@ test('ensure of the same source track returns the same canonical id', async () =
   )
   assert.equal((second.body.copies as unknown[]).length, 1)
 })
+
+test('yandex swipe like is stored and still liked after reload', async () => {
+  const owner = await register('canon-yandex-like@example.com')
+  const snapshot = {
+    sourceId: 'yandex-music',
+    externalId: '10934720',
+    title: 'Город',
+    artist: 'Север',
+    album: 'Альбом',
+    durationMs: 180_000,
+    artworkUrl: null,
+  }
+  const created = await api('/api/me/tracks/identity', {
+    method: 'POST',
+    cookie: owner.cookie,
+    body: snapshot,
+  })
+  assert.equal(created.status, 200)
+  const canonicalId = (created.body.canonicalTrack as { id: string }).id
+  assert.match(canonicalId, /^can_/)
+  const patched = await api(`/api/me/canonical-library/${encodeURIComponent(canonicalId)}`, {
+    method: 'PATCH',
+    cookie: owner.cookie,
+    body: { liked: true },
+  })
+  assert.equal(patched.status, 200)
+  assert.equal((patched.body.item as { state: { liked: boolean } }).state.liked, true)
+  const repeated = await api('/api/me/tracks/identity', {
+    method: 'POST',
+    cookie: owner.cookie,
+    body: snapshot,
+  })
+  assert.equal((repeated.body.canonicalTrack as { id: string }).id, canonicalId)
+  const reloaded = await api('/api/me/canonical-library', { cookie: owner.cookie })
+  const items = itemsOf(reloaded.body)
+  assert.equal(items.length, 1)
+  assert.equal(items[0]?.canonicalTrack.id, canonicalId)
+  assert.equal(items[0]?.state.liked, true)
+  assert.equal(items[0]?.copies[0]?.sourceTrackKey, 'yandex-music:10934720')
+})
