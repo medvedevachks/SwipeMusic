@@ -217,6 +217,41 @@ CREATE TABLE IF NOT EXISTS user_provider_connections (
   PRIMARY KEY (user_id, provider_id),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS user_playback_events (
+  user_id TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  canonical_track_id TEXT,
+  position_ms INTEGER NOT NULL,
+  listened_ms INTEGER NOT NULL,
+  duration_ms INTEGER,
+  reason TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, event_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_user_playback_events_session
+  ON user_playback_events (user_id, session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_user_playback_events_track
+  ON user_playback_events (user_id, source_id, external_id);
+
+CREATE TABLE IF NOT EXISTS user_playback_stats (
+  user_id TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  canonical_track_id TEXT,
+  play_count INTEGER NOT NULL,
+  completed_count INTEGER NOT NULL,
+  skipped_count INTEGER NOT NULL,
+  listened_ms INTEGER NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, source_id, external_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 `
 
 export function openDatabase(databasePath: string): DatabaseSync {

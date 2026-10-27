@@ -20,6 +20,8 @@ import {
   validateSettingsPatch,
   validateTrackWrite,
 } from '../library/validation.ts'
+import { createPlaybackRepository } from '../library/playback/repository.ts'
+import { validatePlaybackBatch } from '../library/playback/validation.ts'
 import { readJsonBody, requireUserId, sendJson } from './currentUser.ts'
 
 type LibraryContext = {
@@ -375,6 +377,30 @@ export async function handleLibraryRequest(
       return
     }
     sendJson(res, 200, found.value)
+    return
+  }
+
+  if (method === 'POST' && path === '/api/me/playback-events') {
+    const body = await readBody(req, res)
+    if (body === undefined) return
+    const parsed = validatePlaybackBatch(body)
+    if (!parsed.ok) {
+      sendJson(res, 400, { error: 'VALIDATION', fields: parsed.fields })
+      return
+    }
+    try {
+      const playback = createPlaybackRepository(context.db)
+      const result = playback.insertEvents(userId, parsed.events)
+      sendJson(res, 200, result)
+    } catch {
+      sendJson(res, 500, { error: 'PLAYBACK_ANALYTICS_FAILED' })
+    }
+    return
+  }
+
+  if (method === 'GET' && path === '/api/me/playback-stats') {
+    const playback = createPlaybackRepository(context.db)
+    sendJson(res, 200, { stats: playback.listStats(userId) })
     return
   }
 

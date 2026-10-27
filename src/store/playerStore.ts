@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { getAudioPlayer } from '../services/audioPlayer'
+import { attachPlaybackAnalytics } from '../services/playbackAnalytics/attach.ts'
 import {
   getPlaybackQueue,
   type RepeatMode,
@@ -46,6 +47,7 @@ type PlayerStore = PlayerState & {
 
 const audioPlayer = getAudioPlayer()
 const playbackQueue = getPlaybackQueue()
+attachPlaybackAnalytics()
 
 const REPEAT_CYCLE: RepeatMode[] = ['OFF', 'ALL', 'ONE']
 
