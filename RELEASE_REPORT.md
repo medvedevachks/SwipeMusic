@@ -10,11 +10,13 @@ Production в этом выпуске не обновлён. Публичный 
 
 До выпуска `origin/feature/deploy-windows-01` был на `3f9e77a`.
 
-Push выполнен обычным fast-forward:
+Push кода выполнен обычным fast-forward:
 
 `3f9e77a..14fc4cb` → `https://github.com/medvedevachks/SwipeMusic.git`
 
-`HEAD` и `origin/feature/deploy-windows-01` совпадают: `14fc4cb65e81e868f05b395a2d483afea1522542`.
+Проверенный код выпуска: `14fc4cb65e81e868f05b395a2d483afea1522542`.
+
+Этот отчёт добавлен следующим коммитом и тоже отправлен fast-forward. Актуальный `origin/feature/deploy-windows-01` — коммит отчёта, он не меняет приложение.
 
 Force push не использовался. `git add .` не использовался. `.tmp`, базы, ключи, сертификаты и env в коммиты не входили.
 
