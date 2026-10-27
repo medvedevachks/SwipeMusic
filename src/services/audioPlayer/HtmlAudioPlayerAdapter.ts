@@ -65,26 +65,9 @@ export class HtmlAudioPlayerAdapter implements PlayerAdapter {
       return
     }
 
+    // src сам запускает загрузку. Отдельный load() сбрасывает play(), вызванный сразу после.
+    this.audio.preload = 'auto'
     this.audio.src = url
-    this.audio.load()
-
-    await new Promise<void>((resolve, reject) => {
-      const onReady = () => {
-        cleanup()
-        resolve()
-      }
-      const onError = () => {
-        cleanup()
-        reject(new Error('Failed to load audio source'))
-      }
-      const cleanup = () => {
-        this.audio.removeEventListener('canplay', onReady)
-        this.audio.removeEventListener('error', onError)
-      }
-
-      this.audio.addEventListener('canplay', onReady, { once: true })
-      this.audio.addEventListener('error', onError, { once: true })
-    })
 
     if (generation !== this.loadGeneration) {
       const error = new Error('Audio load aborted')
@@ -98,7 +81,7 @@ export class HtmlAudioPlayerAdapter implements PlayerAdapter {
   }
 
   pause(): void {
-    // Отменяем in-flight load, чтобы устаревший canplay не «успешно» завершил старый play().
+    // Отменяем in-flight play, чтобы устаревший источник не стал playing.
     this.loadGeneration += 1
     this.audio.pause()
     this.stopPolling()

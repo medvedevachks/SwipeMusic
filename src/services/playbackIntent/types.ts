@@ -41,6 +41,21 @@ export type PlayFromQueueInput = {
   track: Track
 }
 
+/**
+ * Явный Play одной композиции из поиска.
+ * Выдача в очередь не копируется. Продолжение готовит ContinuationProvider.
+ */
+export type PlaySearchTrackInput = {
+  track: Track
+  query: string
+}
+
+export type PlayRadioInput = {
+  tracks: Track[]
+  startIndex: number
+  origin: 'recommendations' | 'favorites'
+}
+
 export type ExitAlbumModeInput = {
   swipeTracks: Track[]
   /** pendingTrack ?? currentTrack — identity текущего playback. */

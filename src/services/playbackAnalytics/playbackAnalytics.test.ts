@@ -397,3 +397,9 @@ test('the same event id can wait for two owners without being sent together', ()
   assert.equal(outbox.holdCount('user-a'), 1)
   assert.equal(outbox.holdCount('user-b'), 0)
 })
+
+test('playback reporting does not await analytics', () => {
+  const player = readFileSync(new URL('../audioPlayer/AudioPlayer.ts', import.meta.url), 'utf8')
+  assert.equal(player.includes('await reportPlayback'), false)
+  assert.match(player, /reportPlayback\(\{/)
+})

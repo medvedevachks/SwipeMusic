@@ -19,10 +19,25 @@ export type PlaybackContext =
       query: string
     }
   | {
+      /**
+       * Один трек, явно выбранный из поиска.
+       * Очередь — этот трек и позже подготовленное продолжение, не выдача.
+       */
+      type: 'search-seed'
+      query: string
+      seedTrackId: string
+    }
+  | {
       type: 'swipe'
     }
   | {
       type: 'library'
+    }
+  | {
+      type: 'radio'
+      id: 'my-wave'
+      title: string
+      origin: 'recommendations' | 'favorites'
     }
   | {
       type: 'none'
@@ -30,9 +45,22 @@ export type PlaybackContext =
 
 export const NONE_PLAYBACK_CONTEXT: PlaybackContext = { type: 'none' }
 
-/** Album/Playlist: Home/Swipe не должен молча перезаписывать очередь. */
+export type SearchSeedPlaybackContext = Extract<PlaybackContext, { type: 'search-seed' }>
+
+/** Album, playlist, «Моя волна» и одиночный трек из поиска: главная не подменяет очередь лентой. */
 export function isQueueLockedContext(context: PlaybackContext): boolean {
-  return context.type === 'album' || context.type === 'playlist'
+  return (
+    context.type === 'album' ||
+    context.type === 'playlist' ||
+    context.type === 'radio' ||
+    context.type === 'search-seed'
+  )
+}
+
+export function isSearchSeedContext(
+  context: PlaybackContext,
+): context is SearchSeedPlaybackContext {
+  return context.type === 'search-seed'
 }
 
 export function parsePlaybackContext(value: unknown): PlaybackContext {
@@ -65,10 +93,27 @@ export function parsePlaybackContext(value: unknown): PlaybackContext {
       }
       return { type: 'search', query: record.query }
     }
+    case 'search-seed': {
+      if (typeof record.query !== 'string' || typeof record.seedTrackId !== 'string' || !record.seedTrackId) {
+        return NONE_PLAYBACK_CONTEXT
+      }
+      return { type: 'search-seed', query: record.query, seedTrackId: record.seedTrackId }
+    }
     case 'swipe':
       return { type: 'swipe' }
     case 'library':
       return { type: 'library' }
+    case 'radio': {
+      if (record.id !== 'my-wave') {
+        return NONE_PLAYBACK_CONTEXT
+      }
+      return {
+        type: 'radio',
+        id: 'my-wave',
+        title: typeof record.title === 'string' && record.title ? record.title : 'Моя волна',
+        origin: record.origin === 'favorites' ? 'favorites' : 'recommendations',
+      }
+    }
     case 'none':
       return NONE_PLAYBACK_CONTEXT
     default:

@@ -10,6 +10,24 @@ import type {
 } from './types'
 
 const API_BASE = '/api/yandex-music'
+const STREAM_URL_TTL_MS = 45_000
+const streamUrlCache = new Map<string, { url: string; at: number }>()
+
+function readStreamCache(trackId: string): string | null {
+  const hit = streamUrlCache.get(trackId)
+  if (!hit) {
+    return null
+  }
+  if (Date.now() - hit.at > STREAM_URL_TTL_MS) {
+    streamUrlCache.delete(trackId)
+    return null
+  }
+  return hit.url
+}
+
+function storeStreamCache(trackId: string, url: string): void {
+  streamUrlCache.set(trackId, { url, at: Date.now() })
+}
 
 export class YandexApiError extends Error {
   readonly status: number
@@ -156,6 +174,10 @@ export class YandexMusicApiClient {
     trackId: string,
     signal?: AbortSignal,
   ): Promise<string | null> {
+    const cached = readStreamCache(trackId)
+    if (cached) {
+      return cached
+    }
     const infos = await this.getDownloadInfo(trackId, signal)
     const preferred =
       infos
@@ -200,7 +222,9 @@ export class YandexMusicApiClient {
     const sign =
       s ||
       md5Hex(`XGRlBW9FXlekgbPrRHuSiA${path.slice(1)}${ts}`)
-    return `https://${host}/get-mp3/${sign}/${ts}${path}`
+    const streamUrl = `https://${host}/get-mp3/${sign}/${ts}${path}`
+    storeStreamCache(trackId, streamUrl)
+    return streamUrl
   }
 
   private async getJson<T>(

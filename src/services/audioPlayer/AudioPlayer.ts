@@ -7,6 +7,9 @@ import type { PlaybackContext } from '../../types/playbackContext'
 import type { Track } from '../../types/track'
 import { getPlaybackResolver } from '../playbackResolver'
 import type { PlaybackCandidate } from '../playbackResolver'
+import { getContinuationSession } from '../continuation/ContinuationSession.ts'
+import { consumeSearchSeedAdvance } from '../continuation/searchSeedPlayback.ts'
+import { reportPlayback } from '../playbackAnalytics/report.ts'
 import { getPlaybackQueue } from '../playbackQueue'
 import {
   beginQueueTransport,
@@ -126,7 +129,21 @@ export class AudioPlayer {
             buffering: false,
             loading: false,
           })
+          reportPlayback({
+            type: 'ended',
+            positionMs: Math.max(0, Math.round(currentTime * 1000)),
+            durationMs: Math.max(0, Math.round((duration || this.state.duration) * 1000)) || null,
+          })
           void this.advanceFromEnded()
+          return
+        case 'timeupdate':
+          if (!this.state.pendingTrack) {
+            reportPlayback({
+              type: 'time',
+              positionMs: Math.max(0, Math.round(currentTime * 1000)),
+            })
+            this.patchState(timePatch)
+          }
           return
         case 'play':
           if (this.state.pendingTrack) {
@@ -257,6 +274,15 @@ export class AudioPlayer {
   }
 
   async playTrack(track: Track, options?: { preserveQueue?: boolean }): Promise<void> {
+    reportPlayback({
+      type: 'intent',
+      sourceId: track.sourceId,
+      externalId: track.externalId,
+      canonicalTrackId: null,
+      preserveQueue: options?.preserveQueue === true,
+    })
+    // Статус запуска — до сети и fallback, чтобы кнопка не молчала.
+    this.armPlayback(track)
     if (!options?.preserveQueue) {
       cancelActiveFallback('manual-play')
       this.adoptRequestedTrack(track)
@@ -266,6 +292,21 @@ export class AudioPlayer {
       }
     }
     await this.playResolved(track)
+  }
+
+  /** Сразу помечает запрошенный трек. currentTrack не меняется, пока источник не загружен. */
+  private armPlayback(track: Track): void {
+    const queue = getPlaybackQueue()
+    this.patchState({
+      pendingTrack: track,
+      loading: true,
+      buffering: true,
+      playing: false,
+      paused: true,
+      error: null,
+      queue: queue.getItems(),
+      queueIndex: queue.getSnapshot().currentIndex,
+    })
   }
 
   /**
@@ -284,13 +325,6 @@ export class AudioPlayer {
   private async playResolved(track: Track): Promise<void> {
     const generation = ++this.playGeneration
     const queue = getPlaybackQueue()
-    // Сразу глушим любой backend — A не должен продолжать звучать.
-    // await: Spotify SDK pause асинхронный (через PlayerManager).
-    await Promise.resolve(this.adapter.pause())
-    if (generation !== this.playGeneration) {
-      return
-    }
-
     this.patchState({
       pendingTrack: track,
       loading: true,
@@ -300,8 +334,9 @@ export class AudioPlayer {
       error: null,
       queue: queue.getItems(),
       queueIndex: queue.getSnapshot().currentIndex,
-      // currentTrack остаётся прежним, пока B не загружен.
     })
+    // Пауза предыдущего источника идёт параллельно с поиском URL.
+    const pausePromise = Promise.resolve(this.adapter.pause())
 
     const resolver = getPlaybackResolver()
     let playbackUrl: string | null = null
@@ -322,6 +357,13 @@ export class AudioPlayer {
           loading: false,
           buffering: false,
           error: resolver.buildUnavailableMessage(),
+        })
+        reportPlayback({
+          type: 'failed',
+          sourceId: track.sourceId,
+          externalId: track.externalId,
+          canonicalTrackId: null,
+          reason: 'load-failed',
         })
         return
       }
@@ -344,6 +386,18 @@ export class AudioPlayer {
             ? error.message
             : 'Failed to resolve playback',
       })
+      reportPlayback({
+        type: 'failed',
+        sourceId: track.sourceId,
+        externalId: track.externalId,
+        canonicalTrackId: null,
+        reason: 'load-failed',
+      })
+      return
+    }
+
+    await pausePromise.catch(() => undefined)
+    if (generation !== this.playGeneration) {
       return
     }
 
@@ -384,6 +438,14 @@ export class AudioPlayer {
         buffering: false,
         error: null,
       })
+      reportPlayback({
+        type: 'audible',
+        sourceId: track.sourceId,
+        externalId: track.externalId,
+        canonicalTrackId: null,
+        positionMs: 0,
+        durationMs: track.durationMs ?? null,
+      })
     } catch (error) {
       if (isAbortError(error) || generation !== this.playGeneration) {
         this.adapter.pause()
@@ -412,11 +474,22 @@ export class AudioPlayer {
         buffering: false,
         error: error instanceof Error ? error.message : 'Failed to play',
       })
+      reportPlayback({
+        type: 'failed',
+        sourceId: track.sourceId,
+        externalId: track.externalId,
+        canonicalTrackId: null,
+        reason: 'playback-failed',
+      })
       throw error
     }
   }
 
   pause(): void {
+    reportPlayback({
+      type: 'paused',
+      positionMs: Math.max(0, Math.round(this.state.currentTime * 1000)),
+    })
     void Promise.resolve(this.adapter.pause())
     this.patchState({
       playing: false,
@@ -442,6 +515,10 @@ export class AudioPlayer {
           pendingTrack: null,
           error: null,
         })
+        reportPlayback({
+          type: 'resumed',
+          positionMs: Math.max(0, Math.round(this.adapter.getCurrentTime() * 1000)),
+        })
       } catch (error) {
         if (isAutoplayBlockedError(error)) {
           this.patchState({ error: null })
@@ -465,6 +542,11 @@ export class AudioPlayer {
   }
 
   stop(): void {
+    reportPlayback({
+      type: 'skip',
+      reason: 'stop',
+      positionMs: Math.max(0, Math.round(this.state.currentTime * 1000)),
+    })
     cancelActiveFallback('stop')
     this.playGeneration += 1
     this.adapter.stop()
@@ -484,6 +566,10 @@ export class AudioPlayer {
       return
     }
     this.adapter.seek(timeSeconds)
+    reportPlayback({
+      type: 'seek',
+      positionMs: Math.max(0, Math.round(timeSeconds * 1000)),
+    })
     const currentTime = this.adapter.getCurrentTime()
     const duration = this.adapter.getDuration() || this.state.duration
     this.patchState({
@@ -494,6 +580,15 @@ export class AudioPlayer {
   }
 
   async next(): Promise<void> {
+    reportPlayback({
+      type: 'skip',
+      reason: 'next',
+      positionMs: Math.max(0, Math.round(this.state.currentTime * 1000)),
+    })
+    if (getPlaybackQueue().getPlaybackContext().type === 'search-seed') {
+      await this.playSearchSeedAdvance(false)
+      return
+    }
     const holder: { track: Track | null } = { track: null }
     beginQueueTransport('next', () => {
       holder.track = getPlaybackQueue().next()
@@ -528,6 +623,13 @@ export class AudioPlayer {
     if (!track) {
       return
     }
+    if (track.id !== this.state.currentTrack?.id) {
+      reportPlayback({
+        type: 'skip',
+        reason: 'previous',
+        positionMs: Math.max(0, Math.round(this.state.currentTime * 1000)),
+      })
+    }
     await this.playTrack(track)
   }
 
@@ -560,6 +662,10 @@ export class AudioPlayer {
   }
 
   private async advanceFromEnded(): Promise<void> {
+    if (getPlaybackQueue().getPlaybackContext().type === 'search-seed') {
+      await this.playSearchSeedAdvance(true)
+      return
+    }
     const track = getPlaybackQueue().next({ fromEnded: true })
     if (!track) {
       this.stop()
@@ -572,6 +678,34 @@ export class AudioPlayer {
       return
     }
     await this.playTrack(track)
+  }
+
+  /**
+   * Продолжение одиночного трека из поиска.
+   * Нет кандидата — остановка без перехода к соседнему результату выдачи.
+   */
+  private async playSearchSeedAdvance(fromEnded: boolean): Promise<void> {
+    const session = getContinuationSession()
+    await session.flush()
+    const previousId = getPlaybackQueue().current()?.id ?? null
+    const track = consumeSearchSeedAdvance(getPlaybackQueue(), session, {
+      fromEnded,
+    })
+    if (!track) {
+      this.stop()
+      this.patchState({
+        currentTrack: null,
+        pendingTrack: null,
+        activeCandidate: null,
+        queueIndex: -1,
+      })
+      return
+    }
+    await this.playTrack(track)
+    const context = getPlaybackQueue().getPlaybackContext()
+    if (context.type === 'search-seed' && track.id !== previousId) {
+      getContinuationSession().prepare(track, context)
+    }
   }
 
   private patchState(partial: Partial<PlayerState>): void {

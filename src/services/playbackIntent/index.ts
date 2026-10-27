@@ -10,4 +10,5 @@ export type {
   PlayFromLibraryInput,
   PlayFromQueueInput,
   PlayFromSwipeInput,
+  PlaySearchTrackInput,
 } from './types'

@@ -3,6 +3,8 @@ import {
   isQueueLockedContext,
   type PlaybackContext,
 } from '../../types/playbackContext'
+import { commitSearchSeedQueue, getContinuationSession } from '../continuation/index.ts'
+import { ensureLibraryContinuation } from '../continuation/searchContinuationRuntime.ts'
 import { getAudioPlayer } from '../audioPlayer'
 import { getPlaybackQueue } from '../playbackQueue'
 import type {
@@ -11,6 +13,8 @@ import type {
   PlayFromLibraryInput,
   PlayFromQueueInput,
   PlayFromSwipeInput,
+  PlayRadioInput,
+  PlaySearchTrackInput,
 } from './types'
 
 function clampIndex(length: number, startIndex: number): number {
@@ -92,10 +96,44 @@ export class PlaybackIntent {
   }
 
   /**
+   * Поиск → один трек. Не копирует выдачу и не создаёт второй плеер.
+   * Альбом, плейлист и «Моя волна» этим методом не ходят.
+   */
+  async playSearchTrack(input: PlaySearchTrackInput): Promise<void> {
+    if (!input.track.id) {
+      return
+    }
+    const player = getAudioPlayer()
+    ensureLibraryContinuation()
+    commitSearchSeedQueue(getPlaybackQueue(), getContinuationSession(), {
+      track: input.track,
+      query: input.query,
+    })
+    await player.playTrack(input.track)
+  }
+
+  /**
    * Клик по существующей глобальной queue: focus + play, context не меняется.
    */
   async playFromQueue(input: PlayFromQueueInput): Promise<void> {
     await getAudioPlayer().playTrack(input.track)
+  }
+
+  /** Очередь «Моей волны». Не создаёт второй плеер. */
+  async playRadio(input: PlayRadioInput): Promise<void> {
+    const startIndex = clampIndex(input.tracks.length, input.startIndex)
+    if (startIndex < 0) {
+      return
+    }
+    const track = input.tracks[startIndex]!
+    const player = getAudioPlayer()
+    player.setQueue(input.tracks, startIndex, {
+      type: 'radio',
+      id: 'my-wave',
+      title: 'Моя волна',
+      origin: input.origin,
+    })
+    await player.playTrack(track)
   }
 
   /**

@@ -24,6 +24,7 @@ import { SAVE_FAILED_MESSAGE } from '../services/libraryPersistence/statusStore'
 import type { GestureConfig, SwipeDirection } from '../types/gesture'
 import type { SwipeAction } from '../types/swipe'
 import type { Track } from '../types/track'
+import { continuationPlaybackCaption } from '../services/continuation/searchSeedPlayback.ts'
 import { getSourceDisplayName } from '../utils/sourceDisplay'
 import SwipeCard from './SwipeCard'
 import { SwipeDirectionHints } from './SwipeDirectionHints'
@@ -49,7 +50,24 @@ type SwipeDeckProps = {
    * Like сюда не приходит: карточка остаётся, текущий трек играет дальше.
    */
   onDeckNavigate: (track: Track) => void
+  onTogglePlay?: (track: Track) => void
+  playerIsPlaying?: boolean
+  /** Пока выключено, колода не прыгает за чужой очередью плеера. */
+  syncWithPlayer?: boolean
+  /**
+   * Трек, который плеер уже играет или держит на паузе.
+   * Пока идёт переключение на другую композицию, здесь null: Pause чужой песни не показываем.
+   */
+  audibleTrackId?: string | null
+  /** Карточка, для которой GlobalPlayer уже готовит источник. */
+  startingTrackId?: string | null
   playback?: PlaybackState | null
+  /**
+   * Трек GlobalPlayer. Для search-seed колода не прыгает за ним:
+   * если это не текущая карточка, показываем только подпись.
+   */
+  nowPlaying?: { id: string; title: string; artist: string } | null
+  playbackContextType?: string
 }
 
 export type SwipeDeckHandle = {
@@ -97,11 +115,24 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
       playerTrackId = null,
       onCategorize,
       onDeckNavigate,
+      onTogglePlay,
+      playerIsPlaying = false,
+      syncWithPlayer = true,
+      audibleTrackId = null,
+      startingTrackId = null,
       playback = null,
+      nowPlaying = null,
+      playbackContextType = '',
     },
     ref,
   ) {
-    const [index, setIndex] = useState(0)
+    const [index, setIndex] = useState(() => {
+      if (!syncWithPlayer || !playerTrackId) {
+        return 0
+      }
+      const found = tracks.findIndex((track) => track.id === playerTrackId)
+      return found >= 0 ? found : 0
+    })
     const [dragDirection, setDragDirection] = useState<SwipeDirection | null>(
       null,
     )
@@ -120,7 +151,7 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
     const awaitingCategoryRef = useRef(false)
     const prevResolveKeyRef = useRef(categoryResolveKey)
     const prevCancelKeyRef = useRef(categoryCancelKey)
-    const indexRef = useRef(0)
+    const indexRef = useRef(index)
     const prevPlayerTrackIdRef = useRef<string | null>(null)
     const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     /** Пропуск sync сразу после нашей навигации (player ещё догоняет). */
@@ -128,8 +159,17 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
 
     const current = tracks[index]
     const next = tracks[index + 1]
-    const playbackForCard =
-      playback && current && playerTrackId === current.id ? playback : null
+    const cardAudible = Boolean(current && audibleTrackId === current.id)
+    const cardIsPlayer =
+      cardAudible || Boolean(current && startingTrackId === current.id)
+    const playbackCaption = cardIsPlayer
+      ? null
+      : continuationPlaybackCaption({
+          contextType: playbackContextType,
+          cardTrackId: current?.id ?? null,
+          playerTrack: nowPlaying,
+        })
+    const playbackForCard = playback && cardAudible ? playback : null
     const dragOverlayText =
       dragDirection != null
         ? dragOverlayCaption(dragDirection, gestureConfig)
@@ -264,6 +304,10 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
      * обновление списка не сдвигают карточку.
      */
     useEffect(() => {
+      if (!syncWithPlayer) {
+        prevPlayerTrackIdRef.current = playerTrackId
+        return
+      }
       if (ignorePlayerSyncRef.current) {
         ignorePlayerSyncRef.current = false
         prevPlayerTrackIdRef.current = playerTrackId
@@ -292,7 +336,7 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
       resetSprings()
       indexRef.current = playerIndex
       setIndex(playerIndex)
-    }, [playerTrackId, tracks, resetSprings, clearDragVisual])
+    }, [playerTrackId, tracks, resetSprings, clearDragVisual, syncWithPlayer])
 
     const restoreCurrent = useCallback(() => {
       awaitingCategoryRef.current = false
@@ -548,7 +592,9 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
       },
       {
         from: () => [front.x.get(), front.y.get()],
-        filterTaps: true,
+        // filterTaps вешает click capture и глушит Play, если прошлый жест не был tap
+        // (порог 3px). Кнопка тогда не доходит до обработчика, нижний плеер — доходит.
+        filterTaps: false,
         // На touchscreen `true` ставит preventScrollAxis: 'y'. DragEngine
         // тогда отменяет жест, как только ось становится вертикальной,
         // и UP/DOWN не доходят до commit. Карточка уже с touch-action: none,
@@ -593,10 +639,7 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
     }
 
     return (
-      <div
-        className="relative mx-auto mb-6 w-full max-w-sm px-[4.5rem] pb-8 pt-7"
-        data-card-motion={cardMotion}
-      >
+      <div className="swipe-deck" data-card-motion={cardMotion}>
         {gestureNotice ? (
           <p
             role="status"
@@ -611,8 +654,17 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
           progress={dragProgress}
         />
 
+        {playbackCaption ? (
+          <p
+            role="status"
+            className="mb-2 text-center text-xs text-[var(--color-muted)]"
+          >
+            {playbackCaption}
+          </p>
+        ) : null}
+
         <div className="relative z-[1]">
-        <div className="relative h-[420px] max-h-[48vh] touch-none overflow-hidden">
+        <div className="swipe-stage">
           {next && (
             <SwipeCard
               key={`back-${next.id}`}
@@ -643,6 +695,13 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
             dragProgress={dragProgress}
             zIndex={2}
             playback={playbackForCard}
+            onTogglePlay={onTogglePlay ? () => onTogglePlay(current) : undefined}
+            isPlaying={playerIsPlaying && cardAudible}
+            isStarting={Boolean(
+              current &&
+                startingTrackId === current.id &&
+                !(playerIsPlaying && cardAudible),
+            )}
           />
         </div>
           {heart ? (

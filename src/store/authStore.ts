@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { authClient } from '../services/auth/authClient.ts'
 import type { AuthUser } from '../services/auth/types'
+import { getContinuationSession } from '../services/continuation/ContinuationSession.ts'
 import { tasteProfileCache } from '../services/taste/profileCache.ts'
 
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
@@ -41,6 +42,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         })
         .catch(() => {
           tasteProfileCache.invalidate()
+          getContinuationSession().cancel()
           set({ user: null, status: 'anonymous' })
         })
         .finally(() => {
@@ -53,18 +55,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   register: async (input) => {
     const user = await authClient.register(input)
     tasteProfileCache.invalidate()
+    getContinuationSession().cancel()
     set({ user, status: 'authenticated' })
   },
 
   login: async (input) => {
     const user = await authClient.login(input)
     tasteProfileCache.invalidate()
+    getContinuationSession().cancel()
     set({ user, status: 'authenticated' })
   },
 
   logout: async () => {
     await authClient.logout()
     tasteProfileCache.invalidate()
+    getContinuationSession().cancel()
     set({ user: null, status: 'anonymous' })
   },
 }))

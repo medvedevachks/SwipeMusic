@@ -1,9 +1,9 @@
-import type { Track } from '../../types/track'
+import type { Track } from '../../types/track.ts'
 import {
   NONE_PLAYBACK_CONTEXT,
   parsePlaybackContext,
   type PlaybackContext,
-} from '../../types/playbackContext'
+} from '../../types/playbackContext.ts'
 
 export type RepeatMode = 'OFF' | 'ONE' | 'ALL'
 export type ShuffleMode = 'OFF' | 'ON'

@@ -15,10 +15,6 @@ import {
 
 type ResolverListener = (resolution: PlaybackResolution | null) => void
 
-function normalizeKey(title: string, artist: string): string {
-  return `${title.trim().toLowerCase()}|${artist.trim().toLowerCase()}`
-}
-
 function scoreCandidate(
   candidate: PlaybackCandidate,
   config: PlaybackResolverConfig,
@@ -102,12 +98,10 @@ export class PlaybackResolver {
     sourceManager.listSources()
 
     const relatedTracks = await this.collectRelatedTracks(track)
-    const all: PlaybackCandidate[] = []
-
-    for (const related of relatedTracks) {
-      const fromProvider = await this.collectFromProvider(related)
-      all.push(...fromProvider)
-    }
+    const groups = await Promise.all(
+      relatedTracks.map((related) => this.collectFromProvider(related)),
+    )
+    const all = groups.flat()
 
     this.lastCandidates = all
 
@@ -204,24 +198,6 @@ export class PlaybackResolver {
         }
       }
 
-      const key = normalizeKey(track.title, track.artist)
-      for (const row of index.list()) {
-        if (normalizeKey(row.track.title, row.track.artist) === key) {
-          byId.set(row.track.id, row.track)
-          for (const copy of row.copies) {
-            if (!copy.available) {
-              continue
-            }
-            const copyTrack: Track = {
-              ...row.track,
-              id: `${copy.sourceId}:${copy.externalId}`,
-              sourceId: copy.sourceId,
-              externalId: copy.externalId,
-            }
-            byId.set(copyTrack.id, copyTrack)
-          }
-        }
-      }
     } catch {
       // MediaIndex ещё не готов — только исходный трек.
     }
