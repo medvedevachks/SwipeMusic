@@ -9,6 +9,7 @@ import {
   pluginRegistry,
 } from '../sdk'
 import { bootstrapMusicSources, sourceTypeLabel } from '../sources'
+import { isDemoSourceId } from '../sources/demoSource'
 import { useSourceManagerStore } from '../store/sourceManagerStore'
 import type { SourceType } from '../types/source'
 
@@ -27,7 +28,8 @@ function capabilityLabels(sourceId: string): string[] {
 export default function Sources() {
   bootstrapMusicSources()
 
-  const sources = useSourceManagerStore((state) => state.sources)
+  const allSources = useSourceManagerStore((state) => state.sources)
+  const sources = allSources.filter((source) => !isDemoSourceId(source.id))
   const addSource = useSourceManagerStore((state) => state.addSource)
   const removeSource = useSourceManagerStore((state) => state.removeSource)
   const enableSource = useSourceManagerStore((state) => state.enableSource)

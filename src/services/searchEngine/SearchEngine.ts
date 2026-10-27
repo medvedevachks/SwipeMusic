@@ -1,6 +1,7 @@
 import type { SearchEngineState } from '../../types/search'
 import type { Track } from '../../types/track'
 import { bootstrapMusicSources, sourceManager } from '../../sources'
+import { isDemoSourceId } from '../../sources/demoSource'
 import { pluginRegistry } from '../../sdk'
 import { getMediaIndex, syncAdapterToMediaIndex } from '../mediaIndex'
 import {
@@ -68,7 +69,9 @@ export class SearchEngine {
     const controller = new AbortController()
     this.abortController = controller
 
-    const enabled = sourceManager.listEnabledSources()
+    const enabled = sourceManager.listEnabledSources().filter(
+      (source) => !isDemoSourceId(source.id),
+    )
     const activeSourceIds = enabled.map((source) => source.id)
 
     beginDevSearchSession(normalized)
@@ -85,7 +88,7 @@ export class SearchEngine {
     if (import.meta.env.DEV) {
       const enabledIds = new Set(activeSourceIds)
       for (const config of sourceManager.listSources()) {
-        if (enabledIds.has(config.id)) {
+        if (enabledIds.has(config.id) || isDemoSourceId(config.id)) {
           continue
         }
         const caps = pluginRegistry.getCapabilities(config.id)

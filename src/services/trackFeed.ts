@@ -1,3 +1,4 @@
+import { withoutDemoTracks } from '../sources/demoSource'
 import {
   activateMusicSource,
   deactivateMusicSource,
@@ -29,7 +30,7 @@ export {
 /** Лента свайпов строится из всех активных источников. */
 export async function fetchSwipeFeed() {
   const result = await fetchTracksFromActiveSources()
-  return result.tracks
+  return withoutDemoTracks(result.tracks)
 }
 
 export function getMusicSource(): MusicSourceAdapter {

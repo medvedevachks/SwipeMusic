@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { withoutDemoTracks } from '../sources/demoSource'
 import type { Track } from '../types/track'
 
 /**
@@ -30,11 +31,12 @@ export const useSwipeDeckSessionStore = create<SwipeDeckSessionState>((set) => {
     tracks,
     options = {},
   ) => {
-    if (tracks.length === 0) {
+    const visible = withoutDemoTracks(tracks)
+    if (visible.length === 0) {
       return
     }
 
-    let ordered = [...tracks]
+    let ordered = [...visible]
     if (options.selectedTrackId) {
       const index = ordered.findIndex((track) => track.id === options.selectedTrackId)
       if (index > 0) {
