@@ -17,6 +17,7 @@ import {
   emitPlaybackMediaError,
 } from '../runtimeFallback/fallbackControl.ts'
 import { routeLivePlayback } from '../runtimeFallback/livePlayback.ts'
+import { attachMediaSession } from './mediaSession.ts'
 import type { PlayerAdapter } from './PlayerAdapter'
 import { getPlayerManager } from './PlayerManager'
 
@@ -721,6 +722,7 @@ let singleton: AudioPlayer | null = null
 export function getAudioPlayer(): AudioPlayer {
   if (!singleton) {
     singleton = new AudioPlayer()
+    attachMediaSession(singleton)
   }
   return singleton
 }

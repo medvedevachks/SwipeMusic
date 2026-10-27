@@ -1,6 +1,7 @@
 import { LocalMusicPanel } from '../components/LocalMusicPanel'
 import { ProviderAuthPanel } from '../components/ProviderAuthPanel'
 import { ProviderSupportBadge } from '../components/ProviderSupportBadge'
+import { DevMediaSessionPanel } from '../components/DevMediaSessionPanel'
 import { DevPlaybackPanel } from '../components/DevPlaybackPanel'
 import { DevYandexLogPanel } from '../components/DevYandexLogPanel'
 import {
@@ -62,6 +63,7 @@ export default function Sources() {
       {showLocalPanel ? <LocalMusicPanel /> : null}
 
       {import.meta.env.DEV ? <DevPlaybackPanel /> : null}
+      {import.meta.env.DEV ? <DevMediaSessionPanel /> : null}
       {import.meta.env.DEV ? <DevYandexLogPanel /> : null}
 
       {authPlugins.map((source) => (
