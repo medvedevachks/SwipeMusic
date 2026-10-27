@@ -62,29 +62,41 @@ body {
   width: 9.5rem;
   height: 9.5rem;
   pointer-events: none;
-  filter: drop-shadow(0 14px 22px rgba(225, 29, 72, 0.42));
+  filter: drop-shadow(0 12px 18px rgba(225, 29, 72, 0.35));
 }
 
+.swipe-heart-pending,
 .swipe-heart-rest {
   transform: translate3d(-50%, 0, 0) scale(1);
   opacity: 1;
 }
 
-@keyframes swipe-heart-fly {
-  0% {
-    transform: translate3d(-50%, 4%, 0) scale(0.92);
+.swipe-heart-pending {
+  animation: swipe-heart-in 180ms ease-out both;
+}
+
+@keyframes swipe-heart-in {
+  from {
+    transform: translate3d(-50%, 6px, 0) scale(0.72);
     opacity: 0;
   }
-  14% {
-    transform: translate3d(-50%, 0, 0) scale(1.16);
-    opacity: 1;
-  }
-  30% {
+  to {
     transform: translate3d(-50%, 0, 0) scale(1);
     opacity: 1;
   }
+}
+
+@keyframes swipe-heart-fly {
+  0% {
+    transform: translate3d(-50%, 0, 0) scale(1);
+    opacity: 1;
+  }
+  16% {
+    transform: translate3d(-50%, 0, 0) scale(1.18);
+    opacity: 1;
+  }
   100% {
-    transform: translate3d(calc(-50% - 52vw), -8%, 0) scale(1.24);
+    transform: translate3d(calc(-50% - 46vw), -6%, 0) scale(1.28);
     opacity: 0;
   }
 }
@@ -94,6 +106,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .swipe-heart-pending,
   .swipe-heart-fly {
     animation: none;
     transform: translate3d(-50%, 0, 0) scale(1);

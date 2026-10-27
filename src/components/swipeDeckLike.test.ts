@@ -71,7 +71,23 @@ type CanonicalStoreModule = {
   useCanonicalLibraryStore: {
     getState: () => {
       clear: () => void
-      itemsById: Record<string, { state: { liked: boolean } }>
+      replaceForUser: (
+        userId: string,
+        items: Array<{
+          canonicalTrack: { id: string; title: string }
+          state: { liked: boolean }
+          copies: Array<{ sourceTrackKey: string }>
+        }>,
+      ) => void
+      itemsById: Record<
+        string,
+        {
+          canonicalTrack: { id: string; title: string }
+          state: { liked: boolean }
+          copies: Array<{ sourceTrackKey: string; title: string; artist: string; sourceId: string; externalId: string }>
+          catalogIds: string[]
+        }
+      >
     }
   }
 }
@@ -95,6 +111,7 @@ const categorized: string[] = []
 let deckKey = 0
 let likePatches = 0
 let likeShouldFail = false
+let likeDelayMs = 0
 
 let dom: Window
 let server: ViteDevServer
@@ -222,6 +239,9 @@ function installRemote(): void {
     },
     async patchCanonicalLiked(id: string, liked: boolean) {
       likePatches += 1
+      if (likeDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, likeDelayMs))
+      }
       if (likeShouldFail) {
         throw new Error('like failed')
       }
@@ -260,6 +280,7 @@ function resetLibrary(): void {
   categorized.length = 0
   likePatches = 0
   likeShouldFail = false
+  likeDelayMs = 0
 }
 
 function noticeText(): string {
@@ -537,6 +558,55 @@ test('LIKE сохраняет трек, возвращает карточку и
   assert.equal(playerState().queueIndex, 0)
   assert.equal(playerState().currentTime, 37.5)
   assert.equal(collectionStore.getState().history.length, 1)
+
+  const saved = canonicalStore.getState().itemsById.can_x
+  assert.equal(saved?.state.liked, true)
+  canonicalStore.getState().clear()
+  canonicalStore.getState().replaceForUser('user-1', [saved!])
+  const selectors = (await server.ssrLoadModule(
+    '/src/services/canonical/selectors.ts',
+  )) as {
+    likedCanonicalItems: (items: unknown[]) => Array<{ canonicalTrack: { title: string } }>
+  }
+  const liked = selectors.likedCanonicalItems(
+    Object.values(canonicalStore.getState().itemsById),
+  )
+  assert.equal(liked.length, 1)
+  assert.equal(liked[0]?.canonicalTrack.title, 'Город')
+  const library = (await server.ssrLoadModule(
+    '/src/library/providers/SmartLibraryProvider.ts',
+  )) as { SmartLibraryProvider: new () => { getTracks: (id: string) => Promise<Array<{ id: string }>> } }
+  const favorites = await new library.SmartLibraryProvider().getTracks('favorites')
+  assert.equal(favorites.some((item) => item.id === 'yandex-music:101'), true)
+})
+
+test('сердце улетает только после успешного ответа', { timeout: 20_000 }, async () => {
+  resetLibrary()
+  installRemote()
+  likeDelayMs = 400
+  await seedPlayback(0, 37.5, true)
+  await renderDeck({ tracks }, { remount: true })
+
+  await swipe('left', { pointerType: 'touch', distance: 56 })
+
+  assert.equal(frontTitle(), 'Город')
+  assert.equal(heartPhase(), 'pending')
+  assert.equal(noticeText(), '')
+  assert.equal(likePatches, 1)
+  assert.equal(playerState().currentTime, 37.5)
+  assert.deepEqual(navigated, [])
+
+  await react.act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  })
+
+  assert.equal(frontTitle(), 'Город')
+  assert.equal(heartPhase(), 'fly')
+  assert.equal(noticeText(), 'В избранном')
+  assert.equal(canonicalStore.getState().itemsById.can_x?.state.liked, true)
+  assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
+  assert.equal(playerState().queueIndex, 0)
+  assert.equal(playerState().currentTime, 37.5)
 })
 
 test('LIKE на паузе не запускает музыку', { timeout: 20_000 }, async () => {

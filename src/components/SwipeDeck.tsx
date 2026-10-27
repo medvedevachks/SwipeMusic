@@ -98,13 +98,14 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
     const [gestureNotice, setGestureNotice] = useState<string | null>(null)
     const [cardMotion, setCardMotion] = useState<'idle' | 'return'>('idle')
     const [heart, setHeart] = useState<{
-      phase: 'fly' | 'rest'
+      phase: 'pending' | 'fly' | 'rest'
       token: number
     } | null>(null)
     const lockedRef = useRef(false)
     const cardMotionRef = useRef<'idle' | 'return'>('idle')
     const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const heartTokenRef = useRef(0)
+    const heartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const awaitingCategoryRef = useRef(false)
     const prevResolveKeyRef = useRef(categoryResolveKey)
     const prevCancelKeyRef = useRef(categoryCancelKey)
@@ -132,7 +133,7 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
       indexRef.current = index
     }, [index])
 
-    const showNotice = useCallback((message: string) => {
+    const showNotice = useCallback((message: string, holdMs = 1800) => {
       if (noticeTimerRef.current) {
         clearTimeout(noticeTimerRef.current)
       }
@@ -141,7 +142,17 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
         noticeTimerRef.current = null
         setGestureNotice(null)
         setHeart((current) => (current?.phase === 'rest' ? null : current))
-      }, 1600)
+      }, holdMs)
+    }, [])
+
+    const dismissHeart = useCallback((token: number, holdMs: number) => {
+      if (heartTimerRef.current) {
+        clearTimeout(heartTimerRef.current)
+      }
+      heartTimerRef.current = setTimeout(() => {
+        heartTimerRef.current = null
+        setHeart((current) => (current?.token === token ? null : current))
+      }, holdMs)
     }, [])
 
     useEffect(() => {
@@ -151,6 +162,9 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
         }
         if (noticeTimerRef.current) {
           clearTimeout(noticeTimerRef.current)
+        }
+        if (heartTimerRef.current) {
+          clearTimeout(heartTimerRef.current)
         }
       }
     }, [])
@@ -355,14 +369,14 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
           }
           setDragDirection(direction)
           setDragProgress(progress)
-          // Лайк только чуть сдвигается. Полный ход оставлен skip/previous/catalog.
+          // LEFT следует за пальцем и только слегка наклоняется. UP/DOWN/RIGHT без изменений.
           const likeDrag = mx < 0 && Math.abs(mx) >= Math.abs(my)
           const horizontal = Math.abs(mx) >= Math.abs(my)
           frontApi.set({
-            x: likeDrag ? mx * 0.12 : mx,
-            y: likeDrag ? my * 0.08 : my,
-            rot: likeDrag ? mx / 90 : horizontal ? mx / 20 : my / 90,
-            scale: likeDrag ? 1 : 1.03,
+            x: mx,
+            y: likeDrag ? my * 0.35 : my,
+            rot: likeDrag ? Math.max(-12, mx / 22) : horizontal ? mx / 20 : my / 90,
+            scale: likeDrag ? 1.02 : 1.03,
             opacity: 1,
           })
           if (!likeDrag) {
@@ -434,20 +448,29 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
             window.requestAnimationFrame(() => {
               lockedRef.current = false
             })
+            if (heartTimerRef.current) {
+              clearTimeout(heartTimerRef.current)
+              heartTimerRef.current = null
+            }
+            setHeart({ phase: 'pending', token })
             const finishLike = (ok: boolean) => {
               if (heartTokenRef.current !== token) {
                 return
               }
               if (!ok) {
                 setHeart(null)
-                showNotice(SAVE_FAILED_MESSAGE)
+                showNotice(SAVE_FAILED_MESSAGE, 3200)
                 return
               }
               const reduceMotion = window.matchMedia?.(
                 '(prefers-reduced-motion: reduce)',
               ).matches
-              setHeart({ phase: reduceMotion ? 'rest' : 'fly', token })
+              const phase = reduceMotion ? 'rest' : 'fly'
+              setHeart({ phase, token })
               showNotice('В избранном')
+              if (phase === 'fly') {
+                dismissHeart(token, 1100)
+              }
             }
             if (!saved) {
               finishLike(false)
@@ -607,39 +630,37 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
           {heart ? (
             <div
               key={heart.token}
-              className={`swipe-heart absolute left-1/2 top-[14%] z-30 ${
-                heart.phase === 'fly' ? 'swipe-heart-fly' : 'swipe-heart-rest'
+              className={`swipe-heart absolute left-1/2 top-[18%] z-30 ${
+                heart.phase === 'fly'
+                  ? 'swipe-heart-fly'
+                  : heart.phase === 'pending'
+                    ? 'swipe-heart-pending'
+                    : 'swipe-heart-rest'
               }`}
               data-heart={heart.phase}
               data-heart-size="152"
               onAnimationEnd={(event) => {
-                if (event.target !== event.currentTarget) {
+                if (
+                  event.target !== event.currentTarget ||
+                  event.animationName !== 'swipe-heart-fly'
+                ) {
                   return
                 }
+                const token = heart.token
                 setHeart((currentHeart) =>
-                  currentHeart?.phase === 'fly' ? null : currentHeart,
+                  currentHeart?.token === token && currentHeart.phase === 'fly'
+                    ? null
+                    : currentHeart,
                 )
               }}
             >
               <svg viewBox="0 0 120 120" aria-hidden="true" className="h-full w-full">
-                <defs>
-                  <radialGradient id="swipeHeartGlow" cx="50%" cy="46%" r="52%">
-                    <stop offset="0%" stopColor="#fb7185" stopOpacity="0.95" />
-                    <stop offset="58%" stopColor="#e11d48" stopOpacity="0.28" />
-                    <stop offset="100%" stopColor="#e11d48" stopOpacity="0" />
-                  </radialGradient>
-                  <linearGradient id="swipeHeartFill" x1="30" y1="18" x2="78" y2="102">
-                    <stop offset="0%" stopColor="#fecdd3" />
-                    <stop offset="28%" stopColor="#fb7185" />
-                    <stop offset="100%" stopColor="#9f1239" />
-                  </linearGradient>
-                </defs>
-                <circle cx="60" cy="58" r="46" fill="url(#swipeHeartGlow)" />
                 <path
-                  fill="url(#swipeHeartFill)"
                   d="M60 96.5S28.2 76 16.4 56.6C8.6 43.8 12.8 27 28.2 21.4c9.8-3.6 19.2-1 25.4 7.2 1.8 2.4 6.2 2.4 8 0 6.2-8.2 15.6-10.8 25.4-7.2C103.2 27 107.4 43.8 99.6 56.6 87.8 76 60 96.5 60 96.5z"
+                  fill={heart.phase === 'pending' ? 'transparent' : '#e11d48'}
+                  stroke="#e11d48"
+                  strokeWidth="6"
                 />
-                <ellipse cx="42" cy="40" rx="11" ry="6.5" fill="#fff" opacity="0.55" />
               </svg>
             </div>
           ) : null}
