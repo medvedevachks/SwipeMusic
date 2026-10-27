@@ -76,7 +76,7 @@ export default function BottomPlayer() {
 
   return (
     <div
-      className="border-t border-white/10 bg-[#121212]/95 text-white backdrop-blur-md"
+      className="border-t border-[var(--color-border)] bg-[var(--color-player)]/95 text-[var(--color-player-fg)] backdrop-blur-md"
       style={{ minHeight: 88 }}
       role="region"
       aria-label="Глобальный плеер"
@@ -95,10 +95,10 @@ export default function BottomPlayer() {
               aria-hidden
             />
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-white">
+              <p className="truncate text-sm font-medium text-[var(--color-player-fg)]">
                 {displayTrack?.title ?? 'Ничего не играет'}
               </p>
-              <p className="truncate text-xs text-white/55">
+              <p className="truncate text-xs text-[var(--color-player-muted)]">
                 {displayTrack
                   ? `${displayTrack.artist}${sourceLabel ? ` · ${sourceLabel}` : ''}`
                   : 'Выберите трек'}
@@ -120,7 +120,7 @@ export default function BottomPlayer() {
                   'flex h-8 w-8 items-center justify-center rounded-full text-sm transition-colors',
                   shuffleMode === 'ON'
                     ? 'text-[var(--color-accent)]'
-                    : 'text-white/60 hover:text-white',
+                    : 'text-[var(--color-player-muted)] hover:text-[var(--color-player-fg)]',
                 ].join(' ')}
                 aria-label="Shuffle"
                 aria-pressed={shuffleMode === 'ON'}
@@ -131,7 +131,7 @@ export default function BottomPlayer() {
               </button>
               <button
                 type="button"
-                className="flex h-9 w-9 items-center justify-center rounded-full text-white/80 transition-colors hover:text-white disabled:opacity-40"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--color-player-fg)] transition-colors hover:text-[var(--color-player-fg)] disabled:opacity-40"
                 aria-label="Предыдущий"
                 disabled={!canControl}
                 onClick={() => void previous()}
@@ -140,7 +140,7 @@ export default function BottomPlayer() {
               </button>
               <button
                 type="button"
-                className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-base font-semibold text-black transition hover:scale-105 disabled:opacity-40"
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--color-accent)] text-base font-semibold text-white transition hover:scale-105 disabled:opacity-40"
                 aria-label={playing ? 'Пауза' : 'Воспроизведение'}
                 disabled={!canControl}
                 onClick={() => {
@@ -155,7 +155,7 @@ export default function BottomPlayer() {
               </button>
               <button
                 type="button"
-                className="flex h-9 w-9 items-center justify-center rounded-full text-white/80 transition-colors hover:text-white disabled:opacity-40"
+                className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--color-player-fg)] transition-colors hover:text-[var(--color-player-fg)] disabled:opacity-40"
                 aria-label="Следующий"
                 disabled={!canControl}
                 onClick={() => void next()}
@@ -168,7 +168,7 @@ export default function BottomPlayer() {
                   'flex h-8 w-8 items-center justify-center rounded-full text-sm transition-colors',
                   repeatActive
                     ? 'text-[var(--color-accent)]'
-                    : 'text-white/60 hover:text-white',
+                    : 'text-[var(--color-player-muted)] hover:text-[var(--color-player-fg)]',
                 ].join(' ')}
                 aria-label={`Repeat: ${repeatMode}`}
                 disabled={!canControl}
@@ -192,7 +192,7 @@ export default function BottomPlayer() {
           <div className="flex items-center gap-1 md:hidden">
             <button
               type="button"
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-black disabled:opacity-40"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--color-accent)] text-white disabled:opacity-40"
               aria-label={playing ? 'Пауза' : 'Воспроизведение'}
               disabled={!canControl}
               onClick={() => {
@@ -207,7 +207,7 @@ export default function BottomPlayer() {
             </button>
             <button
               type="button"
-              className="flex h-9 w-9 items-center justify-center rounded-full text-white/80 disabled:opacity-40"
+              className="flex h-9 w-9 items-center justify-center rounded-full text-[var(--color-player-fg)] disabled:opacity-40"
               aria-label="Следующий"
               disabled={!canControl}
               onClick={() => void next()}
@@ -220,7 +220,7 @@ export default function BottomPlayer() {
           <div className="relative flex shrink-0 items-center justify-end gap-1 sm:min-w-[22%] sm:gap-2">
             {candidateHint ? (
               <span
-                className="hidden rounded bg-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-white/55 lg:inline"
+                className="hidden rounded bg-[var(--color-surface-hover)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--color-player-muted)] lg:inline"
                 title="Тип PlaybackCandidate"
               >
                 {candidateHint}
@@ -228,7 +228,7 @@ export default function BottomPlayer() {
             ) : null}
             {sourceLabel ? (
               <span
-                className="hidden max-w-[7rem] truncate text-[10px] text-white/45 xl:inline"
+                className="hidden max-w-[7rem] truncate text-[10px] text-[var(--color-player-muted)] xl:inline"
                 title={sourceLabel}
               >
                 {sourceLabel}
@@ -245,10 +245,10 @@ export default function BottomPlayer() {
                 }
               }}
             />
-            <label className="hidden items-center gap-1 text-[10px] text-white/55 lg:flex">
+            <label className="hidden items-center gap-1 text-[10px] text-[var(--color-player-muted)] lg:flex">
               <span className="sr-only">Скорость</span>
               <select
-                className="rounded-md border border-white/15 bg-transparent px-1.5 py-1 text-[11px] text-white/80 outline-none hover:border-white/30"
+                className="rounded-md border border-[var(--color-border)] bg-transparent px-1.5 py-1 text-[11px] text-[var(--color-player-fg)] outline-none hover:border-[var(--color-muted)]"
                 value={playbackRate}
                 aria-label="Скорость воспроизведения"
                 disabled={!canControl}
@@ -257,7 +257,7 @@ export default function BottomPlayer() {
                 }
               >
                 {PLAYBACK_RATES.map((rate) => (
-                  <option key={rate} value={rate} className="bg-[#181818]">
+                  <option key={rate} value={rate} className="bg-[var(--color-surface)]">
                     {rate}x
                   </option>
                 ))}
@@ -265,7 +265,7 @@ export default function BottomPlayer() {
             </label>
             <button
               type="button"
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--color-player-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-player-fg)]"
               aria-label="Меню плеера"
               aria-expanded={menuOpen}
               onClick={() => setMenuOpen((open) => !open)}
@@ -273,10 +273,10 @@ export default function BottomPlayer() {
               ⋯
             </button>
             {menuOpen ? (
-              <div className="absolute bottom-10 right-0 z-40 min-w-[10rem] overflow-hidden rounded-xl border border-white/10 bg-[#181818] py-1 shadow-xl">
+              <div className="absolute bottom-10 right-0 z-40 min-w-[10rem] overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-xl">
                 <Link
                   to="/queue"
-                  className="block px-3 py-2 text-sm text-white/85 hover:bg-white/10"
+                  className="block px-3 py-2 text-sm text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
                   onClick={() => setMenuOpen(false)}
                 >
                   Очередь ({queueLength})
@@ -284,7 +284,7 @@ export default function BottomPlayer() {
                 {alternativeCount >= 2 && shownTrack ? (
                   <button
                     type="button"
-                    className="block min-h-11 w-full px-3 py-2 text-left text-sm text-white/85 hover:bg-white/10"
+                    className="block min-h-11 w-full px-3 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
                     onClick={() => {
                       setMenuOpen(false)
                       void openManualSourceAlternatives(shownTrack)
@@ -295,7 +295,7 @@ export default function BottomPlayer() {
                 ) : null}
                 <button
                   type="button"
-                  className="block w-full px-3 py-2 text-left text-sm text-white/85 hover:bg-white/10"
+                  className="block w-full px-3 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
                   onClick={() => {
                     toggleShuffle()
                     setMenuOpen(false)
@@ -305,7 +305,7 @@ export default function BottomPlayer() {
                 </button>
                 <button
                   type="button"
-                  className="block w-full px-3 py-2 text-left text-sm text-white/85 hover:bg-white/10"
+                  className="block w-full px-3 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
                   onClick={() => {
                     cycleRepeatMode()
                     setMenuOpen(false)
@@ -313,8 +313,8 @@ export default function BottomPlayer() {
                 >
                   Repeat: {repeatMode}
                 </button>
-                <div className="border-t border-white/10 px-3 py-2 lg:hidden">
-                  <p className="mb-1 text-[10px] uppercase text-white/40">
+                <div className="border-t border-[var(--color-border)] px-3 py-2 lg:hidden">
+                  <p className="mb-1 text-[10px] uppercase text-[var(--color-player-muted)]">
                     Скорость
                   </p>
                   <div className="flex flex-wrap gap-1">
@@ -326,7 +326,7 @@ export default function BottomPlayer() {
                           'rounded px-2 py-1 text-xs',
                           playbackRate === rate
                             ? 'bg-[var(--color-accent)] text-white'
-                            : 'bg-white/10 text-white/70',
+                            : 'bg-[var(--color-surface-hover)] text-[var(--color-fg)]',
                         ].join(' ')}
                         onClick={() => {
                           setPlaybackRate(rate)

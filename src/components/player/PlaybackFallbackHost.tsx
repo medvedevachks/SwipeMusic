@@ -51,14 +51,14 @@ export default function PlaybackFallbackHost() {
     <>
       {model.kind === 'notice' && model.noticeText ? (
         <div
-          className="border-t border-white/10 bg-[#121212] px-3 py-2 text-white"
+          className="border-t border-[var(--color-border)] bg-[var(--color-player)] px-3 py-2 text-[var(--color-player-fg)]"
           role="status"
         >
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
             <p className="text-sm">{model.noticeText}</p>
             <button
               type="button"
-              className="min-h-11 shrink-0 rounded-lg px-3 text-sm text-white/80"
+              className="min-h-11 shrink-0 rounded-lg px-3 text-sm text-[var(--color-player-fg)]"
               onClick={() => dismissFallbackPrompt('notice')}
             >
               Закрыть

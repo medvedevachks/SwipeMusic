@@ -1,4 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom'
+import ThemeSwitch from '../components/ThemeSwitch'
 import { useAuthStore } from '../store/authStore'
 
 export default function Profile() {
@@ -17,6 +18,7 @@ export default function Profile() {
       <h1 className="font-display text-2xl font-semibold tracking-tight text-[var(--color-fg)]">
         Профиль
       </h1>
+      <ThemeSwitch />
       {user ? (
         <div className="space-y-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
           <div>

@@ -19,7 +19,7 @@ export default function PlayerVolumeControl({
     <div className="flex min-w-0 items-center gap-1.5">
       <button
         type="button"
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm text-[var(--color-muted)] transition-colors hover:bg-white/10 hover:text-white"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm text-[var(--color-player-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-player-fg)]"
         aria-label={muted ? 'Включить звук' : 'Без звука'}
         onClick={onToggleMute}
       >

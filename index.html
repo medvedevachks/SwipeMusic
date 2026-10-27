@@ -5,7 +5,24 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/pwa-192x192.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0f766e" />
+    <meta name="theme-color" content="#f3f5f7" />
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('swipe-music.theme')
+          var theme =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia('(prefers-color-scheme: dark)').matches
+                ? 'dark'
+                : 'light'
+          document.documentElement.dataset.theme = theme
+          document.documentElement.style.colorScheme = theme
+          var color = document.querySelector('meta[name="theme-color"]')
+          if (color) color.setAttribute('content', theme === 'dark' ? '#10161b' : '#f3f5f7')
+        } catch (e) {}
+      })()
+    </script>
     <meta name="description" content="PWA for searching, listening to, and organizing music" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

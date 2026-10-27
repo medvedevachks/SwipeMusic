@@ -127,7 +127,7 @@ export default function PlayerProgressBar({
           }
         }}
       >
-        <div className="absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-white/15 transition-[height] group-hover:h-1.5">
+        <div className="absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-[var(--color-border)] transition-[height] group-hover:h-1.5">
           <div
             className="h-full rounded-full bg-[var(--color-accent)]"
             style={{ width: `${ratio * 100}%` }}
@@ -135,7 +135,7 @@ export default function PlayerProgressBar({
         </div>
         <div
           className={[
-            'absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow transition-opacity',
+            'absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--color-player-fg)] shadow transition-opacity',
             dragging || previewRatio != null
               ? 'opacity-100'
               : 'opacity-0 group-hover:opacity-100',
