@@ -57,6 +57,20 @@ export function resolveTheme(): ThemeChoice {
   return readStoredTheme() ?? systemTheme()
 }
 
+let currentTheme: ThemeChoice | null = null
+const listeners = new Set<() => void>()
+
+export function getTheme(): ThemeChoice {
+  return currentTheme ?? resolveTheme()
+}
+
+export function subscribeTheme(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
 export function applyTheme(theme: ThemeChoice): void {
   const root = document.documentElement
   root.dataset.theme = theme
@@ -64,6 +78,13 @@ export function applyTheme(theme: ThemeChoice): void {
   const color = document.querySelector('meta[name="theme-color"]')
   if (color) {
     color.setAttribute('content', THEME_TOKENS[theme].bg)
+  }
+  if (currentTheme === theme) {
+    return
+  }
+  currentTheme = theme
+  for (const listener of listeners) {
+    listener()
   }
 }
 

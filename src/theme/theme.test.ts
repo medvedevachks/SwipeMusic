@@ -3,8 +3,10 @@ import test from 'node:test'
 import {
   applyTheme,
   commitTheme,
+  getTheme,
   readStoredTheme,
   resolveTheme,
+  subscribeTheme,
   THEME_STORAGE_KEY,
   THEME_TOKENS,
 } from './theme.ts'
@@ -68,6 +70,22 @@ test('a stored theme is restored on the next open', () => {
   applyTheme(resolveTheme())
   assert.equal(document.documentElement.dataset.theme, 'dark')
   assert.equal(THEME_TOKENS.dark.surface, '#1b242c')
+})
+
+test('every subscriber sees the same applied theme', () => {
+  storage.clear()
+  installDom(false)
+  applyTheme('light')
+  const seen: string[] = []
+  const stop = subscribeTheme(() => {
+    seen.push(getTheme())
+  })
+  applyTheme('dark')
+  commitTheme('light')
+  stop()
+  applyTheme('dark')
+  assert.deepEqual(seen, ['dark', 'light'])
+  assert.equal(getTheme(), 'dark')
 })
 
 test('switch click toggles and a drag commits the side under the pointer', () => {
