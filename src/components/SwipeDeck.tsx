@@ -58,6 +58,17 @@ export type SwipeDeckHandle = {
 }
 
 const SWIPE_COMMIT_MS = 180
+/** Визуальный потолок LEFT. Порог жеста считается по реальному движению указателя. */
+const LIKE_CARD_SHIFT = 10
+
+function likeCardShift(mx: number, my: number): { x: number; y: number } {
+  const distance = Math.hypot(mx, my)
+  if (distance <= LIKE_CARD_SHIFT) {
+    return { x: mx, y: my }
+  }
+  const ratio = LIKE_CARD_SHIFT / distance
+  return { x: mx * ratio, y: my * ratio }
+}
 
 function flyTarget(direction: SwipeDirection) {
   switch (direction) {
@@ -98,7 +109,7 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
     const [gestureNotice, setGestureNotice] = useState<string | null>(null)
     const [cardMotion, setCardMotion] = useState<'idle' | 'return'>('idle')
     const [heart, setHeart] = useState<{
-      phase: 'pending' | 'fly' | 'rest'
+      phase: 'fly' | 'rest'
       token: number
     } | null>(null)
     const lockedRef = useRef(false)
@@ -369,17 +380,26 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
           }
           setDragDirection(direction)
           setDragProgress(progress)
-          // LEFT следует за пальцем и только слегка наклоняется. UP/DOWN/RIGHT без изменений.
+          // Реальный mx/my решает порог. На LEFT карточка сдвигается не больше LIKE_CARD_SHIFT.
           const likeDrag = mx < 0 && Math.abs(mx) >= Math.abs(my)
           const horizontal = Math.abs(mx) >= Math.abs(my)
-          frontApi.set({
-            x: mx,
-            y: likeDrag ? my * 0.35 : my,
-            rot: likeDrag ? Math.max(-12, mx / 22) : horizontal ? mx / 20 : my / 90,
-            scale: likeDrag ? 1.02 : 1.03,
-            opacity: 1,
-          })
-          if (!likeDrag) {
+          if (likeDrag) {
+            const shift = likeCardShift(mx, my)
+            frontApi.set({
+              x: shift.x,
+              y: shift.y,
+              rot: 0,
+              scale: 1,
+              opacity: 1,
+            })
+          } else {
+            frontApi.set({
+              x: mx,
+              y: my,
+              rot: horizontal ? mx / 20 : my / 90,
+              scale: 1.03,
+              opacity: 1,
+            })
             backApi.set({
               scale: 0.97 + Math.min(Math.hypot(mx, my) / 1800, 0.03),
               y: 14 - Math.min(Math.hypot(mx, my) / 40, 10),
@@ -392,7 +412,7 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
         // Gesture ended
         const flick = Math.hypot(vx, vy) > 0.35
         const likeDistance =
-          decision?.action === 'like' && Math.abs(mx) > SWIPE_VERTICAL_THRESHOLD
+          decision?.action === 'like' && Math.abs(mx) >= SWIPE_VERTICAL_THRESHOLD
         const passed =
           Math.abs(mx) > SWIPE_THRESHOLD ||
           Math.abs(my) > SWIPE_VERTICAL_THRESHOLD ||
@@ -419,14 +439,7 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
 
         const settleLikeCard = () => {
           clearDragVisual()
-          void frontApi.start({
-            x: 0,
-            y: 0,
-            rot: 0,
-            scale: 1,
-            opacity: 1,
-            config: { tension: 420, friction: 38, clamp: true },
-          })
+          frontApi.set({ x: 0, y: 0, rot: 0, scale: 1, opacity: 1 })
           backApi.set({ x: 0, y: 14, rot: 0, scale: 0.96, opacity: 1 })
         }
 
@@ -452,7 +465,6 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
               clearTimeout(heartTimerRef.current)
               heartTimerRef.current = null
             }
-            setHeart({ phase: 'pending', token })
             const finishLike = (ok: boolean) => {
               if (heartTokenRef.current !== token) {
                 return
@@ -509,6 +521,12 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
             commitTimerRef.current = null
             finishAction(action, track)
           }, SWIPE_COMMIT_MS)
+          return
+        }
+
+        const releasedLike = mx < 0 && Math.abs(mx) >= Math.abs(my)
+        if (releasedLike) {
+          settleLikeCard()
           return
         }
 
@@ -631,11 +649,7 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
             <div
               key={heart.token}
               className={`swipe-heart absolute left-1/2 top-[18%] z-30 ${
-                heart.phase === 'fly'
-                  ? 'swipe-heart-fly'
-                  : heart.phase === 'pending'
-                    ? 'swipe-heart-pending'
-                    : 'swipe-heart-rest'
+                heart.phase === 'fly' ? 'swipe-heart-fly' : 'swipe-heart-rest'
               }`}
               data-heart={heart.phase}
               data-heart-size="152"
@@ -657,7 +671,7 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
               <svg viewBox="0 0 120 120" aria-hidden="true" className="h-full w-full">
                 <path
                   d="M60 96.5S28.2 76 16.4 56.6C8.6 43.8 12.8 27 28.2 21.4c9.8-3.6 19.2-1 25.4 7.2 1.8 2.4 6.2 2.4 8 0 6.2-8.2 15.6-10.8 25.4-7.2C103.2 27 107.4 43.8 99.6 56.6 87.8 76 60 96.5 60 96.5z"
-                  fill={heart.phase === 'pending' ? 'transparent' : '#e11d48'}
+                  fill="#e11d48"
                   stroke="#e11d48"
                   strokeWidth="6"
                 />

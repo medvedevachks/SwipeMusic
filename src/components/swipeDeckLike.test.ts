@@ -369,6 +369,26 @@ function heartPhase(): string {
   return dom.document.querySelector('[data-heart]')?.getAttribute('data-heart') ?? ''
 }
 
+function cardVisualShift(): number {
+  const card = dom.document.querySelector('article.cursor-grab')
+  if (!card) {
+    return Number.NaN
+  }
+  const raw = (card as HTMLElement).style.transform || dom.getComputedStyle(card).transform || ''
+  const matrix = /matrix\(([^)]+)\)/.exec(raw)
+  if (matrix) {
+    const parts = matrix[1].split(',').map((part) => Number(part.trim()))
+    const tx = parts.length >= 6 ? parts[4] : Number.NaN
+    const ty = parts.length >= 6 ? parts[5] : Number.NaN
+    return Math.hypot(tx ?? 0, ty ?? 0)
+  }
+  const translate = /translate3d\(\s*([-\d.]+)px,\s*([-\d.]+)(?:px)?/.exec(raw)
+  if (translate) {
+    return Math.hypot(Number(translate[1]), Number(translate[2]))
+  }
+  return raw === '' || raw === 'none' ? 0 : Number.NaN
+}
+
 function heartSize(): string {
   return dom.document.querySelector('[data-heart]')?.getAttribute('data-heart-size') ?? ''
 }
@@ -590,7 +610,7 @@ test('сердце улетает только после успешного о�
   await swipe('left', { pointerType: 'touch', distance: 56 })
 
   assert.equal(frontTitle(), 'Город')
-  assert.equal(heartPhase(), 'pending')
+  assert.equal(heartPhase(), '')
   assert.equal(noticeText(), '')
   assert.equal(likePatches, 1)
   assert.equal(playerState().currentTime, 37.5)
@@ -664,6 +684,41 @@ test('ошибка сохранения LIKE не сообщает об успе
   assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
   assert.equal(playerState().currentTime, 37.5)
   assert.equal(playerState().playing, true)
+  assert.deepEqual(navigated, [])
+  assert.deepEqual(played, [])
+})
+
+test('LEFT на 55 px почти не двигает карточку и сохраняет лайк', { timeout: 20_000 }, async () => {
+  resetLibrary()
+  installRemote()
+  await seedPlayback(0, 37.5, true)
+  await renderDeck({ tracks }, { remount: true })
+
+  const card = dom.document.querySelector('article.cursor-grab')
+  assert.ok(card)
+  await react.act(async () => {
+    card.dispatchEvent(pointer('pointerdown', 220, 220, 1, 'mouse'))
+    card.dispatchEvent(pointer('pointermove', 165, 220, 1, 'mouse'))
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  })
+
+  const shift = cardVisualShift()
+  assert.ok(shift > 0, `карточка не сдвинулась, transform: ${(card as HTMLElement).style.transform}`)
+  assert.ok(shift <= 12, `визуальный сдвиг ${shift} px`)
+
+  await react.act(async () => {
+    card.dispatchEvent(pointer('pointerup', 165, 220, 0, 'mouse'))
+    await new Promise((resolve) => setTimeout(resolve, 280))
+  })
+
+  assert.equal(frontTitle(), 'Город')
+  assert.equal(likePatches, 1)
+  assert.equal(noticeText(), 'В избранном')
+  assert.equal(heartPhase(), 'fly')
+  assert.equal(heartSize(), '152')
+  assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
+  assert.equal(playerState().queueIndex, 0)
+  assert.equal(playerState().currentTime, 37.5)
   assert.deepEqual(navigated, [])
   assert.deepEqual(played, [])
 })
