@@ -12,16 +12,15 @@ export default function MainLayout() {
   useGlobalPlayerHotkeys()
 
   return (
-    <div className="flex min-h-svh flex-col bg-[var(--color-bg)]">
+    <div className="app-shell bg-[var(--color-bg)]">
       <AppHeader />
-      <main className="mx-auto w-full max-w-2xl flex-1 px-4 pb-[11.5rem] pt-5 sm:px-6 sm:pt-6">
-        <LibraryStatus />
-        <LibraryOutlet />
+      <main className="app-main">
+        <div className="app-main-frame">
+          <LibraryStatus />
+          <LibraryOutlet />
+        </div>
       </main>
-      <div
-        className="fixed inset-x-0 bottom-0 z-30"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-      >
+      <div className="app-dock">
         <PlaybackFallbackHost />
         <BottomPlayer />
         <BottomNav />

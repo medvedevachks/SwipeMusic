@@ -21,7 +21,7 @@ const navItems: {
 export default function BottomNav() {
   return (
     <nav
-      className="border-t border-[var(--color-border)] bg-[var(--color-nav)]/95 backdrop-blur-md"
+      className="app-nav border-t border-[var(--color-border)] bg-[var(--color-nav)]/95 backdrop-blur-md"
       aria-label="Основная навигация"
     >
       <ul className="mx-auto flex h-14 max-w-2xl items-stretch justify-between px-1 sm:h-16 sm:px-2">

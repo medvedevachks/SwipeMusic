@@ -1,7 +1,8 @@
-import type { SyntheticEvent } from 'react'
+import { useEffect, useRef, type SyntheticEvent } from 'react'
 import { animated } from '@react-spring/web'
 import type { SpringValue } from '@react-spring/web'
 import type { SwipeDirection } from '../types/gesture'
+import { PauseIcon, PlayIcon } from './icons'
 import type { Track } from '../types/track'
 import { formatPlaybackTime } from '../utils/formatTime'
 
@@ -30,6 +31,24 @@ type SwipeCardProps = {
   dragProgress?: number
   zIndex?: number
   playback?: PlaybackOverlay | null
+  onTogglePlay?: () => void
+  isPlaying?: boolean
+  /** Источник этой карточки уже запрашивается, звука ещё нет. */
+  isStarting?: boolean
+}
+
+/** Родной listener раньше bubble: use-gesture на карточке не должен видеть Play и ползунок. */
+function shieldFromCardGesture(node: HTMLElement | null): void {
+  if (!node || node.dataset.gestureShield === '1') {
+    return
+  }
+  const stop = (event: Event) => {
+    event.stopPropagation()
+  }
+  node.addEventListener('pointerdown', stop)
+  node.addEventListener('pointermove', stop)
+  node.addEventListener('pointerup', stop)
+  node.dataset.gestureShield = '1'
 }
 
 const overlayTone: Record<SwipeDirection, string> = {
@@ -65,8 +84,17 @@ export default function SwipeCard({
   dragProgress = 0,
   zIndex = 1,
   playback = null,
+  onTogglePlay,
+  isPlaying = false,
+  isStarting = false,
 }: SwipeCardProps) {
   const progressMax = playback && playback.duration > 0 ? playback.duration : 0
+  const playRef = useRef<HTMLButtonElement>(null)
+  const seekRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    shieldFromCardGesture(playRef.current)
+    shieldFromCardGesture(seekRef.current)
+  })
   const showOverlay =
     interactive && Boolean(dragOverlayText) && Boolean(dragDirection)
   const ready = dragProgress >= 1
@@ -90,9 +118,9 @@ export default function SwipeCard({
         touchAction: interactive ? 'none' : undefined,
       }}
     >
-      <div className="flex h-full flex-col overflow-hidden rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[0_18px_50px_-28px_rgba(20,33,43,0.55)]">
+      <div className="deck-card flex h-full flex-col overflow-hidden rounded-[1.7rem]">
         <div
-          className="relative min-h-0 flex-1 bg-[var(--color-accent)]"
+          className="deck-cover bg-[var(--color-accent)]"
           style={{
             backgroundColor: track.coverColor ?? undefined,
             backgroundImage: track.coverUrl
@@ -102,9 +130,33 @@ export default function SwipeCard({
             backgroundPosition: 'center',
           }}
         >
-          <div className="absolute inset-0 bg-gradient-to-br from-white/25 via-transparent to-black/35" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.28),transparent_45%)]" />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/25 via-transparent to-black/35" />
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.28),transparent_45%)]" />
 
+          {onTogglePlay ? (
+            <button
+                ref={playRef}
+                type="button"
+                className="deck-key deck-key-primary deck-orb"
+                aria-label={isPlaying ? 'Пауза' : isStarting ? 'Запуск' : 'Слушать'}
+                aria-pressed={isPlaying}
+                aria-busy={isStarting || undefined}
+                onPointerDown={stopSeekGesture}
+                onPointerUp={stopSeekGesture}
+                onClick={(event) => {
+                  stopSeekGesture(event)
+                  onTogglePlay()
+                }}
+              >
+                {isPlaying ? (
+                  <PauseIcon />
+                ) : isStarting ? (
+                  <span className="h-8 w-8 animate-spin rounded-full border-2 border-current border-t-transparent motion-reduce:animate-none" />
+                ) : (
+                  <PlayIcon className="translate-x-0.5" />
+                )}
+              </button>
+          ) : null}
           {showOverlay && dragDirection ? (
             <div
               className={`pointer-events-none absolute z-10 rounded-xl border px-3 py-1.5 text-sm font-bold tracking-wide backdrop-blur-md ${overlayTone[dragDirection]} ${overlayEdge[dragDirection]} ${
@@ -133,6 +185,7 @@ export default function SwipeCard({
 
           {playback ? (
             <div
+              ref={seekRef}
               className="space-y-1.5 touch-auto"
               style={{ touchAction: 'auto' }}
               onPointerDown={stopSeekGesture}
@@ -148,7 +201,7 @@ export default function SwipeCard({
                 onChange={(event) =>
                   playback.onSeek(Number(event.target.value))
                 }
-                className="w-full accent-[var(--color-accent)]"
+                className="deck-seek"
                 aria-label="Позиция воспроизведения"
               />
               <div className="flex justify-between text-xs text-[var(--color-muted)]">

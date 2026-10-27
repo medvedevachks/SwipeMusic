@@ -3,7 +3,7 @@ import { ThemeSwitchControl } from './ThemeSwitch'
 
 export default function AppHeader() {
   return (
-    <header className="sticky top-0 z-20 border-b border-[var(--color-border)]/80 bg-[var(--color-bg)]/90 backdrop-blur-md">
+    <header className="border-b border-[var(--color-border)]/80 bg-[var(--color-bg)]/90 backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-2xl items-center justify-between gap-2 px-4 sm:h-16 sm:gap-3 sm:px-6">
         <Link to="/" className="min-w-0">
           <span className="block truncate font-display text-lg font-semibold tracking-tight text-[var(--color-fg)] sm:text-xl">

@@ -1,3 +1,5 @@
+import { VolumeIcon } from '../icons'
+
 type PlayerVolumeControlProps = {
   volume: number
   muted: boolean
@@ -12,18 +14,19 @@ export default function PlayerVolumeControl({
   onToggleMute,
 }: PlayerVolumeControlProps) {
   const effective = muted ? 0 : volume
-  const icon =
-    muted || effective === 0 ? '🔇' : effective < 0.4 ? '🔈' : effective < 0.75 ? '🔉' : '🔊'
+  const level =
+    muted || effective === 0 ? 'mute' : effective < 0.4 ? 'low' : effective < 0.75 ? 'mid' : 'high'
 
   return (
-    <div className="flex min-w-0 items-center gap-1.5">
+    <div className="flex min-w-0 items-center gap-1">
       <button
         type="button"
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm text-[var(--color-player-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-player-fg)]"
+        className="deck-key deck-key-utility"
         aria-label={muted ? 'Включить звук' : 'Без звука'}
+        aria-pressed={muted}
         onClick={onToggleMute}
       >
-        {icon}
+        <VolumeIcon level={level} className="h-4 w-4" />
       </button>
       <input
         type="range"
@@ -32,7 +35,7 @@ export default function PlayerVolumeControl({
         step={0.01}
         value={effective}
         aria-label="Громкость"
-        className="hidden h-1 w-20 accent-[var(--color-accent)] sm:block md:w-24"
+        className="deck-volume hidden sm:block"
         onChange={(event) => {
           const next = Number(event.target.value)
           onVolumeChange(next)

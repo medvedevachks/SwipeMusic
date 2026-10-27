@@ -89,7 +89,7 @@ export default function PlayerProgressBar({
 
   return (
     <div className="flex w-full items-center gap-2">
-      <span className="w-10 shrink-0 text-right font-mono text-[10px] tabular-nums text-[var(--color-muted)] sm:text-[11px]">
+      <span className="w-10 shrink-0 text-right font-mono text-[10px] tabular-nums text-[var(--color-player-muted)] sm:text-[11px]">
         {formatPlaybackTime(displayTime)}
       </span>
       <div
@@ -102,7 +102,7 @@ export default function PlayerProgressBar({
         aria-valuenow={Math.floor(displayTime)}
         aria-disabled={disabled}
         className={[
-          'group relative h-8 flex-1 cursor-pointer touch-none',
+          'group relative h-11 flex-1 cursor-pointer touch-none',
           disabled ? 'pointer-events-none opacity-40' : '',
         ].join(' ')}
         onPointerDown={onPointerDown}
@@ -127,23 +127,15 @@ export default function PlayerProgressBar({
           }
         }}
       >
-        <div className="absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-[var(--color-border)] transition-[height] group-hover:h-1.5">
-          <div
-            className="h-full rounded-full bg-[var(--color-accent)]"
-            style={{ width: `${ratio * 100}%` }}
-          />
+        <div className="deck-groove">
+          <div className="deck-groove-fill" style={{ width: `${ratio * 100}%` }} />
         </div>
         <div
-          className={[
-            'absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[var(--color-player-fg)] shadow transition-opacity',
-            dragging || previewRatio != null
-              ? 'opacity-100'
-              : 'opacity-0 group-hover:opacity-100',
-          ].join(' ')}
+          className="deck-thumb"
           style={{ left: `${ratio * 100}%` }}
         />
       </div>
-      <span className="w-10 shrink-0 font-mono text-[10px] tabular-nums text-[var(--color-muted)] sm:text-[11px]">
+      <span className="w-10 shrink-0 font-mono text-[10px] tabular-nums text-[var(--color-player-muted)] sm:text-[11px]">
         {formatPlaybackTime(duration)}
       </span>
     </div>
