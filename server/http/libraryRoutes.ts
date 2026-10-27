@@ -22,6 +22,8 @@ import {
 } from '../library/validation.ts'
 import { createPlaybackRepository } from '../library/playback/repository.ts'
 import { validatePlaybackBatch } from '../library/playback/validation.ts'
+import { loadTasteInput } from '../library/taste/loadTasteInput.ts'
+import { readUserTasteProfile } from '../../src/services/taste/buildTasteProfile.ts'
 import { readJsonBody, requireUserId, sendJson } from './currentUser.ts'
 
 type LibraryContext = {
@@ -401,6 +403,20 @@ export async function handleLibraryRequest(
   if (method === 'GET' && path === '/api/me/playback-stats') {
     const playback = createPlaybackRepository(context.db)
     sendJson(res, 200, { stats: playback.listStats(userId) })
+    return
+  }
+
+  if (method === 'GET' && path === '/api/me/taste-profile') {
+    if (context.config.nodeEnv !== 'development') {
+      sendJson(res, 404, { error: 'NOT_FOUND' })
+      return
+    }
+    const profile = readUserTasteProfile(
+      userId,
+      loadTasteInput(context.db, userId),
+      new Date().toISOString(),
+    )
+    sendJson(res, 200, { profile })
     return
   }
 
