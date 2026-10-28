@@ -147,6 +147,7 @@ UI (pages / BottomPlayer)
 | Поведение OFF | Очередь = список результатов поиска (legacy) | `planSearchPlayback` |
 | UI | Search / Home search-deck | `src/pages/Search.tsx`, `src/pages/Home.tsx` |
 | Advance | `AudioPlayer` next/ended → `consumeSearchSeedAdvance` | `AudioPlayer.ts` |
+| Queue provenance | Persist/restore пишет `sessionTailIds`. Legacy search-seed без поля: хвост hits срезается до current (не объявлять dump рекомендацией). Album/playlist/swipe/radio без поля — полный список | `PlaybackQueue.ts` |
 
 **Команды сборки**
 
@@ -183,9 +184,9 @@ Last.fm и MusicBrainz для рекомендаций **не** подключа
 
 - Remote `origin`: `medvedevachks/SwipeMusic`.
 - Ветка: `feature/deploy-windows-01`.
-- HEAD снимка: `3dc112d` — `feat: gate search continuation with a production build flag`.
-- SEARCH-CONTINUATION-PROD в этом коммите **опубликован** на GitHub.
-- По отчёту приёмки/релиза: **362** теста PASS, lint/build OFF и ON на DEV проходили.
+- HEAD снимка: ветка `feature/deploy-windows-01` (search-seed + SEARCH-FLOW-04 persist `sessionTailIds`).
+- SEARCH-CONTINUATION-PROD (`3dc112d`) и search-flow фиксы **в ветке**; на production ещё не выкатывались (**отчёт**).
+- Локальная приёмка SEARCH-FLOW-04: **377** теста PASS, lint/build OFF и ON.
 - Baseline внутри истории ветки: `14fc4cb` (Media Session) — предок `3dc112d`.
 
 ### 11.2 Production (**только операторский отчёт**, с DEV-ПК путь `C:\SwipeMusic` недоступен)

@@ -26,7 +26,17 @@ export type PlaybackQueueSnapshot = {
 
 export type PlaybackQueueListener = (snapshot: PlaybackQueueSnapshot) => void
 
-const STORAGE_KEY = 'swipe-music-playback-queue-v1'
+/** localStorage key очереди. Экспорт для тестов persist/restore. */
+export const PLAYBACK_QUEUE_STORAGE_KEY = 'swipe-music-playback-queue-v1'
+
+/** Снимок на диске: snapshot + явный provenance insertNext. */
+export type PersistedPlaybackQueue = PlaybackQueueSnapshot & {
+  /**
+   * Id треков, добавленных через insertNext.
+   * Отсутствие поля = legacy payload без достоверного provenance.
+   */
+  sessionTailIds?: string[]
+}
 
 function stripPreview(track: Track): Track {
   return { ...track, previewUrl: null }
@@ -515,11 +525,12 @@ export class PlaybackQueue {
 
   private persist(): void {
     try {
-      const payload: PlaybackQueueSnapshot = {
+      const payload: PersistedPlaybackQueue = {
         ...this.getSnapshot(),
         items: this.items.map(stripPreview),
+        sessionTailIds: [...this.sessionTailIds],
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
+      localStorage.setItem(PLAYBACK_QUEUE_STORAGE_KEY, JSON.stringify(payload))
     } catch {
       // quota / private mode
     }
@@ -527,11 +538,11 @@ export class PlaybackQueue {
 
   private restore(): void {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY)
+      const raw = localStorage.getItem(PLAYBACK_QUEUE_STORAGE_KEY)
       if (!raw) {
         return
       }
-      const data = JSON.parse(raw) as PlaybackQueueSnapshot & {
+      const data = JSON.parse(raw) as PersistedPlaybackQueue & {
         context?: unknown
       }
       if (!Array.isArray(data.items)) {
@@ -547,14 +558,8 @@ export class PlaybackQueue {
       this.shuffleMode = data.shuffleMode ?? 'OFF'
       this.history = Array.isArray(data.history) ? data.history : []
       this.context = parsePlaybackContext(data.context)
-      // После reload хвост очереди — уже принятые элементы сессии, не dump выдачи.
       this.sessionTailIds.clear()
-      for (let index = this.currentIndex + 1; index < this.items.length; index += 1) {
-        const id = this.items[index]?.id
-        if (id) {
-          this.sessionTailIds.add(id)
-        }
-      }
+      this.applyRestoredSessionTail(data)
 
       if (this.items.length > 0 && this.currentIndex < 0) {
         this.currentIndex = 0
@@ -562,6 +567,34 @@ export class PlaybackQueue {
       }
     } catch {
       // ignore corrupt storage
+    }
+  }
+
+  /**
+   * Восстанавливает sessionTailIds из persist.
+   * Legacy search-seed без поля: не доверять хвосту (срез до current), history не трогаем.
+   * Album / playlist / swipe / radio: полный список items сохраняется.
+   */
+  private applyRestoredSessionTail(data: PersistedPlaybackQueue): void {
+    const hasProvenance = Object.prototype.hasOwnProperty.call(data, 'sessionTailIds')
+    if (hasProvenance) {
+      const known = new Set(this.items.map((track) => track.id))
+      const rawTail = Array.isArray(data.sessionTailIds) ? data.sessionTailIds : []
+      for (const id of rawTail) {
+        if (typeof id === 'string' && known.has(id)) {
+          this.sessionTailIds.add(id)
+        }
+      }
+      return
+    }
+
+    if (this.context.type !== 'search-seed') {
+      return
+    }
+    // Старый search-seed dump в localStorage: hits ≠ continuation.
+    if (this.currentIndex >= 0 && this.currentIndex < this.items.length - 1) {
+      this.items = this.items.slice(0, this.currentIndex + 1)
+      this.rebuildPlayOrder(this.currentIndex)
     }
   }
 }
