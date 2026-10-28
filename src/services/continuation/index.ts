@@ -5,6 +5,7 @@ export {
   resetContinuationSessionForTests,
 } from './ContinuationSession.ts'
 export {
+  buildSearchHitExclusions,
   commitSearchSeedQueue,
   consumeSearchSeedAdvance,
   isSearchSeedPlaybackEnabled,
@@ -23,8 +24,22 @@ export {
   noteSearchPlaybackEvent,
 } from './searchPlaybackDebug.ts'
 export {
+  beginSearchFlowCommand,
+  clearSearchFlowDiagEvents,
+  getSearchFlowDiagEvents,
+  installSearchFlowDiagBridge,
+  noteSearchFlowEvent,
+} from './searchFlowDiag.ts'
+export {
   isContinuationCandidateAvailable,
   type ContinuationCandidate,
   type ContinuationProvider,
   type ContinuationSignal,
 } from './types.ts'
+export {
+  createSearchRecommendationProvider,
+  ensureLibraryContinuation,
+  ensureSearchRecommendation,
+  resetSearchRecommendationRuntimeForTests,
+  type SearchRecommendationRuntimeDeps,
+} from './searchContinuationRuntime.ts'

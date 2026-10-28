@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
+import { devAcceptanceAudioPlugin } from './scripts/vite-dev-acceptance-audio.ts'
 
 const lanCertPath = resolve('.certs/lan-cert.pem')
 const lanKeyPath = resolve('.certs/lan-key.pem')
@@ -43,6 +44,7 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     tailwindcss(),
+    devAcceptanceAudioPlugin(),
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: false,

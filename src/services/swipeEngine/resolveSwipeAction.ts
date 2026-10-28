@@ -9,6 +9,11 @@ export type ResolveSwipeInput = {
   gestureConfig?: GestureConfig
   /** Индекс текущей карточки в колоде (для previous). */
   deckIndex?: number
+  /**
+   * Явный доступ Previous (playback history / peekPrevious).
+   * Если задан — важнее deckIndex (sync-колода после exhausted).
+   */
+  canGoPrevious?: boolean
 }
 
 /**
@@ -19,13 +24,19 @@ export function resolveSwipeAction(input: ResolveSwipeInput): SwipeDecision {
   const config = input.gestureConfig ?? defaultGestureConfig
   const action: SwipeAction = config[input.direction]
   const deckIndex = input.deckIndex ?? 0
+  const canGoPrevious =
+    action !== 'previous'
+      ? true
+      : input.canGoPrevious !== undefined
+        ? input.canGoPrevious
+        : deckIndex > 0
 
   return {
     track: input.track,
     action,
     direction: input.direction,
     requiresCategorySelection: action === 'categorize',
-    canGoPrevious: action === 'previous' ? deckIndex > 0 : true,
+    canGoPrevious,
   }
 }
 

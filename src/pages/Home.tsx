@@ -7,14 +7,25 @@ import { useSwipeFeed } from '../hooks/useSwipeFeed'
 import { getAudioPlayer } from '../services/audioPlayer'
 import { commitCatalogChoice } from '../services/canonical/userOrganization.ts'
 import {
+  beginSearchFlowCommand,
   isSearchSeedPlaybackEnabled,
+  noteSearchFlowEvent,
   searchDeckUsesSeedPlayback,
-  sortingDeckFollowsPlayer,
 } from '../services/continuation/index.ts'
 import { getPlaybackIntent } from '../services/playbackIntent'
 import { getPlaybackQueue } from '../services/playbackQueue'
 import {
-  homeCardTracks,
+  resolveHomeDeckFocusId,
+  resolveHomeDeckTracks,
+} from '../services/recommendation/homeDeck.ts'
+import { isRecommendationExhausted } from '../services/recommendation/sessionState.ts'
+import {
+  activateRecommendationSession,
+  commitRecommendationSeed,
+  getRecommendationSessionMode,
+  pickRecommendationStart,
+} from '../services/recommendation/sessionRuntime.ts'
+import {
   runCardPlay,
   waveHomeView,
   type HomeStage,
@@ -46,11 +57,11 @@ export default function Home() {
   const pendingPlaybackTrack = usePlayerStore((state) => state.pendingTrack)
   const playbackContext = usePlayerStore((state) => state.playbackContext)
   const queue = usePlayerStore((state) => state.queue)
+  const queueIndex = usePlayerStore((state) => state.queueIndex)
   const playing = usePlayerStore((state) => state.playing)
   const playerLoading = usePlayerStore((state) => state.loading || state.buffering)
   const queueLocked = isQueueLockedContext(playbackContext)
   const radioActive = playbackContext.type === 'radio' && playbackContext.id === MY_WAVE_ID
-  const playerTrackId = (pendingPlaybackTrack ?? currentTrack)?.id ?? null
   const audibleTrackId =
     pendingPlaybackTrack && pendingPlaybackTrack.id !== currentTrack?.id
       ? null
@@ -80,57 +91,152 @@ export default function Home() {
   const [categoryResolveKey, setCategoryResolveKey] = useState(0)
   const [categoryCancelKey, setCategoryCancelKey] = useState(0)
 
-  const sortingTracks = useMemo(
-    () =>
-      homeCardTracks({
-        stage: 'sorting',
-        feed: tracks,
-        radioQueue: [],
-        radioActive: false,
-      }),
-    [tracks],
-  )
-  const waveTracks = useMemo(
-    () =>
-      homeCardTracks({
-        stage: 'wave',
-        feed: tracks,
-        radioQueue: queue,
-        radioActive,
-      }),
-    [tracks, queue, radioActive],
-  )
+  const sessionMode = mode === 'search' ? 'search' : 'catalog'
+  // module-flag exhausted перечитываем при смене playing/current (stop после miss).
+  const sessionUiKey = `${playing ? 1 : 0}:${currentTrack?.id ?? ''}:${queueIndex}`
+  const sortingDeck = useMemo(() => {
+    void sessionUiKey
+    return resolveHomeDeckTracks({
+      stage: 'sorting',
+      sessionMode,
+      browseFeed: tracks,
+      queue,
+      queueIndex,
+      currentTrack,
+      pendingTrack: pendingPlaybackTrack,
+      context: playbackContext,
+      recommendationExhausted: isRecommendationExhausted(),
+    })
+  }, [
+    sessionMode,
+    tracks,
+    queue,
+    queueIndex,
+    currentTrack,
+    pendingPlaybackTrack,
+    playbackContext,
+    sessionUiKey,
+  ])
+  const waveDeck = useMemo(() => {
+    void sessionUiKey
+    return resolveHomeDeckTracks({
+      stage: 'wave',
+      sessionMode: 'catalog',
+      browseFeed: tracks,
+      queue,
+      queueIndex,
+      currentTrack,
+      pendingTrack: pendingPlaybackTrack,
+      context: playbackContext,
+      recommendationExhausted: isRecommendationExhausted(),
+    })
+  }, [
+    tracks,
+    queue,
+    queueIndex,
+    currentTrack,
+    pendingPlaybackTrack,
+    playbackContext,
+    sessionUiKey,
+  ])
+  const sortingTracks = sortingDeck.tracks
+  const waveTracks = waveDeck.tracks
+  const playerTrackId = resolveHomeDeckFocusId({
+    pendingTrack: pendingPlaybackTrack,
+    currentTrack,
+    queue,
+    queueIndex,
+    deckSource: stage === 'wave' ? waveDeck.source : sortingDeck.source,
+  })
 
   useEffect(() => {
-    const feed = homeCardTracks({
-      stage: 'sorting',
-      feed: tracks,
-      radioQueue: [],
-      radioActive: false,
-    })
-    const session = useSwipeDeckSessionStore.getState()
-    // Search results — только колода карточек при search-seed; не PlaybackQueue.
-    const allowFeedAsQueue = !(
-      session.mode === 'search' && isSearchSeedPlaybackEnabled()
-    )
+    // Лента карточек ≠ рекомендательная очередь (единый Recommendation Engine).
     const live = getPlaybackQueue().getSnapshot()
     const liveLocked = isQueueLockedContext(live.context)
     if (
       !shouldReplaceHomeQueueWithSwipeFeed({
         queueLocked: queueLocked || liveLocked,
-        feedLength: feed.length,
+        feedLength: tracks.length,
         queueLength: Math.max(live.items.length, usePlayerStore.getState().queue.length),
         contextType: live.context.type,
-        allowFeedAsQueue,
+        allowFeedAsQueue: false,
       })
     ) {
       return
     }
-    setQueue(feed, 0, { type: 'swipe' })
+    setQueue(tracks.filter((track) => !isDemoSourceId(track.sourceId)), 0, { type: 'swipe' })
   }, [tracks, setQueue, queueLocked, mode])
 
+  // После reload: восстановить recommendation mode из persisted PlaybackContext.
+  useEffect(() => {
+    const active = getRecommendationSessionMode()
+    if (playbackContext.type === 'search-seed' && active !== 'search') {
+      activateRecommendationSession('search')
+      return
+    }
+    if (
+      playbackContext.type === 'swipe' &&
+      sessionMode === 'catalog' &&
+      active !== 'swipe'
+    ) {
+      activateRecommendationSession('swipe')
+      return
+    }
+    if (radioActive && active !== 'wave') {
+      activateRecommendationSession('wave')
+    }
+  }, [playbackContext, radioActive, sessionMode])
+
+  // Холодный старт «Свайпы»: одна рекомендация в очередь без autoplay.
+  useEffect(() => {
+    if (mode === 'search') {
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const live = getPlaybackQueue().getSnapshot()
+      if (live.items.length > 0 || isQueueLockedContext(live.context)) {
+        return
+      }
+      const picked = await pickRecommendationStart({ mode: 'swipe' })
+      if (cancelled || !picked.ok) {
+        return
+      }
+      const again = getPlaybackQueue().getSnapshot()
+      if (again.items.length > 0 || isQueueLockedContext(again.context)) {
+        return
+      }
+      commitRecommendationSeed({ mode: 'swipe', track: picked.track })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [mode, tracks])
+
   const playListedTrack = useCallback(
-    (track: Track, list: readonly Track[], nextStage: HomeStage, intent: 'toggle' | 'advance' = 'toggle') => {
+    (track: Track, _list: readonly Track[], nextStage: HomeStage, intent: 'toggle' | 'advance' = 'toggle') => {
+      // Жест вперёд = единый AudioPlayer.next (search / swipe / wave recommendation).
+      if (intent === 'advance') {
+        // exhausted только на конце; после Previous хвост истории снова доступен.
+        const queue = getPlaybackQueue()
+        if (isRecommendationExhausted() && !queue.peekNext()) {
+          noteSearchFlowEvent({
+            source: 'Home.playListedTrack.advance',
+            trackId: track.id,
+            detail: 'exhausted→ignore',
+          })
+          return
+        }
+        beginSearchFlowCommand('Home.playListedTrack.advance')
+        noteSearchFlowEvent({
+          source: 'Home.playListedTrack.advance',
+          trackId: track.id,
+          detail: 'recommendation→AudioPlayer.next',
+        })
+        void getAudioPlayer().next()
+        return
+      }
+
       const state = usePlayerStore.getState()
       const radioReady =
         state.playbackContext.type === 'radio' &&
@@ -158,27 +264,16 @@ export default function Home() {
                 sessionMode: session.mode,
               })
             ) {
-              // Жест «дальше» = тот же continuation, что Next/ended — не следующий hit поиска.
-              if (intent === 'advance') {
-                await getAudioPlayer().next()
-                return
-              }
-              // Явный Play на карточке — новая search-seed сессия.
               await getPlaybackIntent().playSearchTrack({
                 track,
                 query: session.searchQuery ?? '',
+                searchHits: session.tracks ?? [track],
               })
               return
             }
-            const startIndex = list.findIndex((item) => item.id === track.id)
-            if (startIndex < 0) {
-              throw new Error('В ленте нет этой композиции')
-            }
-            await getPlaybackIntent().playFromSwipe({
-              tracks: [...list],
-              startIndex,
-              explicitUserPlay: true,
-            })
+            // Каталог: одна стартовая композиция + recommendation session (не dump ленты).
+            commitRecommendationSeed({ mode: 'swipe', track })
+            await getAudioPlayer().playTrack(track)
           },
           playRadio: async () => {
             const live = usePlayerStore.getState()
@@ -236,11 +331,28 @@ export default function Home() {
     [playListedTrack, waveTracks],
   )
 
-  const navigateWaveTrack = useCallback(
-    (track: Track) => {
-      playListedTrack(track, waveTracks, radioActive ? 'wave' : 'sorting', 'advance')
+  const navigateDeckPlayback = useCallback(
+    (track: Track, direction: 'next' | 'previous', stage: HomeStage) => {
+      if (direction === 'previous') {
+        beginSearchFlowCommand('Home.navigateDeck.previous')
+        noteSearchFlowEvent({
+          source: 'Home.navigateDeck',
+          trackId: track.id,
+          detail: '→AudioPlayer.previous',
+        })
+        void getAudioPlayer().previous()
+        return
+      }
+      playListedTrack(track, stage === 'wave' ? waveTracks : sortingTracks, stage, 'advance')
     },
-    [playListedTrack, radioActive, waveTracks],
+    [playListedTrack, sortingTracks, waveTracks],
+  )
+
+  const navigateWaveTrack = useCallback(
+    (track: Track, direction: 'next' | 'previous' = 'next') => {
+      navigateDeckPlayback(track, direction, radioActive ? 'wave' : 'sorting')
+    },
+    [navigateDeckPlayback, radioActive],
   )
 
   const exitAlbumMode = useCallback(() => {
@@ -251,10 +363,11 @@ export default function Home() {
     })
   }, [sortingTracks])
 
+  // Без id трека в key: иначе каждый Next размонтирует колоду.
   const deckKey =
     mode === 'search'
-      ? `search:${searchQuery ?? ''}:${sortingTracks[0]?.id ?? 'empty'}`
-      : `catalog:${sortingTracks[0]?.id ?? 'empty'}`
+      ? `search:${searchQuery ?? ''}:${sortingDeck.source}`
+      : `catalog:${sortingDeck.source}`
 
   const waveView = waveHomeView({
     radioActive,
@@ -293,7 +406,10 @@ export default function Home() {
                 ? 'bg-[var(--color-accent)] text-white'
                 : 'border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-fg)]',
             ].join(' ')}
-            onClick={() => setStage('sorting')}
+            onClick={() => {
+              setStage('sorting')
+              activateRecommendationSession('swipe')
+            }}
           >
             Свайпы
           </button>
@@ -307,7 +423,12 @@ export default function Home() {
                 ? 'bg-[var(--color-accent)] text-white'
                 : 'border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-fg)]',
             ].join(' ')}
-            onClick={() => setStage('wave')}
+            onClick={() => {
+              setStage('wave')
+              if (radioActive) {
+                activateRecommendationSession('wave')
+              }
+            }}
           >
             Моя волна
           </button>
@@ -358,13 +479,56 @@ export default function Home() {
           </p>
         ) : error ? (
           <p className="py-20 text-center text-sm text-rose-600">{error}</p>
+        ) : sortingDeck.emptyReason === 'playback-empty' ? (
+          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-8 text-center">
+            <p className="text-sm text-[var(--color-fg)]">
+              Нет доступных рекомендаций для продолжения.
+            </p>
+            <p className="mt-1 text-sm text-[var(--color-muted)]">
+              Выберите другой трек в поиске или подключите источник.
+            </p>
+          </div>
+        ) : sortingDeck.emptyReason === 'playback-exhausted' ? (
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-center sm:text-left">
+              <p className="text-sm text-[var(--color-fg)]">Рекомендации закончились.</p>
+              <p className="mt-1 text-xs text-[var(--color-muted)]">
+                Next не подставляет результаты поиска. Выберите другой трек или сбросьте поиск.
+              </p>
+            </div>
+            <SwipeDeck
+              key={`${deckKey}:exhausted`}
+              tracks={sortingTracks}
+              gestureConfig={gestureConfig}
+              categoryResolveKey={categoryResolveKey}
+              categoryCancelKey={categoryCancelKey}
+              playerTrackId={playerTrackId}
+              playerIsPlaying={false}
+              syncWithPlayer={sortingDeck.syncWithPlayer}
+              advanceAtEnd={false}
+              playback={playback}
+              audibleTrackId={null}
+              startingTrackId={null}
+              nowPlaying={currentTrack}
+              playbackContextType={playbackContext.type}
+              onTogglePlay={playSortingTrack}
+              onDeckNavigate={() => {
+                /* exhausted: Next/жест вперёд игнорируются */
+              }}
+              onCategorize={setPendingTrack}
+            />
+          </div>
         ) : sortingTracks.length === 0 ? (
           <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-8 text-center">
             <p className="text-sm text-[var(--color-fg)]">
-              Нет музыки из подключённых источников.
+              {mode === 'search'
+                ? 'Ничего не найдено.'
+                : 'Нет музыки из подключённых источников.'}
             </p>
             <p className="mt-1 text-sm text-[var(--color-muted)]">
-              Демо-библиотека не попадает в ленту. Подключите свой источник.
+              {mode === 'search'
+                ? 'Измените запрос или сбросьте поиск.'
+                : 'Демо-библиотека не попадает в ленту. Подключите свой источник.'}
             </p>
           </div>
         ) : (
@@ -376,17 +540,17 @@ export default function Home() {
             categoryCancelKey={categoryCancelKey}
             playerTrackId={playerTrackId}
             playerIsPlaying={playing}
-            syncWithPlayer={sortingDeckFollowsPlayer({
-              radioActive,
-              contextType: playbackContext.type,
-            })}
+            syncWithPlayer={sortingDeck.syncWithPlayer}
+            advanceAtEnd={sortingDeck.advanceAtEnd}
             playback={playback}
             audibleTrackId={audibleTrackId}
             startingTrackId={startingTrackId}
             nowPlaying={pendingPlaybackTrack ?? currentTrack}
             playbackContextType={playbackContext.type}
             onTogglePlay={playSortingTrack}
-            onDeckNavigate={(track) => playListedTrack(track, sortingTracks, 'sorting', 'advance')}
+            onDeckNavigate={(track, direction) =>
+              navigateDeckPlayback(track, direction, 'sorting')
+            }
             onCategorize={setPendingTrack}
           />
         )}
@@ -398,21 +562,58 @@ export default function Home() {
 
       {waveView === 'deck' ? (
         <div className="home-deck-pane" hidden={stage !== 'wave'}>
-          <SwipeDeck
-            tracks={waveTracks}
-            gestureConfig={gestureConfig}
-            categoryResolveKey={categoryResolveKey}
-            categoryCancelKey={categoryCancelKey}
-            playerTrackId={playerTrackId}
-            playerIsPlaying={playing}
-            syncWithPlayer
-            playback={playback}
-            audibleTrackId={audibleTrackId}
-            startingTrackId={startingTrackId}
-            onTogglePlay={playWaveTrack}
-            onDeckNavigate={navigateWaveTrack}
-            onCategorize={setPendingTrack}
-          />
+          {waveDeck.emptyReason === 'playback-empty' ? (
+            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-8 text-center">
+              <p className="text-sm text-[var(--color-fg)]">
+                Волна остановилась: нет следующей рекомендации.
+              </p>
+            </div>
+          ) : waveDeck.emptyReason === 'playback-exhausted' ? (
+            <div className="space-y-3">
+              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-center sm:text-left">
+                <p className="text-sm text-[var(--color-fg)]">Рекомендации волны закончились.</p>
+              </div>
+              <SwipeDeck
+                tracks={waveTracks}
+                gestureConfig={gestureConfig}
+                categoryResolveKey={categoryResolveKey}
+                categoryCancelKey={categoryCancelKey}
+                playerTrackId={playerTrackId}
+                playerIsPlaying={false}
+                syncWithPlayer={waveDeck.syncWithPlayer}
+                advanceAtEnd={false}
+                playback={playback}
+                audibleTrackId={null}
+                startingTrackId={null}
+                nowPlaying={currentTrack}
+                playbackContextType={playbackContext.type}
+                onTogglePlay={playWaveTrack}
+                onDeckNavigate={() => {
+                  /* exhausted wave */
+                }}
+                onCategorize={setPendingTrack}
+              />
+            </div>
+          ) : (
+            <SwipeDeck
+              tracks={waveTracks}
+              gestureConfig={gestureConfig}
+              categoryResolveKey={categoryResolveKey}
+              categoryCancelKey={categoryCancelKey}
+              playerTrackId={playerTrackId}
+              playerIsPlaying={playing}
+              syncWithPlayer={waveDeck.syncWithPlayer}
+              advanceAtEnd={waveDeck.advanceAtEnd}
+              playback={playback}
+              audibleTrackId={audibleTrackId}
+              startingTrackId={startingTrackId}
+              nowPlaying={pendingPlaybackTrack ?? currentTrack}
+              playbackContextType={playbackContext.type}
+              onTogglePlay={playWaveTrack}
+              onDeckNavigate={navigateWaveTrack}
+              onCategorize={setPendingTrack}
+            />
+          )}
         </div>
       ) : stage === 'wave' ? (
         <WaveStartCard

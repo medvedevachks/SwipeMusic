@@ -109,6 +109,11 @@ export class ContinuationSession {
   flush(): Promise<void> {
     return this.inflightPromise ?? Promise.resolve()
   }
+
+  /** Есть незавершённый prepareContinuation. */
+  isBusy(): boolean {
+    return this.inflightPromise !== null
+  }
 }
 
 /** Пустой порт: кандидатов нет, поиск по исполнителю не вызывается. */

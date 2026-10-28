@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { canonicalItemForTrack } from '../../services/canonical/selectors'
+import { beginSearchFlowCommand } from '../../services/continuation/searchFlowDiag.ts'
 import { openManualSourceAlternatives } from '../../services/runtimeFallback/fallbackUxRuntime'
 import { usePlaybackFallbackUxStore } from '../../store/playbackFallbackUxStore'
 import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore'
@@ -164,7 +165,10 @@ export default function BottomPlayer() {
                 className="deck-key deck-key-side"
                 aria-label="Следующий"
                 disabled={!canControl}
-                onClick={() => void next()}
+                onClick={() => {
+                  beginSearchFlowCommand('BottomPlayer.Next')
+                  void next()
+                }}
               >
                 <NextIcon className="h-4 w-4" />
               </button>

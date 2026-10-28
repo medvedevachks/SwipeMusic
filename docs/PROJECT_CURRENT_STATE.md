@@ -5,10 +5,10 @@
 
 | Поле | Значение |
 |---|---|
-| Дата снимка | 2026-10-28 |
+| Дата снимка | 2026-10-28 (RELEASE-RECOMMENDATION-13) |
 | Канонический репозиторий | https://github.com/medvedevachks/SwipeMusic |
 | Ветка снимка | `feature/deploy-windows-01` |
-| Проверенный HEAD | `3dc112d3333e46c910693a9d4a376a7bd5f96964` |
+| Проверенный HEAD | см. Git после commit RELEASE-RECOMMENDATION-13 (предок baseline `b403874`) |
 | Исторический upstream | https://github.com/r-sh-galimov/SwipeMusic |
 
 **Легенда источников фактов**
@@ -126,15 +126,39 @@ UI (pages / BottomPlayer)
 
 ---
 
-## 8. «Моя волна»
+## 8. Recommendation Engine (единый runtime)
 
-Подбор из библиотеки / лайков: `src/services/personalRadio/recommend.ts` (`buildPersonalRadio`), запуск `myWaveRuntime.ts`, `toggleMyWave.ts`.
+Единый API: `src/services/recommendation` → `recommendNext` + session/advance.
 
-- По умолчанию selection = `library` (`radioSelection.ts`).
-- **Taste-radio OFF** в обычном UI; DEV-override только через `sessionStorage` и `import.meta.env.DEV`.
-- Continuation поиска **не** вызывает `buildPersonalRadio`.
+| Часть | Файлы |
+|---|---|
+| Ядро | `engine.ts`, `types.ts`, `identity.ts` |
+| Continuation bridge | `continuationBridge.ts` → `ContinuationProvider` |
+| Session | `sessionRuntime.ts`, `sessionState.ts` — mode `search` \| `swipe` \| `wave` |
+| Advance | `advance.ts` → `consumeRecommendationAdvance` / `resolveRecommendationAdvance`; очередь через `enqueueRecommendationAdvance` |
+| AudioPlayer | `playRecommendationAdvance` (Next / ended); сериализация быстрых Next |
 
-Известная проблема качества волны (**план**, RADIO-08): повторы и нерелевантные треки, в т.ч. повторяющийся «Комсомольск-на-Амуре» — **не исправлено**.
+- Режимы `swipe` | `wave`: одинаковая стратегия (`sameRecommendationStrategy`).
+- Search-seed: тот же advance; `ensureSearchRecommendation` ставит provider + mode `search`.
+- Swipe cold start: `Home` → `pickRecommendationStart` + `commitRecommendationSeed` (**без** autoplay).
+- Wave: `myWaveRuntime.toggleLiveMyWave` → тот же pick/commit (`mode: 'wave'`); `buildPersonalRadio` на живом пути **не** вызывается (код в `recommend.ts` / `toggleMyWave.ts` сохранён).
+- Лента карточек Home **не** дампится в `PlaybackQueue` (`allowFeedAsQueue: false`).
+- **HOME-CARD-SYNC:** `resolveHomeDeckTracks` — browse feed vs playback-колода из очереди плеера; `SwipeDeck.advanceAtEnd` для Next на последней карточке. Search hits не переписываются рекомендациями.
+- **Exhausted:** miss → `markRecommendationExhausted`, last track сохраняется (без `queueIndex=-1`); UI «Рекомендации закончились», Next не подставляет search hits.
+- **DEV acceptance:** источник `dev-acceptance` только при `import.meta.env.DEV && VITE_DEV_ACCEPTANCE=true`; WAV в `.data/dev-acceptance/audio` через Vite middleware (не `public/`, не в dist). Backend DEV: `DATABASE_PATH=.data/dev-acceptance/swipemusic.sqlite` (не `dev-owner` / default). `scripts/dev-acceptance-prepare.mts` сохраняет `PASSWORD.txt`+hash при повторном запуске (`--rotate-password` для смены); пароль только ASCII alnum, файл **без** trailing newline (иначе Ctrl+A → 401). DEV diag: `GET /api/auth/dev-login-diag`, файл `.data/dev-acceptance/last-login-diag.json` (без секретов).
+- **Recommendation Engine:** `seedArtists` — liked/taste раньше current; ранжирование штрафует same-artist dump. DEV-каталог: выдача «Сплин» (5) + другие исполнители; prepare сидит сильные лайки Кино/Земфира/Би-2/…
+- **Search hard-exclude:** при `search-seed` вся исходная выдача → `context.hardExcludeHits` (persist в queue); Next/ended/gesture не берут эти треки; swipe/wave/album не наследуют.
+- Album / playlist: последовательный `queue.next`, не recommendation advance.
+- Пустой вкус / нет источников → miss (`emptyReason`), не «персонализированный» hit.
+- DEV-диагностика search-flow сохранена.
+
+Интеграционные тесты: `recommendation.integration.test.ts` (A–I), `searchRecommendation.integration.test.ts`.
+
+## 8b. «Моя волна» (legacy)
+
+`buildPersonalRadio` / `toggleMyWave` остаются в дереве для unit-тестов Personal Radio; UI и live runtime идут через Recommendation Engine (§8).
+
+Известная проблема качества (**план**, RADIO-08): повторы и нерелевантные треки — **не исправлено** на уровне ранжирования ядра.
 
 ---
 
@@ -146,7 +170,7 @@ UI (pages / BottomPlayer)
 | Поведение ON | Очередь = один выбранный трек; дальше кандидаты из канонической библиотеки | `commitSearchSeedQueue`, `libraryContinuation.ts`, `ContinuationSession.ts`, `searchContinuationRuntime.ts` |
 | Поведение OFF | Очередь = список результатов поиска (legacy) | `planSearchPlayback` |
 | UI | Search / Home search-deck | `src/pages/Search.tsx`, `src/pages/Home.tsx` |
-| Advance | `AudioPlayer` next/ended → `consumeSearchSeedAdvance` | `AudioPlayer.ts` |
+| Advance | `AudioPlayer` next/ended → `playRecommendationAdvance` → `resolveRecommendationAdvance` (search-seed ⊂ recommendation) | `AudioPlayer.ts`, `recommendation/advance.ts`; `consumeSearchSeedAdvance` — тонкая обёртка |
 | Queue provenance | Persist/restore пишет `sessionTailIds`. Legacy search-seed без поля: хвост hits срезается до current (не объявлять dump рекомендацией). Album/playlist/swipe/radio без поля — полный список | `PlaybackQueue.ts` |
 
 **Команды сборки**
@@ -184,25 +208,22 @@ Last.fm и MusicBrainz для рекомендаций **не** подключа
 
 - Remote `origin`: `medvedevachks/SwipeMusic`.
 - Ветка: `feature/deploy-windows-01`.
-- HEAD снимка: ветка `feature/deploy-windows-01` (search-seed + SEARCH-FLOW-04 persist `sessionTailIds`).
-- SEARCH-CONTINUATION-PROD (`3dc112d`) и search-flow фиксы **в ветке**; на production ещё не выкатывались (**отчёт**).
-- Локальная приёмка SEARCH-FLOW-04: **377** теста PASS, lint/build OFF и ON.
-- Baseline внутри истории ветки: `14fc4cb` (Media Session) — предок `3dc112d`.
+- Код: Recommendation Engine + HOME-CARD-SYNC + SEARCH-EXCLUSION (`hardExcludeHits`) + PLAYBACK-HISTORY (`historyIndex`) + DEV acceptance (только `DEV && VITE_DEV_ACCEPTANCE`).
+- Production build для выкладки: **`VITE_SEARCH_SEED_PLAYBACK=true`** (без флага search-seed OFF).
+- DEV-ПК `KOMPUTER`: путь `C:\SwipeMusic` **недоступен** → frontend deploy на S1 только с консоли Server.
 
-### 11.2 Production (**только операторский отчёт**, с DEV-ПК путь `C:\SwipeMusic` недоступен)
+### 11.2 Production (**отчёт + probe с KOMPUTER**)
 
-| Параметр | Значение из отчёта |
+| Параметр | Значение |
 |---|---|
-| ОС | Windows Server 2019 |
+| ОС | Windows Server 2019 (S1) |
 | Каталог | `C:\SwipeMusic` |
 | Публичный URL | `https://app.swipe-music.site:8443` |
 | Backend | `127.0.0.1:8787` за Caddy |
-| Установленный код | `14fc4cb` |
-| Backup | `C:\SwipeMusic\backups\release-20261028-002505` |
-| `3dc112d` | **не** развёрнут |
-| search-seed | OFF |
-| Media Session | в установленном коде есть; руль не проверен |
-| SQLite / secrets | вне Git, сохранять при обновлениях |
+| Установленный код (до RELEASE-13) | `b403874` (**отчёт** владельца); search-seed OFF |
+| HTTPS / health (probe KOMPUTER) | 200 / `{"ok":true}` |
+| SQLite / secrets | вне Git; frontend-only релиз **не** трогает |
+| start-backend.ps1 preferredNode | локальная правка S1 — **не** перезаписывать |
 
 Не путать: успешный `/api/health` ≠ новый frontend установлен.
 
@@ -212,11 +233,11 @@ Last.fm и MusicBrainz для рекомендаций **не** подключа
 
 | Приоритет | Задача | Суть |
 |---|---|---|
-| **1** | RELEASE-SEARCH этапы 2/3 | На сервере: backup → ff до `3dc112d` → `npm run build` **без** флага → smoke (вход, Яндекс, волна, аналитика, taste 401/owner). Затем, только после живого Яндекса: сохранить OFF-dist, пересобрать с `VITE_SEARCH_SEED_PLAYBACK=true`, проверить PWA/SW, цепочку поиска. Откат search-seed = вернуть OFF-статику. |
-| **2** | RADIO-08 | Убрать нерелевантные и повторяющиеся треки «Моей волны» (в т.ч. «Комсомольск-на-Амуре»). |
+| **1** | RELEASE-RECOMMENDATION-13 deploy на S1 | На Server: backup `dist` → `git pull` до release SHA → `VITE_SEARCH_SEED_PLAYBACK=true` `npm run build` → staging swap → smoke. Откат = вернуть backup dist. **Без** restart backend/Caddy/AD. Реальный Yandex playback — только владелец. |
+| **2** | RADIO-08 | Убрать нерелевантные и повторяющиеся треки волны/свайпов на уровне ранжирования ядра. |
 | **3** | MEDIA-REMOTE-02 | Проверить физические кнопки руля на Android-магнитоле. |
 
-Не начинать RADIO-08 и не включать search-seed незаметно. Car Mode / VK / Zaycev — только по отдельному решению.
+Не начинать RADIO-08 до закрытия пользовательской проверки RELEASE-13. Car Mode / VK / Zaycev — только по отдельному решению.
 
 ---
 
@@ -253,8 +274,8 @@ Last.fm и MusicBrainz для рекомендаций **не** подключа
 
 ## 15. Быстрый чеклист для нового агента
 
-1. `git rev-parse HEAD` → ожидать `3dc112d` (или новее по явной задаче).
+1. `git rev-parse HEAD` / `git status` — сверить с этим снимком и задачей.
 2. Прочитать этот файл целиком.
-3. Не деплоить на Server без задачи RELEASE и доступа к `C:\SwipeMusic`.
-4. Не считать RADIO-08 и руль закрытыми.
-5. Application-секреты и `.data/*.sqlite` не читать в отчёты и не коммитить.
+3. Не деплоить на Server без задачи RELEASE и доступа к `C:\SwipeMusic` **на S1**.
+4. Не считать RADIO-08, руль и «реальный Yandex PASS» закрытыми без проверки владельца.
+5. Application-секреты, `.data/**`, `PASSWORD.txt` не читать в отчёты и не коммитить.

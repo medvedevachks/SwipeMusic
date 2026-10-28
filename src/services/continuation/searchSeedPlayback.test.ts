@@ -896,7 +896,7 @@ test('search seed uses the existing player singleton and does not construct anot
   assert.match(player, /export function getAudioPlayer\(\)/)
   assert.equal(player.split('new AudioPlayer').length - 1, 1)
   assert.equal(player.includes('new Audio('), false)
-  assert.match(player, /playSearchSeedAdvance/)
+  assert.match(player, /playRecommendationAdvance/)
   assert.match(intent, /async playSearchTrack/)
   assert.match(intent, /getAudioPlayer\(\)/)
   assert.equal(intent.includes('new AudioPlayer'), false)

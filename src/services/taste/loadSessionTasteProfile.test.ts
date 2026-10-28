@@ -22,7 +22,10 @@ test('session taste profile stays local to the signed-in response and the releas
   const radio = readFileSync(new URL('../personalRadio/radioSelection.ts', import.meta.url), 'utf8')
   const wave = readFileSync(new URL('../personalRadio/myWaveRuntime.ts', import.meta.url), 'utf8')
   assert.match(radio, /import\.meta\.env\?\.DEV !== true/)
-  assert.match(wave, /selection === 'taste'/)
+  // Live wave path uses Recommendation Engine (not legacy selection === 'taste').
+  assert.match(wave, /pickRecommendationStart/)
+  assert.match(wave, /commitRecommendationSeed/)
+  assert.match(wave, /mode: 'wave'/)
   const previous = globalThis.fetch
   const calls: string[] = []
   setSearchSeedPlaybackEnabled(false)

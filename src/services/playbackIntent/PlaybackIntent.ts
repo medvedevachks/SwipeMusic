@@ -4,7 +4,8 @@ import {
   type PlaybackContext,
 } from '../../types/playbackContext'
 import { commitSearchSeedQueue, getContinuationSession } from '../continuation/index.ts'
-import { ensureLibraryContinuation } from '../continuation/searchContinuationRuntime.ts'
+import { noteSearchFlowEvent } from '../continuation/searchFlowDiag.ts'
+import { ensureSearchRecommendation } from '../continuation/searchContinuationRuntime.ts'
 import { getAudioPlayer } from '../audioPlayer'
 import { getPlaybackQueue } from '../playbackQueue'
 import type {
@@ -68,6 +69,16 @@ export class PlaybackIntent {
 
     const track = tracks[startIndex]!
     const player = getAudioPlayer()
+    const before = getPlaybackQueue().getSnapshot()
+    noteSearchFlowEvent({
+      source: 'PlaybackIntent.playFromSwipe',
+      contextBefore: before.context.type,
+      queueLengthBefore: before.items.length,
+      currentIndex: before.currentIndex,
+      trackId: track.id,
+      nextSource: 'search-result',
+      detail: `explicit=${Boolean(input.explicitUserPlay)};list=${tracks.length}`,
+    })
     player.setQueue(tracks, startIndex, { type: 'swipe' })
 
     if (
@@ -104,10 +115,21 @@ export class PlaybackIntent {
       return
     }
     const player = getAudioPlayer()
-    ensureLibraryContinuation()
+    const before = getPlaybackQueue().getSnapshot()
+    noteSearchFlowEvent({
+      source: 'PlaybackIntent.playSearchTrack',
+      contextBefore: before.context.type,
+      queueLengthBefore: before.items.length,
+      currentIndex: before.currentIndex,
+      trackId: input.track.id,
+      nextSource: 'continuation',
+      detail: 'commit-search-seed',
+    })
+    ensureSearchRecommendation()
     commitSearchSeedQueue(getPlaybackQueue(), getContinuationSession(), {
       track: input.track,
       query: input.query,
+      searchHits: input.searchHits,
     })
     await player.playTrack(input.track)
   }

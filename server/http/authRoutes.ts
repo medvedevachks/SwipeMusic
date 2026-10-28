@@ -23,6 +23,12 @@ import {
   validateRegister,
   validateResetPassword,
 } from '../auth/validation.ts'
+import {
+  devLoginDiagHeader,
+  getLastDevLoginDiag,
+  isDevAuthDiagEnabled,
+  recordDevLoginDiag,
+} from '../auth/devLoginDiag.ts'
 import type { AppConfig } from '../config/env.ts'
 import type { MailSender } from '../mail/MailSender.ts'
 import { resolveClientIp } from './clientIp.ts'
@@ -179,7 +185,22 @@ export async function handleAuthRequest(
     return
   }
 
+  if (method === 'GET' && path === '/api/auth/dev-login-diag') {
+    if (!isDevAuthDiagEnabled(context.config.nodeEnv)) {
+      sendJson(res, 404, { error: 'NOT_FOUND' })
+      return
+    }
+    sendJson(res, 200, {
+      enabled: true,
+      last: getLastDevLoginDiag(),
+      databasePath: context.config.databasePath,
+      pid: process.pid,
+    })
+    return
+  }
+
   if (method === 'POST' && path === '/api/auth/login') {
+    const diagOn = isDevAuthDiagEnabled(context.config.nodeEnv)
     let body: unknown
     try {
       body = await readBody(req)
@@ -190,12 +211,54 @@ export async function handleAuthRequest(
 
     const parsed = validateLogin(body)
     if (!parsed.ok) {
+      if (diagOn) {
+        const diag = recordDevLoginDiag({
+          httpStatus: 400,
+          errorCode: 'VALIDATION',
+          userExists: null,
+          passwordOk: null,
+          rateLimited: false,
+          databasePath: context.config.databasePath,
+          passwordLength: null,
+          passwordHadWhitespaceEdges: null,
+        })
+        sendJson(res, 400, { error: 'VALIDATION', fields: parsed.fields }, devLoginDiagHeader(diag))
+        return
+      }
       sendJson(res, 400, { error: 'VALIDATION', fields: parsed.fields })
       return
     }
 
+    const submittedPassword = parsed.value.password
+    const passwordMeta = {
+      passwordLength: submittedPassword.length,
+      passwordHadWhitespaceEdges:
+        submittedPassword.length !== submittedPassword.trim().length,
+    }
+
     const loginAttempt = context.loginLimiter.consume(clientIp(req), parsed.value.email)
     if (!loginAttempt.allowed) {
+      if (diagOn) {
+        const diag = recordDevLoginDiag({
+          httpStatus: 429,
+          errorCode: 'RATE_LIMITED',
+          userExists: null,
+          passwordOk: null,
+          rateLimited: true,
+          databasePath: context.config.databasePath,
+          ...passwordMeta,
+        })
+        sendJson(
+          res,
+          429,
+          { error: 'RATE_LIMITED' },
+          {
+            'Retry-After': String(loginAttempt.retryAfterSeconds),
+            ...devLoginDiagHeader(diag),
+          },
+        )
+        return
+      }
       sendRateLimited(res, loginAttempt.retryAfterSeconds)
       return
     }
@@ -204,7 +267,7 @@ export async function handleAuthRequest(
     const hash = user?.passwordHash ?? DUMMY_PASSWORD_HASH
     let passwordOk = false
     try {
-      passwordOk = await verifyPassword(parsed.value.password, hash, context.passwordWork)
+      passwordOk = await verifyPassword(submittedPassword, hash, context.passwordWork)
     } catch (error) {
       if (error instanceof PasswordBusyError) {
         sendBusy(res)
@@ -213,12 +276,38 @@ export async function handleAuthRequest(
       throw error
     }
     if (!user || !passwordOk) {
+      if (diagOn) {
+        const diag = recordDevLoginDiag({
+          httpStatus: 401,
+          errorCode: 'INVALID_CREDENTIALS',
+          userExists: Boolean(user),
+          passwordOk,
+          rateLimited: false,
+          databasePath: context.config.databasePath,
+          ...passwordMeta,
+        })
+        sendJson(res, 401, { error: 'INVALID_CREDENTIALS' }, devLoginDiagHeader(diag))
+        return
+      }
       sendJson(res, 401, { error: 'INVALID_CREDENTIALS' })
       return
     }
 
     const { token } = sessions.create(user.id)
     res.setHeader('Set-Cookie', serializeSessionCookie(token, context.config))
+    if (diagOn) {
+      const diag = recordDevLoginDiag({
+        httpStatus: 200,
+        errorCode: null,
+        userExists: true,
+        passwordOk: true,
+        rateLimited: false,
+        databasePath: context.config.databasePath,
+        ...passwordMeta,
+      })
+      sendJson(res, 200, { user: toPublicUser(user) }, devLoginDiagHeader(diag))
+      return
+    }
     sendJson(res, 200, { user: toPublicUser(user) })
     return
   }

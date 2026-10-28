@@ -8,7 +8,22 @@ import type { Track } from '../../types/track'
 import { getPlaybackResolver } from '../playbackResolver'
 import type { PlaybackCandidate } from '../playbackResolver'
 import { getContinuationSession } from '../continuation/ContinuationSession.ts'
-import { consumeSearchSeedAdvance } from '../continuation/searchSeedPlayback.ts'
+import { noteSearchFlowEvent } from '../continuation/searchFlowDiag.ts'
+import {
+  isRecommendationAdvanceContext,
+  prepareRecommendationFollowUp,
+  resolveRecommendationAdvance,
+} from '../recommendation/advance.ts'
+import {
+  clearRecommendationExhausted,
+  isRecommendationExhausted,
+  markRecommendationExhausted,
+} from '../recommendation/sessionState.ts'
+import {
+  getRecommendationAdvanceEpoch,
+  invalidateRecommendationAdvance,
+} from '../recommendation/advanceEpoch.ts'
+import { enqueueRecommendationAdvance } from '../recommendation/sessionRuntime.ts'
 import { reportPlayback } from '../playbackAnalytics/report.ts'
 import { getPlaybackQueue } from '../playbackQueue'
 import {
@@ -317,6 +332,18 @@ export class AudioPlayer {
   private adoptRequestedTrack(track: Track): void {
     const queue = getPlaybackQueue()
     if (!queue.getItems().some((item) => item.id === track.id)) {
+      const before = queue.getSnapshot()
+      noteSearchFlowEvent({
+        source: 'AudioPlayer.adoptRequestedTrack',
+        contextBefore: before.context.type,
+        contextAfter: 'none',
+        queueLengthBefore: before.items.length,
+        queueLengthAfter: 1,
+        currentIndex: before.currentIndex,
+        trackId: track.id,
+        nextSource: 'unknown',
+        detail: 'track-missing-from-queue→setQueue(none)',
+      })
       queue.setQueue([track], 0, { type: 'none' })
     } else {
       queue.focusTrack(track.id)
@@ -439,6 +466,19 @@ export class AudioPlayer {
         buffering: false,
         error: null,
       })
+      {
+        const snap = getPlaybackQueue().getSnapshot()
+        noteSearchFlowEvent({
+          source: 'AudioPlayer.playStart',
+          contextBefore: snap.context.type,
+          contextAfter: snap.context.type,
+          queueLengthBefore: snap.items.length,
+          queueLengthAfter: snap.items.length,
+          currentIndex: snap.currentIndex,
+          trackId: track.id,
+          detail: 'audible-start',
+        })
+      }
       reportPlayback({
         type: 'audible',
         sourceId: track.sourceId,
@@ -581,13 +621,36 @@ export class AudioPlayer {
   }
 
   async next(): Promise<void> {
+    const queue = getPlaybackQueue()
+    const before = queue.getSnapshot()
+    noteSearchFlowEvent({
+      source: 'AudioPlayer.next',
+      contextBefore: before.context.type,
+      queueLengthBefore: before.items.length,
+      currentIndex: before.currentIndex,
+      trackId: queue.current()?.id ?? null,
+      detail: `peekNext=${queue.peekNext()?.id ? 'yes' : 'no'}`,
+    })
     reportPlayback({
       type: 'skip',
       reason: 'next',
       positionMs: Math.max(0, Math.round(this.state.currentTime * 1000)),
     })
-    if (getPlaybackQueue().getPlaybackContext().type === 'search-seed') {
-      await this.playSearchSeedAdvance(false)
+    if (isRecommendationAdvanceContext(queue.getPlaybackContext())) {
+      // После Previous снова можно идти по хвосту истории; exhausted только на самом конце.
+      if (isRecommendationExhausted() && !queue.peekNext()) {
+        noteSearchFlowEvent({
+          source: 'AudioPlayer.next',
+          contextBefore: before.context.type,
+          trackId: queue.current()?.id ?? null,
+          detail: 'exhausted→ignore',
+        })
+        return
+      }
+      if (isRecommendationExhausted() && queue.peekNext()) {
+        clearRecommendationExhausted()
+      }
+      await this.playRecommendationAdvance(false)
       return
     }
     const holder: { track: Track | null } = { track: null }
@@ -604,6 +667,18 @@ export class AudioPlayer {
       })
       return
     }
+    const after = getPlaybackQueue().getSnapshot()
+    noteSearchFlowEvent({
+      source: 'AudioPlayer.next→queue.next',
+      contextBefore: before.context.type,
+      contextAfter: after.context.type,
+      queueLengthBefore: before.items.length,
+      queueLengthAfter: after.items.length,
+      currentIndex: after.currentIndex,
+      trackId: holder.track.id,
+      nextSource: 'queue',
+      detail: 'non-recommendation path',
+    })
     await this.playTrack(holder.track)
   }
 
@@ -619,6 +694,11 @@ export class AudioPlayer {
       }
       return
     }
+
+    // Сброс prefetch + inflight Next: быстрое Previous не должно проиграть устаревшую рекомендацию.
+    invalidateRecommendationAdvance()
+    getContinuationSession().cancel()
+    clearRecommendationExhausted()
 
     const track = getPlaybackQueue().previous()
     if (!track) {
@@ -663,8 +743,30 @@ export class AudioPlayer {
   }
 
   private async advanceFromEnded(): Promise<void> {
-    if (getPlaybackQueue().getPlaybackContext().type === 'search-seed') {
-      await this.playSearchSeedAdvance(true)
+    const queue = getPlaybackQueue()
+    const before = queue.getSnapshot()
+    noteSearchFlowEvent({
+      source: 'AudioPlayer.advanceFromEnded',
+      contextBefore: before.context.type,
+      queueLengthBefore: before.items.length,
+      currentIndex: before.currentIndex,
+      trackId: queue.current()?.id ?? null,
+      detail: 'ended',
+    })
+    if (isRecommendationAdvanceContext(queue.getPlaybackContext())) {
+      if (isRecommendationExhausted() && !queue.peekNext()) {
+        noteSearchFlowEvent({
+          source: 'AudioPlayer.advanceFromEnded',
+          contextBefore: before.context.type,
+          trackId: queue.current()?.id ?? null,
+          detail: 'exhausted→ignore',
+        })
+        return
+      }
+      if (isRecommendationExhausted() && queue.peekNext()) {
+        clearRecommendationExhausted()
+      }
+      await this.playRecommendationAdvance(true)
       return
     }
     const track = getPlaybackQueue().next({ fromEnded: true })
@@ -678,34 +780,124 @@ export class AudioPlayer {
       })
       return
     }
+    noteSearchFlowEvent({
+      source: 'AudioPlayer.advanceFromEnded→queue.next',
+      contextBefore: before.context.type,
+      contextAfter: getPlaybackQueue().getPlaybackContext().type,
+      queueLengthAfter: getPlaybackQueue().getItems().length,
+      currentIndex: getPlaybackQueue().getSnapshot().currentIndex,
+      trackId: track.id,
+      nextSource: 'queue',
+      detail: 'non-recommendation ended',
+    })
     await this.playTrack(track)
   }
 
   /**
-   * Продолжение одиночного трека из поиска.
-   * Нет кандидата — остановка без перехода к соседнему результату выдачи.
+   * Единый advance для search-seed / swipe / wave recommendation session.
+   * Сериализует быстрые Next и ждёт inflight prepare (гонка INTEGRATION-02).
    */
-  private async playSearchSeedAdvance(fromEnded: boolean): Promise<void> {
-    const session = getContinuationSession()
-    await session.flush()
-    const previousId = getPlaybackQueue().current()?.id ?? null
-    const track = consumeSearchSeedAdvance(getPlaybackQueue(), session, {
-      fromEnded,
-    })
-    if (!track) {
+  private async playRecommendationAdvance(fromEnded: boolean): Promise<void> {
+    const epoch = getRecommendationAdvanceEpoch()
+    let advanced: {
+      track: Track
+      fromId: string | null
+      walkingHistory: boolean
+    } | null = null
+    try {
+      advanced = await enqueueRecommendationAdvance(async () => {
+        if (epoch !== getRecommendationAdvanceEpoch()) {
+          return null
+        }
+        const session = getContinuationSession()
+        const queue = getPlaybackQueue()
+        const before = queue.getSnapshot()
+        const fromId = queue.current()?.id ?? null
+        // Уже есть трек впереди в истории/хвосте — Recommendation Engine не зовём.
+        const walkingHistory = Boolean(queue.peekNext())
+        noteSearchFlowEvent({
+          source: 'AudioPlayer.playRecommendationAdvance',
+          contextBefore: before.context.type,
+          queueLengthBefore: before.items.length,
+          currentIndex: before.currentIndex,
+          trackId: fromId,
+          detail: fromEnded
+            ? walkingHistory
+              ? 'fromEnded:history'
+              : 'fromEnded'
+            : walkingHistory
+              ? 'fromNext:history'
+              : 'fromNext',
+        })
+        const resolved = await resolveRecommendationAdvance(queue, session, { fromEnded })
+        if (epoch !== getRecommendationAdvanceEpoch()) {
+          return null
+        }
+        if (!resolved) {
+          noteSearchFlowEvent({
+            source: 'AudioPlayer.playRecommendationAdvance',
+            contextBefore: before.context.type,
+            contextAfter: queue.getPlaybackContext().type,
+            queueLengthAfter: queue.getItems().length,
+            currentIndex: queue.getSnapshot().currentIndex,
+            trackId: fromId,
+            detail: 'no-candidate→stop',
+          })
+          return null
+        }
+        noteSearchFlowEvent({
+          source: 'AudioPlayer.playRecommendationAdvance→playTrack',
+          contextBefore: before.context.type,
+          contextAfter: queue.getPlaybackContext().type,
+          queueLengthAfter: queue.getItems().length,
+          currentIndex: queue.getSnapshot().currentIndex,
+          trackId: resolved.id,
+          nextSource: walkingHistory ? 'queue' : 'continuation',
+          detail: fromEnded ? 'ended-track' : 'next-track',
+        })
+        return { track: resolved, fromId, walkingHistory }
+      })
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return
+      }
+      throw error
+    }
+
+    if (epoch !== getRecommendationAdvanceEpoch()) {
+      return
+    }
+
+    if (!advanced) {
+      // Сохраняем последнюю рекомендацию для карточки; не сбрасываем queueIndex на -1
+      // (иначе focus падает на queue[0] и Home выглядит как search hits).
+      const lastTrack =
+        this.state.currentTrack ?? this.state.pendingTrack ?? getPlaybackQueue().current()
+      const liveIndex = getPlaybackQueue().getSnapshot().currentIndex
+      markRecommendationExhausted()
       this.stop()
       this.patchState({
-        currentTrack: null,
+        currentTrack: lastTrack,
         pendingTrack: null,
         activeCandidate: null,
-        queueIndex: -1,
+        queueIndex: liveIndex >= 0 ? liveIndex : this.state.queueIndex,
+        playing: false,
+        paused: true,
       })
       return
     }
-    await this.playTrack(track)
-    const context = getPlaybackQueue().getPlaybackContext()
-    if (context.type === 'search-seed' && track.id !== previousId) {
-      getContinuationSession().prepare(track, context)
+
+    await this.playTrack(advanced.track)
+    if (epoch !== getRecommendationAdvanceEpoch()) {
+      return
+    }
+    // Prefetch только после новой рекомендации на конце истории — не при Previous/Next по хвосту.
+    if (!advanced.walkingHistory && advanced.track.id !== advanced.fromId) {
+      prepareRecommendationFollowUp(
+        getContinuationSession(),
+        advanced.track,
+        getPlaybackQueue().getPlaybackContext(),
+      )
     }
   }
 

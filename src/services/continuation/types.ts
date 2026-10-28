@@ -12,8 +12,9 @@ export type ContinuationCandidate = {
 }
 
 /**
- * Будущий RecommendationEngine подключается сюда.
- * Реализация по умолчанию не подбирает треки и не ищет по исполнителю.
+ * Точка подключения единого Recommendation Engine
+ * (`src/services/recommendation`, createRecommendationContinuationProvider).
+ * Runtime search-seed пока использует libraryContinuation provider.
  */
 export interface ContinuationProvider {
   prepareContinuation(

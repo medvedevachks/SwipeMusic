@@ -51,7 +51,11 @@ export default function Search() {
     const legacyDeck = useSwipeDeckSessionStore.getState().tracks ?? []
     const playback =
       plan.mode === 'single-track'
-        ? getPlaybackIntent().playSearchTrack({ track: plan.track, query: plan.query })
+        ? getPlaybackIntent().playSearchTrack({
+            track: plan.track,
+            query: plan.query,
+            searchHits: playbackTracks,
+          })
         : legacyDeck.length > 0
           ? getPlaybackIntent().playFromSwipe({
               tracks: [...legacyDeck],

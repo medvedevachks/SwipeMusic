@@ -48,6 +48,8 @@ export type PlayFromQueueInput = {
 export type PlaySearchTrackInput = {
   track: Track
   query: string
+  /** Исходная поисковая выдача — hard exclusions для рекомендаций. */
+  searchHits?: readonly Track[]
 }
 
 export type PlayRadioInput = {

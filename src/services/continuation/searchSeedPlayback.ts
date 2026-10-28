@@ -5,9 +5,63 @@ import {
   type SearchSeedPlaybackContext,
 } from '../../types/playbackContext.ts'
 import type { Track } from '../../types/track.ts'
+import { consumeRecommendationAdvance } from '../recommendation/advance.ts'
+import { invalidateRecommendationAdvance } from '../recommendation/advanceEpoch.ts'
+import type { RecommendationExcludedTrack } from '../recommendation/types.ts'
 import { ContinuationSession } from './ContinuationSession.ts'
 import { noteSearchPlaybackEvent } from './searchPlaybackDebug.ts'
-import { isContinuationCandidateAvailable } from './types.ts'
+
+export type SearchHitExclusion = {
+  id: string
+  title: string
+  artist: string
+  sourceId?: string
+  externalId?: string
+}
+
+/** Идентичности всей поисковой выдачи → hard exclusions Recommendation Engine. */
+export function buildSearchHitExclusions(
+  hits: readonly Track[],
+): SearchHitExclusion[] {
+  const out: SearchHitExclusion[] = []
+  const seen = new Set<string>()
+  for (const track of hits) {
+    if (!track.id) {
+      continue
+    }
+    const key = [
+      track.id,
+      track.sourceId,
+      track.externalId ?? '',
+      track.artist.trim().toLowerCase(),
+      track.title.trim().toLowerCase(),
+    ].join('\0')
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    out.push({
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      sourceId: track.sourceId,
+      externalId: track.externalId,
+    })
+  }
+  return out
+}
+
+export function searchHitExclusionsAsRecommendationExcluded(
+  hits: readonly SearchHitExclusion[],
+): RecommendationExcludedTrack[] {
+  return hits.map((hit) => ({
+    id: hit.id,
+    title: hit.title,
+    artist: hit.artist,
+    sourceId: hit.sourceId,
+    externalId: hit.externalId,
+  }))
+}
 
 let searchSeedPlaybackEnabled = false
 
@@ -155,18 +209,25 @@ export function continuationPlaybackCaption(input: {
 /**
  * Очередь = выбранный трек. Сессия поиска и выдача не изменяются.
  * Предыдущее продолжение отменяется.
+ * searchHits фиксируются как hard exclusions для всей recommendation-сессии.
  */
 export function commitSearchSeedQueue(
   queue: PlaybackQueue,
   session: ContinuationSession,
-  input: { track: Track; query: string },
+  input: { track: Track; query: string; searchHits?: readonly Track[] },
 ): SearchSeedPlaybackContext {
+  const hits =
+    input.searchHits && input.searchHits.length > 0 ? input.searchHits : [input.track]
+  const hardExcludeHits = buildSearchHitExclusions(hits)
   const context: SearchSeedPlaybackContext = {
     type: 'search-seed',
     query: input.query,
     seedTrackId: input.track.id,
+    hardExcludeHits,
   }
   queue.setQueue([input.track], 0, context)
+  // Новый seed: не дать догнать устаревший Next предыдущей сессии.
+  invalidateRecommendationAdvance()
   session.prepare(input.track, context, { force: true })
   noteSearchPlaybackEvent('commit-search-seed', {
     contextType: context.type,
@@ -174,6 +235,7 @@ export function commitSearchSeedQueue(
     trackId: input.track.id,
     source: 'playSearchTrack',
     seedEnabled: true,
+    reason: `hardExcludeHits=${hardExcludeHits.length}`,
   })
   return context
 }
@@ -193,62 +255,6 @@ export function consumeSearchSeedAdvance(
   if (!isSearchSeedContext(context)) {
     return null
   }
-
-  const fromEnded = options.fromEnded
-  const repeatMode = queue.getSnapshot().repeatMode
-  if (fromEnded && repeatMode === 'ONE') {
-    return queue.next({ fromEnded: true })
-  }
-
-  // Срез пачки hits; один insertNext впереди trimUnplayedTail оставляет (инвариант очереди).
-  const lengthBefore = queue.getItems().length
-  queue.trimUnplayedTail()
-  if (queue.getItems().length < lengthBefore) {
-    noteSearchPlaybackEvent('advance-trim', {
-      contextType: context.type,
-      queueLength: queue.getItems().length,
-      reason: fromEnded ? 'ended' : 'next',
-    })
-  }
-
-  if (queue.peekNext()) {
-    const track = queue.next(fromEnded ? { fromEnded: true } : undefined)
-    noteSearchPlaybackEvent('advance-queued', {
-      contextType: context.type,
-      queueLength: queue.getItems().length,
-      trackId: track?.id ?? null,
-      reason: fromEnded ? 'ended' : 'next',
-    })
-    return track
-  }
-
-  const prepared = session.peekPrepared()
-  if (prepared) {
-    const currentId = queue.current()?.id ?? context.seedTrackId
-    if (isContinuationCandidateAvailable(prepared, currentId, queue.getItems())) {
-      session.takePrepared()
-      queue.insertNext(prepared)
-      const track = queue.next(fromEnded ? { fromEnded: true } : undefined)
-      noteSearchPlaybackEvent('advance-continuation', {
-        contextType: context.type,
-        queueLength: queue.getItems().length,
-        trackId: track?.id ?? null,
-        reason: fromEnded ? 'ended' : 'next',
-        source: 'library-continuation',
-      })
-      return track
-    }
-    session.takePrepared()
-  }
-
-  if (repeatMode === 'ALL') {
-    return queue.next(fromEnded ? { fromEnded: true } : undefined)
-  }
-
-  noteSearchPlaybackEvent('advance-stop', {
-    contextType: context.type,
-    queueLength: queue.getItems().length,
-    reason: fromEnded ? 'ended' : 'next',
-  })
-  return null
+  // Единый advance (search-seed ⊂ recommendation contexts).
+  return consumeRecommendationAdvance(queue, session, options)
 }

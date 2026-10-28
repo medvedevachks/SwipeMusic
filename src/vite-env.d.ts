@@ -8,6 +8,8 @@ interface ImportMetaEnv {
   readonly VITE_SEARCH_SEED_PLAYBACK?: string
   /** DEV acceptance only: controlled Search→Next harness. Exact "true". */
   readonly VITE_SEARCH_FLOW_HARNESS?: string
+  /** DEV acceptance only: controlled catalog source (not Yandex). Exact "true". */
+  readonly VITE_DEV_ACCEPTANCE?: string
 }
 
 interface ImportMeta {

@@ -24,7 +24,9 @@ import { SAVE_FAILED_MESSAGE } from '../services/libraryPersistence/statusStore'
 import type { GestureConfig, SwipeDirection } from '../types/gesture'
 import type { SwipeAction } from '../types/swipe'
 import type { Track } from '../types/track'
+import { beginSearchFlowCommand, noteSearchFlowEvent } from '../services/continuation/searchFlowDiag.ts'
 import { continuationPlaybackCaption } from '../services/continuation/searchSeedPlayback.ts'
+import { getPlaybackQueue } from '../services/playbackQueue'
 import { getSourceDisplayName } from '../utils/sourceDisplay'
 import SwipeCard from './SwipeCard'
 import { SwipeDirectionHints } from './SwipeDirectionHints'
@@ -46,10 +48,10 @@ type SwipeDeckProps = {
   playerTrackId?: string | null
   onCategorize: (track: Track) => void
   /**
-   * Skip и previous сменили карточку вместе с воспроизведением.
-   * Like сюда не приходит: карточка остаётся, текущий трек играет дальше.
+   * Skip / previous → плеер. Like сюда не приходит.
+   * direction различает Previous и Next (нельзя оба сводить к next).
    */
-  onDeckNavigate: (track: Track) => void
+  onDeckNavigate: (track: Track, direction: 'next' | 'previous') => void
   onTogglePlay?: (track: Track) => void
   playerIsPlaying?: boolean
   /** Пока выключено, колода не прыгает за чужой очередью плеера. */
@@ -63,11 +65,16 @@ type SwipeDeckProps = {
   startingTrackId?: string | null
   playback?: PlaybackState | null
   /**
-   * Трек GlobalPlayer. Для search-seed колода не прыгает за ним:
-   * если это не текущая карточка, показываем только подпись.
+   * Трек GlobalPlayer. В browse-режиме поиска, если это не текущая карточка,
+   * показываем только подпись (playback-колода сама следует за плеером).
    */
   nowPlaying?: { id: string; title: string; artist: string } | null
   playbackContextType?: string
+  /**
+   * Рекомендательная сессия: жест «дальше» на последней карточке
+   * запрашивает Next у плеера, а не упирается в конец ленты.
+   */
+  advanceAtEnd?: boolean
 }
 
 export type SwipeDeckHandle = {
@@ -123,6 +130,7 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
       playback = null,
       nowPlaying = null,
       playbackContextType = '',
+      advanceAtEnd = false,
     },
     ref,
   ) {
@@ -242,7 +250,11 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
     }, [backApi, frontApi])
 
     const jumpToIndex = useCallback(
-      (nextIndex: number, notifyPlayer: boolean) => {
+      (
+        nextIndex: number,
+        notifyPlayer: boolean,
+        direction: 'next' | 'previous',
+      ) => {
         clearDragVisual()
         lockedRef.current = false
         awaitingCategoryRef.current = false
@@ -253,16 +265,64 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
         const track = tracks[nextIndex]
         if (notifyPlayer && track) {
           ignorePlayerSyncRef.current = true
-          onDeckNavigate(track)
+          beginSearchFlowCommand('SwipeDeck.onDeckNavigate')
+          noteSearchFlowEvent({
+            source: 'SwipeDeck.onDeckNavigate',
+            trackId: track.id,
+            currentIndex: nextIndex,
+            nextSource: direction === 'previous' ? 'queue' : 'search-result',
+            detail: `deckIndex=${nextIndex};dir=${direction};sync=${syncWithPlayer ? 'on' : 'off'}`,
+          })
+          onDeckNavigate(track, direction)
         }
       },
-      [clearDragVisual, onDeckNavigate, resetSprings, tracks],
+      [clearDragVisual, onDeckNavigate, resetSprings, syncWithPlayer, tracks],
     )
 
     const goNext = useCallback(
       (notifyPlayer: boolean) => {
+        // Playback-колода: индекс ведёт плеер (syncWithPlayer), не локальный jump.
+        if (notifyPlayer && syncWithPlayer) {
+          const currentTrack = tracks[indexRef.current] ?? tracks[tracks.length - 1]
+          if (!currentTrack) {
+            lockedRef.current = false
+            clearDragVisual()
+            resetSprings()
+            return
+          }
+          beginSearchFlowCommand('SwipeDeck.goNext→player')
+          noteSearchFlowEvent({
+            source: 'SwipeDeck.goNext',
+            trackId: currentTrack.id,
+            currentIndex: indexRef.current,
+            nextSource: 'continuation',
+            detail: advanceAtEnd ? 'sync→AudioPlayer.next' : 'sync→AudioPlayer.next',
+          })
+          onDeckNavigate(currentTrack, 'next')
+          lockedRef.current = false
+          clearDragVisual()
+          resetSprings()
+          return
+        }
+
         const nextIndex = indexRef.current + 1
         if (nextIndex >= tracks.length) {
+          const currentTrack = tracks[indexRef.current]
+          if (advanceAtEnd && notifyPlayer && currentTrack) {
+            beginSearchFlowCommand('SwipeDeck.advanceAtEnd')
+            noteSearchFlowEvent({
+              source: 'SwipeDeck.advanceAtEnd',
+              trackId: currentTrack.id,
+              currentIndex: indexRef.current,
+              nextSource: 'continuation',
+              detail: 'last-card→AudioPlayer.next',
+            })
+            onDeckNavigate(currentTrack, 'next')
+            lockedRef.current = false
+            clearDragVisual()
+            resetSprings()
+            return
+          }
           lockedRef.current = false
           clearDragVisual()
           resetSprings()
@@ -270,22 +330,56 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
           indexRef.current = tracks.length
           return
         }
-        jumpToIndex(nextIndex, notifyPlayer)
+        jumpToIndex(nextIndex, notifyPlayer, 'next')
       },
-      [clearDragVisual, jumpToIndex, resetSprings, tracks.length],
+      [
+        advanceAtEnd,
+        clearDragVisual,
+        jumpToIndex,
+        onDeckNavigate,
+        resetSprings,
+        syncWithPlayer,
+        tracks,
+      ],
     )
 
     const goPrevious = useCallback(
       (notifyPlayer: boolean) => {
+        if (notifyPlayer && syncWithPlayer) {
+          // Индекс колоды может временно расходиться (exhausted / lag);
+          // Previous всегда ведёт плеер по единой queue history.
+          const currentTrack =
+            tracks[indexRef.current] ?? tracks[0] ?? null
+          if (!currentTrack) {
+            lockedRef.current = false
+            clearDragVisual()
+            resetSprings()
+            return
+          }
+          beginSearchFlowCommand('SwipeDeck.goPrevious→player')
+          noteSearchFlowEvent({
+            source: 'SwipeDeck.goPrevious',
+            trackId: currentTrack.id,
+            currentIndex: indexRef.current,
+            nextSource: 'queue',
+            detail: 'sync→AudioPlayer.previous',
+          })
+          onDeckNavigate(currentTrack, 'previous')
+          lockedRef.current = false
+          clearDragVisual()
+          resetSprings()
+          return
+        }
+
         if (indexRef.current <= 0) {
           lockedRef.current = false
           clearDragVisual()
           resetSprings()
           return
         }
-        jumpToIndex(indexRef.current - 1, notifyPlayer)
+        jumpToIndex(indexRef.current - 1, notifyPlayer, 'previous')
       },
-      [clearDragVisual, jumpToIndex, resetSprings],
+      [clearDragVisual, jumpToIndex, onDeckNavigate, resetSprings, syncWithPlayer, tracks],
     )
 
     useImperativeHandle(
@@ -414,6 +508,10 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
               direction,
               gestureConfig,
               deckIndex: indexRef.current,
+              canGoPrevious: syncWithPlayer
+                ? indexRef.current > 0 ||
+                  Boolean(getPlaybackQueue().peekPrevious())
+                : undefined,
             })
           : null
 

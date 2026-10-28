@@ -37,6 +37,13 @@ type AudioModule = {
   getAudioPlayer: () => {
     setQueue: (tracks: Track[], startIndex?: number, context?: { type: 'swipe' }) => void
     playTrack: (track: Track) => Promise<void>
+    next: () => Promise<void>
+    previous: () => Promise<void>
+  }
+}
+type QueueModule = {
+  getPlaybackQueue: () => {
+    getSnapshot: () => { items: Track[]; currentIndex: number }
   }
 }
 type IntentModule = {
@@ -120,7 +127,7 @@ let reactDom: ReactDomModule
 let SwipeDeck: DeckModule['default']
 let usePlayerStore: PlayerModule['usePlayerStore']
 let audio: ReturnType<AudioModule['getAudioPlayer']>
-let playFromSwipe: IntentModule['getPlaybackIntent'] extends () => infer T ? T['playFromSwipe'] : never
+let getPlaybackQueue: QueueModule['getPlaybackQueue']
 let organization: OrganizationModule
 let canonicalStore: CanonicalStoreModule['useCanonicalLibraryStore']
 let collectionStore: CollectionStoreModule['useCollectionStore']
@@ -448,13 +455,18 @@ function Harness(props: {
     onCategorize: (item: Track) => {
       categorized.push(item.id)
     },
-    onDeckNavigate: (item: Track) => {
-      navigated.push(item.id)
-      const startIndex = props.tracks.findIndex((entry) => entry.id === item.id)
-      return playFromSwipe({
-        tracks: props.tracks,
-        startIndex,
-        explicitUserPlay: true,
+    syncWithPlayer: true,
+    advanceAtEnd: true,
+    onDeckNavigate: (item: Track, direction: 'next' | 'previous') => {
+      // Как Home: жест → AudioPlayer.next/previous, не playFromSwipe(current).
+      const beforeId = usePlayerStore.getState().currentTrack?.id ?? item.id
+      const run =
+        direction === 'previous' ? audio.previous() : audio.next()
+      return Promise.resolve(run).then(() => {
+        const afterId = usePlayerStore.getState().currentTrack?.id ?? null
+        if (afterId && afterId !== beforeId) {
+          navigated.push(afterId)
+        }
       })
     },
   })
@@ -496,8 +508,12 @@ before(async () => {
   usePlayerStore = playerMod.usePlayerStore
   const audioMod = (await server.ssrLoadModule('/src/services/audioPlayer/AudioPlayer.ts')) as AudioModule
   audio = audioMod.getAudioPlayer()
+  getPlaybackQueue = (
+    (await server.ssrLoadModule('/src/services/playbackQueue/PlaybackQueue.ts')) as QueueModule
+  ).getPlaybackQueue
   audio.playTrack = async (item) => {
     played.push(item.id)
+    const snap = getPlaybackQueue().getSnapshot()
     await react.act(async () => {
       usePlayerStore.setState({
         currentTrack: item,
@@ -508,11 +524,12 @@ before(async () => {
         loading: false,
         buffering: false,
         error: null,
+        queue: snap.items,
+        queueIndex: snap.currentIndex,
       })
     })
   }
-  const intentMod = (await server.ssrLoadModule('/src/services/playbackIntent/index.ts')) as IntentModule
-  playFromSwipe = intentMod.getPlaybackIntent().playFromSwipe.bind(intentMod.getPlaybackIntent())
+  void ((await server.ssrLoadModule('/src/services/playbackIntent/index.ts')) as IntentModule)
   organization = (await server.ssrLoadModule(
     '/src/services/canonical/userOrganization.ts',
   )) as OrganizationModule
