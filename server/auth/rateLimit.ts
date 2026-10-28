@@ -178,6 +178,37 @@ export function createLoginRateLimiter(
   }
 }
 
+export const TASTE_PROFILE_LIMIT = 30
+export const TASTE_PROFILE_WINDOW_MS = 60 * 1000
+
+export type TasteProfileLimiter = {
+  consume(userId: string): RateLimitDecision
+}
+
+export function createTasteProfileLimiter(
+  options: { limit?: number; windowMs?: number; now?: Clock } = {},
+): TasteProfileLimiter {
+  const now = options.now ?? Date.now
+  const window = createHitWindow({
+    limit: options.limit ?? TASTE_PROFILE_LIMIT,
+    windowMs: options.windowMs ?? TASTE_PROFILE_WINDOW_MS,
+    now,
+    maxKeys: AUTH_LIMIT_MAX_KEYS,
+  })
+
+  return {
+    consume(userId: string): RateLimitDecision {
+      const current = now()
+      const decision = window.inspect(userId, current)
+      if (decision.blocked) {
+        return denied(decision.retryAfterSeconds)
+      }
+      window.commit(userId, decision.recent, current)
+      return { allowed: true }
+    },
+  }
+}
+
 export function createRegisterRateLimiter(
   options: {
     limit?: number

@@ -23,13 +23,18 @@ import {
 import { createPlaybackRepository } from '../library/playback/repository.ts'
 import { validatePlaybackBatch } from '../library/playback/validation.ts'
 import { loadTasteInput } from '../library/taste/loadTasteInput.ts'
+import { boundTasteProfileResponse } from '../library/taste/presentTasteProfile.ts'
+import { createTasteProfileLimiter, type TasteProfileLimiter } from '../auth/rateLimit.ts'
 import { readUserTasteProfile } from '../../src/services/taste/buildTasteProfile.ts'
 import { readJsonBody, requireUserId, sendJson } from './currentUser.ts'
 
 type LibraryContext = {
   db: DatabaseSync
   config: AppConfig
+  tasteProfileLimiter?: TasteProfileLimiter
 }
+
+const defaultTasteProfileLimiter = createTasteProfileLimiter()
 
 function sendFailure<T>(res: ServerResponse, result: LibraryResult<T>): void {
   if (result.ok) {
@@ -407,14 +412,15 @@ export async function handleLibraryRequest(
   }
 
   if (method === 'GET' && path === '/api/me/taste-profile') {
-    if (context.config.nodeEnv !== 'development') {
-      sendJson(res, 404, { error: 'NOT_FOUND' })
+    const limiter = context.tasteProfileLimiter ?? defaultTasteProfileLimiter
+    const decision = limiter.consume(userId)
+    if (!decision.allowed) {
+      res.setHeader('Retry-After', String(decision.retryAfterSeconds))
+      sendJson(res, 429, { error: 'RATE_LIMITED' })
       return
     }
-    const profile = readUserTasteProfile(
-      userId,
-      loadTasteInput(context.db, userId),
-      new Date().toISOString(),
+    const profile = boundTasteProfileResponse(
+      readUserTasteProfile(userId, loadTasteInput(context.db, userId), new Date().toISOString()),
     )
     sendJson(res, 200, { profile })
     return

@@ -4,6 +4,8 @@
 interface ImportMetaEnv {
   readonly VITE_SPOTIFY_CLIENT_ID?: string
   readonly VITE_SPOTIFY_REDIRECT_URI?: string
+  /** Production autoplay after one search track. Only the exact string "true" enables it. */
+  readonly VITE_SEARCH_SEED_PLAYBACK?: string
 }
 
 interface ImportMeta {

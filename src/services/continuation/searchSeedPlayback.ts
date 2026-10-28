@@ -29,15 +29,41 @@ function isProductionBuild(): boolean {
   }
 }
 
+function readReleaseFlag(): string | undefined {
+  try {
+    const value = import.meta.env.VITE_SEARCH_SEED_PLAYBACK
+    return typeof value === 'string' ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /**
- * В локальном Vite DEV включено само.
- * Production-сборка всегда выключена: ни модульный флаг, ни настройки браузера её не включают.
+ * DEV включён сам. Production включается только строкой `true` во флаге сборки.
+ * Хранилище браузера и модульный override production не включают.
  */
-export function isSearchSeedPlaybackEnabled(): boolean {
-  if (isProductionBuild()) {
+export function resolveSearchSeedPlaybackEnabled(input: {
+  production: boolean
+  dev: boolean
+  releaseFlag: string | undefined
+  runtimeOverride: boolean
+}): boolean {
+  if (input.releaseFlag === 'true') {
+    return true
+  }
+  if (input.production) {
     return false
   }
-  return searchSeedPlaybackEnabled || readViteDevDefault()
+  return input.runtimeOverride || input.dev
+}
+
+export function isSearchSeedPlaybackEnabled(): boolean {
+  return resolveSearchSeedPlaybackEnabled({
+    production: isProductionBuild(),
+    dev: readViteDevDefault(),
+    releaseFlag: readReleaseFlag(),
+    runtimeOverride: searchSeedPlaybackEnabled,
+  })
 }
 
 export function setSearchSeedPlaybackEnabled(enabled: boolean): void {

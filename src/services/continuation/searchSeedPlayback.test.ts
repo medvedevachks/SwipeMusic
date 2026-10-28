@@ -18,6 +18,7 @@ import {
   consumeSearchSeedAdvance,
   isSearchSeedPlaybackEnabled,
   planSearchPlayback,
+  resolveSearchSeedPlaybackEnabled,
   searchDeckUsesSeedPlayback,
   setSearchSeedPlaybackEnabled,
   continuationPlaybackCaption,
@@ -44,12 +45,49 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-test('search seed is a vite dev default and a production build cannot turn it on', () => {
+test('search seed is on in dev and production follows only the build flag', () => {
   const source = readFileSync(new URL('./searchSeedPlayback.ts', import.meta.url), 'utf8')
   assert.match(source, /import\.meta\.env\.DEV === true/)
   assert.match(source, /import\.meta\.env\.PROD === true/)
+  assert.match(source, /VITE_SEARCH_SEED_PLAYBACK/)
   assert.equal(source.includes('sessionStorage'), false)
   assert.equal(source.includes('swipe-music.dev.search-seed'), false)
+  assert.equal(
+    resolveSearchSeedPlaybackEnabled({
+      production: false,
+      dev: true,
+      releaseFlag: undefined,
+      runtimeOverride: false,
+    }),
+    true,
+  )
+  assert.equal(
+    resolveSearchSeedPlaybackEnabled({
+      production: true,
+      dev: false,
+      releaseFlag: undefined,
+      runtimeOverride: true,
+    }),
+    false,
+  )
+  assert.equal(
+    resolveSearchSeedPlaybackEnabled({
+      production: true,
+      dev: false,
+      releaseFlag: 'true',
+      runtimeOverride: false,
+    }),
+    true,
+  )
+  assert.equal(
+    resolveSearchSeedPlaybackEnabled({
+      production: true,
+      dev: false,
+      releaseFlag: '1',
+      runtimeOverride: true,
+    }),
+    false,
+  )
   assert.equal(isSearchSeedPlaybackEnabled(), false)
   setSearchSeedPlaybackEnabled(true)
   assert.equal(isSearchSeedPlaybackEnabled(), true)
