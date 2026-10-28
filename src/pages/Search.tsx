@@ -37,6 +37,8 @@ export default function Search() {
       selectedTrackId,
       query: q ?? query,
     })
+    // playSearchTrack синхронно делает commitSearchSeedQueue до первого await.
+    // Home читает живую очередь, чтобы не подменить search-seed всей выдачей.
     const playback =
       plan.mode === 'single-track'
         ? getPlaybackIntent().playSearchTrack({ track: plan.track, query: plan.query })

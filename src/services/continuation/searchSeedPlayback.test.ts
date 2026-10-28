@@ -157,6 +157,207 @@ test('enabled search playback plans one track and does not copy the result list'
     }),
     false,
   )
+  assert.equal(
+    shouldReplaceHomeQueueWithSwipeFeed({
+      queueLocked: false,
+      feedLength: results.length,
+      queueLength: 0,
+      contextType: 'search-seed',
+    }),
+    false,
+  )
+})
+
+test('a stale unlocked Home snapshot must not turn search-seed into the result list', () => {
+  const results = [
+    track({ sourceId: 'yandex-music', externalId: '1', title: 'Один', artist: 'А' }),
+    track({ sourceId: 'yandex-music', externalId: '2', title: 'Два', artist: 'Б' }),
+    track({ sourceId: 'yandex-music', externalId: '3', title: 'Три', artist: 'В' }),
+  ]
+  const queue = new PlaybackQueue()
+  const session = new ContinuationSession()
+  commitSearchSeedQueue(queue, session, { track: results[0]!, query: 'один' })
+
+  // Как будто React ещё видит пустую незаблокированную очередь.
+  const staleWouldReplace = shouldReplaceHomeQueueWithSwipeFeed({
+    queueLocked: false,
+    feedLength: results.length,
+    queueLength: 0,
+  })
+  assert.equal(staleWouldReplace, true)
+
+  const guarded = shouldReplaceHomeQueueWithSwipeFeed({
+    queueLocked: false,
+    feedLength: results.length,
+    queueLength: 0,
+    contextType: queue.getPlaybackContext().type,
+  })
+  assert.equal(guarded, false)
+  assert.deepEqual(queue.getItems().map((item) => item.id), [results[0]!.id])
+  assert.equal(queue.getPlaybackContext().type, 'search-seed')
+})
+
+/**
+ * Тело Home useEffect: решение только по живой PlaybackQueue + contextType.
+ * React snapshot намеренно «устаревший» (unlocked, length 0).
+ */
+function applyHomeFeedEffect(input: {
+  queue: PlaybackQueue
+  feed: Track[]
+  reactQueueLocked: boolean
+  reactQueueLength: number
+}): boolean {
+  const live = input.queue.getSnapshot()
+  const liveLocked = isQueueLockedContext(live.context)
+  const replace = shouldReplaceHomeQueueWithSwipeFeed({
+    queueLocked: input.reactQueueLocked || liveLocked,
+    feedLength: input.feed.length,
+    queueLength: Math.max(live.items.length, input.reactQueueLength),
+    contextType: live.context.type,
+  })
+  if (!replace) {
+    return false
+  }
+  input.queue.setQueue(input.feed, 0, { type: 'swipe' })
+  return true
+}
+
+test('Search play then Home mount keeps search-seed through two ended continuations', async () => {
+  const searchHits = [
+    track({ sourceId: 'yandex-music', externalId: 'hit-a', title: 'Hit A', artist: 'Search' }),
+    track({ sourceId: 'yandex-music', externalId: 'hit-b', title: 'Hit B', artist: 'Search' }),
+    track({ sourceId: 'yandex-music', externalId: 'hit-c', title: 'Hit C', artist: 'Search' }),
+  ]
+  const library = [
+    track({ sourceId: 'yandex-music', externalId: 'lib-1', title: 'Lib One', artist: 'Shelf' }),
+    track({ sourceId: 'yandex-music', externalId: 'lib-2', title: 'Lib Two', artist: 'Shelf' }),
+  ]
+  let prepareCount = 0
+  const queue = new PlaybackQueue()
+  const session = new ContinuationSession({
+    async prepareContinuation(current) {
+      prepareCount += 1
+      if (current.id === searchHits[0]!.id) {
+        return { track: library[0]! }
+      }
+      if (current.id === library[0]!.id) {
+        return { track: library[1]! }
+      }
+      return null
+    },
+  })
+
+  const plan = planSearchPlayback({
+    enabled: true,
+    tracks: searchHits,
+    selectedTrackId: searchHits[0]!.id,
+    query: 'hit',
+  })
+  assert.equal(plan.mode, 'single-track')
+  if (plan.mode !== 'single-track') {
+    return
+  }
+  commitSearchSeedQueue(queue, session, { track: plan.track, query: plan.query })
+  assert.equal(queue.getPlaybackContext().type, 'search-seed')
+  assert.equal(queue.getItems().length, 1)
+  assert.equal(queue.current()?.id, searchHits[0]!.id)
+
+  const replaced = applyHomeFeedEffect({
+    queue,
+    feed: searchHits,
+    reactQueueLocked: false,
+    reactQueueLength: 0,
+  })
+  assert.equal(replaced, false)
+  assert.equal(queue.getPlaybackContext().type, 'search-seed')
+  assert.equal(queue.getItems().length, 1)
+  assert.equal(
+    queue.getItems().some((item) => item.id === searchHits[1]!.id),
+    false,
+  )
+
+  await session.flush()
+  const first = consumeSearchSeedAdvance(queue, session, { fromEnded: true })
+  assert.equal(first?.id, library[0]!.id)
+  assert.equal(searchHits.some((item) => item.id === first?.id), false)
+  assert.equal(queue.getPlaybackContext().type, 'search-seed')
+  session.prepare(first!, queue.getPlaybackContext() as never)
+  await session.flush()
+
+  const second = consumeSearchSeedAdvance(queue, session, { fromEnded: true })
+  assert.equal(second?.id, library[1]!.id)
+  assert.equal(searchHits.some((item) => item.id === second?.id), false)
+  assert.ok(prepareCount >= 2)
+})
+
+test('stale Home snapshots leave album playlist and radio queues alone', () => {
+  const feed = [
+    track({ sourceId: 'yandex-music', externalId: 'f1', title: 'Feed', artist: 'X' }),
+    track({ sourceId: 'yandex-music', externalId: 'f2', title: 'Feed 2', artist: 'X' }),
+  ]
+  const album = new PlaybackQueue()
+  album.setQueue(
+    [track({ sourceId: 'yandex-music', externalId: 'a1', title: 'A', artist: 'Alb' })],
+    0,
+    { type: 'album', id: 'alb', title: 'Album' },
+  )
+  assert.equal(
+    applyHomeFeedEffect({
+      queue: album,
+      feed,
+      reactQueueLocked: false,
+      reactQueueLength: 0,
+    }),
+    false,
+  )
+  assert.equal(album.getPlaybackContext().type, 'album')
+
+  const playlist = new PlaybackQueue()
+  playlist.setQueue(
+    [track({ sourceId: 'yandex-music', externalId: 'p1', title: 'P', artist: 'Pl' })],
+    0,
+    { type: 'playlist', id: 'pl', title: 'List' },
+  )
+  assert.equal(
+    applyHomeFeedEffect({
+      queue: playlist,
+      feed,
+      reactQueueLocked: false,
+      reactQueueLength: 0,
+    }),
+    false,
+  )
+  assert.equal(playlist.getPlaybackContext().type, 'playlist')
+
+  const radio = new PlaybackQueue()
+  radio.setQueue(
+    [track({ sourceId: 'yandex-music', externalId: 'r1', title: 'R', artist: 'Wave' })],
+    0,
+    { type: 'radio', id: 'my-wave', title: 'Моя волна', origin: 'favorites' },
+  )
+  assert.equal(
+    applyHomeFeedEffect({
+      queue: radio,
+      feed,
+      reactQueueLocked: false,
+      reactQueueLength: 0,
+    }),
+    false,
+  )
+  assert.equal(radio.getPlaybackContext().type, 'radio')
+
+  const empty = new PlaybackQueue()
+  assert.equal(
+    applyHomeFeedEffect({
+      queue: empty,
+      feed,
+      reactQueueLocked: false,
+      reactQueueLength: 0,
+    }),
+    true,
+  )
+  assert.equal(empty.getPlaybackContext().type, 'swipe')
+  assert.equal(empty.getItems().length, 2)
 })
 
 test('search swipe session stays independent from the playback queue', () => {

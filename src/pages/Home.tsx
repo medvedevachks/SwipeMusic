@@ -12,6 +12,7 @@ import {
   sortingDeckFollowsPlayer,
 } from '../services/continuation/index.ts'
 import { getPlaybackIntent } from '../services/playbackIntent'
+import { getPlaybackQueue } from '../services/playbackQueue'
 import {
   homeCardTracks,
   runCardPlay,
@@ -107,11 +108,16 @@ export default function Home() {
       radioQueue: [],
       radioActive: false,
     })
+    // Берём живую очередь: после playSearchTrack React-снимок может отставать на кадр,
+    // и тогда лента поиска ошибочно становится swipe-очередью вместо search-seed.
+    const live = getPlaybackQueue().getSnapshot()
+    const liveLocked = isQueueLockedContext(live.context)
     if (
       !shouldReplaceHomeQueueWithSwipeFeed({
-        queueLocked,
+        queueLocked: queueLocked || liveLocked,
         feedLength: feed.length,
-        queueLength: usePlayerStore.getState().queue.length,
+        queueLength: Math.max(live.items.length, usePlayerStore.getState().queue.length),
+        contextType: live.context.type,
       })
     ) {
       return

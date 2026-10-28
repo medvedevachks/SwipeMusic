@@ -9,7 +9,13 @@ import App from './App.tsx'
 
 applyStoredTheme()
 bootstrapMusicSources()
-registerSW({ immediate: true })
+// autoUpdate: новый SW забирает клиентов; update() ловит OFF→ON без ожидания срока кэша.
+registerSW({
+  immediate: true,
+  onRegisteredSW(_url, registration) {
+    void registration?.update()
+  },
+})
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

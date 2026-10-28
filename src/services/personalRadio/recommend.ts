@@ -600,11 +600,23 @@ export function decideRadioToggle(state: RadioTransportState): RadioTransportDec
   return 'build'
 }
 
+const HOME_FEED_PROTECTED_CONTEXT = new Set([
+  'search-seed',
+  'album',
+  'playlist',
+  'radio',
+])
+
 export function shouldReplaceHomeQueueWithSwipeFeed(input: {
   queueLocked: boolean
   feedLength: number
   queueLength: number
+  /** Живой context очереди. Не полагаться только на React-снимок после playSearchTrack. */
+  contextType?: string
 }): boolean {
+  if (input.contextType && HOME_FEED_PROTECTED_CONTEXT.has(input.contextType)) {
+    return false
+  }
   if (input.queueLocked || input.feedLength === 0 || input.queueLength > 0) {
     return false
   }
