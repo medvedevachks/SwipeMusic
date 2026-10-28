@@ -108,8 +108,11 @@ export default function Home() {
       radioQueue: [],
       radioActive: false,
     })
-    // Берём живую очередь: после playSearchTrack React-снимок может отставать на кадр,
-    // и тогда лента поиска ошибочно становится swipe-очередью вместо search-seed.
+    const session = useSwipeDeckSessionStore.getState()
+    // Search results — только колода карточек при search-seed; не PlaybackQueue.
+    const allowFeedAsQueue = !(
+      session.mode === 'search' && isSearchSeedPlaybackEnabled()
+    )
     const live = getPlaybackQueue().getSnapshot()
     const liveLocked = isQueueLockedContext(live.context)
     if (
@@ -118,12 +121,13 @@ export default function Home() {
         feedLength: feed.length,
         queueLength: Math.max(live.items.length, usePlayerStore.getState().queue.length),
         contextType: live.context.type,
+        allowFeedAsQueue,
       })
     ) {
       return
     }
     setQueue(feed, 0, { type: 'swipe' })
-  }, [tracks, setQueue, queueLocked])
+  }, [tracks, setQueue, queueLocked, mode])
 
   const playListedTrack = useCallback(
     (track: Track, list: readonly Track[], nextStage: HomeStage, intent: 'toggle' | 'advance' = 'toggle') => {
@@ -154,6 +158,12 @@ export default function Home() {
                 sessionMode: session.mode,
               })
             ) {
+              // Жест «дальше» = тот же continuation, что Next/ended — не следующий hit поиска.
+              if (intent === 'advance') {
+                await getAudioPlayer().next()
+                return
+              }
+              // Явный Play на карточке — новая search-seed сессия.
               await getPlaybackIntent().playSearchTrack({
                 track,
                 query: session.searchQuery ?? '',

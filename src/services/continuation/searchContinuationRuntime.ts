@@ -9,6 +9,7 @@ import {
   mapCanonicalContinuationLibrary,
   type ContinuationLibraryTrack,
 } from './libraryContinuation.ts'
+import { isSearchFlowHarnessEnabled } from './searchFlowHarnessFlag.ts'
 
 let installed = false
 
@@ -37,6 +38,12 @@ async function loadCanonicalItems(): Promise<CanonicalLibraryItem[]> {
  * Повторный вызов не отменяет текущую подготовку.
  */
 export function ensureLibraryContinuation(): void {
+  // Harness-сборка: provider ставит installSearchFlowHarness() до Play.
+  // Обычная production не импортирует harness-модуль отсюда.
+  if (isSearchFlowHarnessEnabled()) {
+    installed = true
+    return
+  }
   if (installed) {
     return
   }

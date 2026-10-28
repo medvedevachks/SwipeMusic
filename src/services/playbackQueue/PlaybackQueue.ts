@@ -63,6 +63,11 @@ export class PlaybackQueue {
   private shuffleMode: ShuffleMode = 'OFF'
   private history: string[] = []
   private context: PlaybackContext = NONE_PLAYBACK_CONTEXT
+  /**
+   * Id треков, поставленных через insertNext в текущей сессии очереди.
+   * Отличает continuation / «играть следующим» от чужого search-hit в хвосте.
+   */
+  private sessionTailIds = new Set<string>()
   private readonly listeners = new Set<PlaybackQueueListener>()
   private persistTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -133,6 +138,7 @@ export class PlaybackQueue {
     }
 
     this.items = cleaned
+    this.sessionTailIds.clear()
     if (cleaned.length === 0) {
       this.currentIndex = -1
       this.playOrder = []
@@ -170,8 +176,41 @@ export class PlaybackQueue {
     this.emit()
   }
 
+  /**
+   * Убирает непрослушанный хвост, не защищённый insertNext (обычно dumps выдачи).
+   * Continuation / «играть следующим» помечены sessionTailIds и сохраняются
+   * даже если впереди ровно один трек. Чужой одиночный search-hit срезается.
+   * Не трогает history, repeatMode, shuffleMode; playOrder с pinned current.
+   */
+  trimUnplayedTail(): void {
+    if (this.currentIndex < 0 || this.items.length === 0) {
+      return
+    }
+    if (this.currentIndex >= this.items.length - 1) {
+      return
+    }
+    const pinnedId = this.items[this.currentIndex]?.id ?? null
+    const head = this.items.slice(0, this.currentIndex + 1)
+    const keptTail = this.items
+      .slice(this.currentIndex + 1)
+      .filter((track) => this.sessionTailIds.has(track.id))
+    if (keptTail.length === this.items.length - this.currentIndex - 1) {
+      return
+    }
+    this.items = [...head, ...keptTail]
+    this.rebuildPlayOrder(this.currentIndex)
+    if (pinnedId && this.items[this.currentIndex]?.id !== pinnedId) {
+      const restored = this.items.findIndex((track) => track.id === pinnedId)
+      if (restored >= 0) {
+        this.rebuildPlayOrder(restored)
+      }
+    }
+    this.emit()
+  }
+
   insertNext(track: Track): void {
-    const cleaned = stripPreview(track)
+    // previewUrl сохраняем: после Next PlaybackResolver читает трек из очереди.
+    const cleaned: Track = { ...track }
     if (this.items.length === 0 || this.currentIndex < 0) {
       this.setQueue([cleaned], 0)
       return
@@ -179,6 +218,7 @@ export class PlaybackQueue {
 
     const insertAt = this.currentIndex + 1
     this.items.splice(insertAt, 0, cleaned)
+    this.sessionTailIds.add(cleaned.id)
 
     if (this.shuffleMode === 'ON') {
       const nextPos = this.playOrderIndex + 1
@@ -204,6 +244,7 @@ export class PlaybackQueue {
     const wasCurrent = removeIndex === this.currentIndex
     this.items.splice(removeIndex, 1)
     this.history = this.history.filter((id) => id !== trackId)
+    this.sessionTailIds.delete(trackId)
 
     if (this.items.length === 0) {
       this.clear()
@@ -255,6 +296,7 @@ export class PlaybackQueue {
     this.playOrder = []
     this.playOrderIndex = -1
     this.history = []
+    this.sessionTailIds.clear()
     this.context = NONE_PLAYBACK_CONTEXT
     this.emit()
   }
@@ -505,6 +547,14 @@ export class PlaybackQueue {
       this.shuffleMode = data.shuffleMode ?? 'OFF'
       this.history = Array.isArray(data.history) ? data.history : []
       this.context = parsePlaybackContext(data.context)
+      // После reload хвост очереди — уже принятые элементы сессии, не dump выдачи.
+      this.sessionTailIds.clear()
+      for (let index = this.currentIndex + 1; index < this.items.length; index += 1) {
+        const id = this.items[index]?.id
+        if (id) {
+          this.sessionTailIds.add(id)
+        }
+      }
 
       if (this.items.length > 0 && this.currentIndex < 0) {
         this.currentIndex = 0

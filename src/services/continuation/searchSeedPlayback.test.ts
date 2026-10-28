@@ -20,6 +20,7 @@ import {
   planSearchPlayback,
   resolveSearchSeedPlaybackEnabled,
   searchDeckUsesSeedPlayback,
+  selectSearchPlaybackTracks,
   setSearchSeedPlaybackEnabled,
   continuationPlaybackCaption,
   sortingDeckFollowsPlayer,
@@ -118,6 +119,26 @@ test('search seed playback stays off and the result list remains the legacy queu
   assert.equal(isSearchSeedPlaybackEnabled(), false)
 })
 
+test('normal mode drops demo tracks from search playback candidates', () => {
+  const demo = track({ sourceId: 'mock', externalId: 'd1', title: 'Demo', artist: 'X' })
+  const real = track({ sourceId: 'yandex-music', externalId: 'y1', title: 'ATL', artist: 'Сплин' })
+  assert.deepEqual(
+    selectSearchPlaybackTracks({ tracks: [demo, real], allowDemo: false }).map((item) => item.id),
+    [real.id],
+  )
+  assert.equal(
+    selectSearchPlaybackTracks({ tracks: [demo, real], allowDemo: true }).length,
+    2,
+  )
+  const blocked = planSearchPlayback({
+    enabled: true,
+    tracks: selectSearchPlaybackTracks({ tracks: [demo], allowDemo: false }),
+    selectedTrackId: demo.id,
+    query: 'q',
+  })
+  assert.equal(blocked.mode, 'result-list')
+})
+
 test('enabled search playback plans one track and does not copy the result list', () => {
   const results = [
     track({ sourceId: 'yandex-music', externalId: '1', title: 'Один', artist: 'А' }),
@@ -198,7 +219,7 @@ test('a stale unlocked Home snapshot must not turn search-seed into the result l
 })
 
 /**
- * Тело Home useEffect: решение только по живой PlaybackQueue + contextType.
+ * Тело Home useEffect: живая PlaybackQueue + запрет feed→queue для search-seed.
  * React snapshot намеренно «устаревший» (unlocked, length 0).
  */
 function applyHomeFeedEffect(input: {
@@ -206,6 +227,7 @@ function applyHomeFeedEffect(input: {
   feed: Track[]
   reactQueueLocked: boolean
   reactQueueLength: number
+  allowFeedAsQueue?: boolean
 }): boolean {
   const live = input.queue.getSnapshot()
   const liveLocked = isQueueLockedContext(live.context)
@@ -214,6 +236,7 @@ function applyHomeFeedEffect(input: {
     feedLength: input.feed.length,
     queueLength: Math.max(live.items.length, input.reactQueueLength),
     contextType: live.context.type,
+    allowFeedAsQueue: input.allowFeedAsQueue,
   })
   if (!replace) {
     return false
@@ -267,6 +290,7 @@ test('Search play then Home mount keeps search-seed through two ended continuati
     feed: searchHits,
     reactQueueLocked: false,
     reactQueueLength: 0,
+    allowFeedAsQueue: false,
   })
   assert.equal(replaced, false)
   assert.equal(queue.getPlaybackContext().type, 'search-seed')
@@ -353,11 +377,241 @@ test('stale Home snapshots leave album playlist and radio queues alone', () => {
       feed,
       reactQueueLocked: false,
       reactQueueLength: 0,
+      allowFeedAsQueue: true,
     }),
     true,
   )
   assert.equal(empty.getPlaybackContext().type, 'swipe')
   assert.equal(empty.getItems().length, 2)
+
+  const searchSeedEmpty = new PlaybackQueue()
+  assert.equal(
+    applyHomeFeedEffect({
+      queue: searchSeedEmpty,
+      feed,
+      reactQueueLocked: false,
+      reactQueueLength: 0,
+      allowFeedAsQueue: false,
+    }),
+    false,
+  )
+  assert.equal(searchSeedEmpty.getItems().length, 0)
+})
+
+test('trimUnplayedTail keeps history current and a single queued continuation', () => {
+  const seed = track({ sourceId: 'yandex-music', externalId: 'seed', title: 'ATL', artist: 'Сплин' })
+  const rec = track({ sourceId: 'yandex-music', externalId: 'rec', title: 'Мой друг', artist: 'Сплин' })
+  const dump = track({ sourceId: 'yandex-music', externalId: 'hit-2', title: 'Hit 2', artist: 'X' })
+  const queue = new PlaybackQueue()
+  queue.setQueue([seed], 0, { type: 'search-seed', query: 'Сплин', seedTrackId: seed.id })
+  queue.setShuffleMode('ON')
+  queue.setRepeatMode('ALL')
+  queue.insertNext(rec)
+  const afterInsert = queue.getSnapshot()
+  assert.equal(afterInsert.items.length, 2)
+  assert.equal(afterInsert.shuffleMode, 'ON')
+  assert.equal(afterInsert.repeatMode, 'ALL')
+
+  // Один трек впереди — не режем (легальный insertNext).
+  queue.trimUnplayedTail()
+  assert.deepEqual(
+    queue.getItems().map((item) => item.id),
+    [seed.id, rec.id],
+  )
+  assert.equal(queue.getSnapshot().shuffleMode, 'ON')
+  assert.equal(queue.getSnapshot().repeatMode, 'ALL')
+
+  queue.next()
+  assert.equal(queue.current()?.id, rec.id)
+  const historyAfterNext = [...queue.getSnapshot().history]
+  assert.ok(historyAfterNext.includes(seed.id))
+  assert.ok(historyAfterNext.includes(rec.id))
+
+  queue.previous()
+  assert.equal(queue.current()?.id, seed.id)
+  // Continuation всё ещё впереди — Previous→Next должен её сохранить.
+  assert.equal(queue.peekNext()?.id, rec.id)
+  assert.equal(queue.getSnapshot().history.length >= 1, true)
+
+  // Пачка hits: два+ впереди — срезаем.
+  queue.setQueue([seed, dump, rec], 0, {
+    type: 'search-seed',
+    query: 'Сплин',
+    seedTrackId: seed.id,
+  })
+  queue.trimUnplayedTail()
+  assert.deepEqual(queue.getItems().map((item) => item.id), [seed.id])
+  assert.equal(queue.current()?.id, seed.id)
+})
+
+test('single foreign search hit in tail is trimmed; insertNext continuation is kept', async () => {
+  setSearchSeedPlaybackEnabled(true)
+  const seed = track({ sourceId: 'yandex-music', externalId: 'seed', title: 'ATL', artist: 'Сплин' })
+  const foreignHit = track({
+    sourceId: 'yandex-music',
+    externalId: 'hit-only',
+    title: 'Чужой hit',
+    artist: 'X',
+  })
+  const rec = track({ sourceId: 'yandex-music', externalId: 'rec', title: 'Мой друг', artist: 'Сплин' })
+  const queue = new PlaybackQueue()
+  const session = new ContinuationSession({
+    async prepareContinuation() {
+      return { track: rec }
+    },
+  })
+
+  // Ровно один чужой hit в хвосте (баг count-only trim) — не должен стать Next.
+  queue.setQueue([seed, foreignHit], 0, {
+    type: 'search-seed',
+    query: 'Сплин',
+    seedTrackId: seed.id,
+  })
+  await session.flush()
+  session.prepare(seed, queue.getPlaybackContext() as never, { force: true })
+  await session.flush()
+  const advanced = consumeSearchSeedAdvance(queue, session, { fromEnded: false })
+  assert.equal(advanced?.id, rec.id)
+  assert.notEqual(advanced?.id, foreignHit.id)
+  assert.equal(queue.getItems().some((item) => item.id === foreignHit.id), false)
+
+  // Настоящий continuation после Previous → Next сохраняется.
+  queue.setQueue([seed], 0, { type: 'search-seed', query: 'Сплин', seedTrackId: seed.id })
+  queue.insertNext(rec)
+  queue.next()
+  queue.previous()
+  assert.equal(queue.peekNext()?.id, rec.id)
+  const again = consumeSearchSeedAdvance(queue, session, { fromEnded: false })
+  assert.equal(again?.id, rec.id)
+  setSearchSeedPlaybackEnabled(false)
+})
+
+test('Previous then Next keeps the inserted continuation without treating it as search dump', async () => {
+  setSearchSeedPlaybackEnabled(true)
+  const seed = track({ sourceId: 'yandex-music', externalId: 'seed', title: 'ATL', artist: 'Сплин' })
+  const rec1 = track({ sourceId: 'yandex-music', externalId: 'rec-1', title: 'R1', artist: 'Сплин' })
+  const rec2 = track({ sourceId: 'yandex-music', externalId: 'rec-2', title: 'R2', artist: 'Сплин' })
+  const queue = new PlaybackQueue()
+  const session = new ContinuationSession({
+    async prepareContinuation(current) {
+      if (current.id === seed.id) return { track: rec1 }
+      if (current.id === rec1.id) return { track: rec2 }
+      return null
+    },
+  })
+  commitSearchSeedQueue(queue, session, { track: seed, query: 'Сплин' })
+  await session.flush()
+  const first = consumeSearchSeedAdvance(queue, session, { fromEnded: false })
+  assert.equal(first?.id, rec1.id)
+  session.prepare(first!, queue.getPlaybackContext() as never)
+  await session.flush()
+
+  const back = queue.previous()
+  assert.equal(back?.id, seed.id)
+  assert.equal(queue.peekNext()?.id, rec1.id)
+
+  const again = consumeSearchSeedAdvance(queue, session, { fromEnded: false })
+  assert.equal(again?.id, rec1.id)
+  assert.equal(queue.current()?.id, rec1.id)
+  setSearchSeedPlaybackEnabled(false)
+})
+
+test('Splin-like search: Next and ended share continuation, not the result list', async () => {
+  setSearchSeedPlaybackEnabled(true)
+  const searchHits = Array.from({ length: 20 }, (_, index) =>
+    track({
+      sourceId: 'yandex-music',
+      externalId: `splin-${index}`,
+      title: index === 0 ? 'ATL' : `Hit ${index}`,
+      artist: index === 0 ? 'Сплин' : `Artist ${index}`,
+    }),
+  )
+  const library = [
+    track({ sourceId: 'yandex-music', externalId: 'rec-1', title: 'Мой друг', artist: 'Сплин' }),
+    track({ sourceId: 'yandex-music', externalId: 'rec-2', title: 'Выхода нет', artist: 'Сплин' }),
+    track({ sourceId: 'yandex-music', externalId: 'rec-3', title: 'Романс', artist: 'Сплин' }),
+  ]
+  const queue = new PlaybackQueue()
+  const session = new ContinuationSession({
+    async prepareContinuation(current) {
+      if (current.externalId === 'splin-0') return { track: library[0]! }
+      if (current.externalId === 'rec-1') return { track: library[1]! }
+      if (current.externalId === 'rec-2') return { track: library[2]! }
+      return null
+    },
+  })
+
+  const plan = planSearchPlayback({
+    enabled: true,
+    tracks: searchHits,
+    selectedTrackId: searchHits[0]!.id,
+    query: 'Сплин',
+  })
+  assert.equal(plan.mode, 'single-track')
+  if (plan.mode !== 'single-track') {
+    setSearchSeedPlaybackEnabled(false)
+    return
+  }
+  commitSearchSeedQueue(queue, session, { track: plan.track, query: plan.query })
+  assert.equal(queue.getItems().length, 1)
+  assert.equal(queue.getPlaybackContext().type, 'search-seed')
+  assert.equal(queue.current()?.title, 'ATL')
+
+  // Home после navigate: search deck из 20 hits не трогает очередь.
+  assert.equal(
+    applyHomeFeedEffect({
+      queue,
+      feed: searchHits,
+      reactQueueLocked: false,
+      reactQueueLength: 0,
+      allowFeedAsQueue: false,
+    }),
+    false,
+  )
+  assert.equal(queue.getItems().length, 1)
+
+  // Даже если кто-то успел подставить выдачу — Next/ended срежут хвост.
+  queue.setQueue([...searchHits], 0, {
+    type: 'search-seed',
+    query: 'Сплин',
+    seedTrackId: searchHits[0]!.id,
+  })
+  assert.equal(queue.getItems().length, 20)
+  await session.flush()
+  const byNext = consumeSearchSeedAdvance(queue, session, { fromEnded: false })
+  assert.equal(byNext?.id, library[0]!.id)
+  assert.equal(searchHits.some((hit) => hit.id === byNext?.id), false)
+  assert.ok(queue.getItems().length <= 2)
+
+  const fresh = new PlaybackQueue()
+  const endedSession = new ContinuationSession({
+    async prepareContinuation(current) {
+      if (current.externalId === 'splin-0') return { track: library[0]! }
+      if (current.externalId === 'rec-1') return { track: library[1]! }
+      if (current.externalId === 'rec-2') return { track: library[2]! }
+      return null
+    },
+  })
+  commitSearchSeedQueue(fresh, endedSession, { track: searchHits[0]!, query: 'Сплин' })
+  await endedSession.flush()
+  const chain: string[] = [fresh.current()!.id]
+  for (let step = 0; step < 3; step += 1) {
+    const next = consumeSearchSeedAdvance(fresh, endedSession, { fromEnded: true })
+    assert.ok(next)
+    chain.push(next!.id)
+    assert.equal(searchHits.some((hit) => hit.id === next!.id), false)
+    if (isSearchSeedContext(fresh.getPlaybackContext())) {
+      endedSession.prepare(next!, fresh.getPlaybackContext())
+      await endedSession.flush()
+    }
+  }
+  assert.deepEqual(chain, [
+    searchHits[0]!.id,
+    library[0]!.id,
+    library[1]!.id,
+    library[2]!.id,
+  ])
+  setSearchSeedPlaybackEnabled(false)
 })
 
 test('search swipe session stays independent from the playback queue', () => {

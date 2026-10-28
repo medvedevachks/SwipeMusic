@@ -6,6 +6,8 @@ interface ImportMetaEnv {
   readonly VITE_SPOTIFY_REDIRECT_URI?: string
   /** Production autoplay after one search track. Only the exact string "true" enables it. */
   readonly VITE_SEARCH_SEED_PLAYBACK?: string
+  /** DEV acceptance only: controlled Search→Next harness. Exact "true". */
+  readonly VITE_SEARCH_FLOW_HARNESS?: string
 }
 
 interface ImportMeta {
@@ -50,4 +52,6 @@ interface Window {
   showDirectoryPicker(
     options?: DirectoryPickerOptions,
   ): Promise<FileSystemDirectoryHandle>
+  /** Включить безопасную диагностику search-seed в production-сборке. */
+  __SWIPE_SEARCH_DEBUG__?: boolean
 }

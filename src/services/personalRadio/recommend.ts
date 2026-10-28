@@ -613,7 +613,15 @@ export function shouldReplaceHomeQueueWithSwipeFeed(input: {
   queueLength: number
   /** Живой context очереди. Не полагаться только на React-снимок после playSearchTrack. */
   contextType?: string
+  /**
+   * false — лента только для карточек (search results при search-seed).
+   * true/undefined — каталожный swipe может инициализировать пустую очередь.
+   */
+  allowFeedAsQueue?: boolean
 }): boolean {
+  if (input.allowFeedAsQueue === false) {
+    return false
+  }
   if (input.contextType && HOME_FEED_PROTECTED_CONTEXT.has(input.contextType)) {
     return false
   }

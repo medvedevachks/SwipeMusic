@@ -188,6 +188,49 @@ test('an empty library and a library without suitable tracks stop the chain', ()
   )
 })
 
+test('continuation depth scales with library size 0/5/20/100 and never uses search hits', () => {
+  const current = seed({ id: 'yandex-music:atl', title: 'ATL', artist: 'Сплин' })
+  const searchHits = Array.from({ length: 20 }, (_, index) =>
+    item({
+      externalId: `hit-${index}`,
+      title: `Hit ${index}`,
+      artist: index === 0 ? 'Сплин' : `Other ${index}`,
+      liked: true,
+      score: 9,
+    }),
+  )
+
+  assert.equal(selectSearchContinuation({ seed: current, library: [], queueIds: [] }), null)
+
+  const sized = (n: number) =>
+    Array.from({ length: n }, (_, index) =>
+      item({
+        externalId: `lib-${index}`,
+        title: `Track ${index}`,
+        artist: index % 3 === 0 ? 'Сплин' : `Band ${index}`,
+        liked: index % 2 === 0,
+        score: index % 2 === 0 ? 0 : 4,
+        lastPlayed: index % 5 === 0 ? `2024-01-${String((index % 28) + 1).padStart(2, '0')}` : null,
+      }),
+    )
+
+  for (const size of [5, 20, 100] as const) {
+    const library = sized(size)
+    const chain = selectSearchContinuationQueue({
+      seed: current,
+      library,
+      queueIds: [],
+      limit: 12,
+    })
+    assert.ok(chain.length >= 1, `size ${size} should yield at least one continuation`)
+    assert.ok(chain.length <= Math.min(12, size), `size ${size} capped`)
+    for (const pick of chain) {
+      assert.equal(searchHits.some((hit) => hit.id === pick.track.id), false)
+      assert.equal(library.some((row) => row.id === pick.track.id), true)
+    }
+  }
+})
+
 test('several continuations walk known tracks and then stop', () => {
   const library = [
     item({ externalId: 'a', title: 'Снег', artist: 'Settlers', liked: true, score: 6 }),

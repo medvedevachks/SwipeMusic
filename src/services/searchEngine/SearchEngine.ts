@@ -48,6 +48,25 @@ export class SearchEngine {
     return this.state
   }
 
+  /**
+   * Только SEARCH-FLOW harness: подставить контролируемую выдачу в UI поиска.
+   * Обычный search() этим путём не ходит.
+   */
+  replaceResultsForHarness(query: string, tracks: readonly Track[]): void {
+    this.abortController?.abort()
+    this.abortController = null
+    this.patchState({
+      query,
+      status: 'success',
+      results: [...tracks],
+      error: null,
+      activeSourceIds: ['harness'],
+      lastSearchTime: Date.now(),
+      hasMore: false,
+      cacheKey: `harness:${query}`,
+    })
+  }
+
   subscribe(listener: StateListener): () => void {
     this.listeners.add(listener)
     listener(this.state)

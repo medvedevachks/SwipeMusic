@@ -2,7 +2,12 @@ import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { DevSearchLogPanel } from '../components/DevSearchLogPanel'
-import { isSearchSeedPlaybackEnabled, planSearchPlayback } from '../services/continuation/index.ts'
+import {
+  isSearchSeedPlaybackEnabled,
+  planSearchPlayback,
+  selectSearchPlaybackTracks,
+} from '../services/continuation/index.ts'
+import { isSearchFlowHarnessEnabled } from '../services/continuation/searchFlowHarnessFlag.ts'
 import { getPlaybackIntent } from '../services/playbackIntent'
 import { useSearchStore } from '../store/searchStore'
 import { useSwipeDeckSessionStore } from '../store/swipeDeckSessionStore'
@@ -25,26 +30,31 @@ export default function Search() {
   const [draft, setDraft] = useState(query)
 
   const openInSwipeDeck = (tracks: Track[], selectedTrackId?: string, q?: string) => {
+    // Search results → только колода карточек. PlaybackQueue заполняет playSearchTrack / plan.
     applySearchDeck(tracks, {
       selectedTrackId,
       query: q ?? query,
     })
 
-    const deck = useSwipeDeckSessionStore.getState().tracks ?? []
+    // Seed: исходная выдача минус demo (кроме harness). Не обходим withoutDemoTracks в user-mode.
+    const playbackTracks = selectSearchPlaybackTracks({
+      tracks,
+      allowDemo: isSearchFlowHarnessEnabled(),
+    })
     const plan = planSearchPlayback({
       enabled: isSearchSeedPlaybackEnabled(),
-      tracks: deck,
+      tracks: playbackTracks,
       selectedTrackId,
       query: q ?? query,
     })
-    // playSearchTrack синхронно делает commitSearchSeedQueue до первого await.
-    // Home читает живую очередь, чтобы не подменить search-seed всей выдачей.
+    // ON: один seed-трек. OFF: legacy — выдача как swipe-очередь (уже без demo в store).
+    const legacyDeck = useSwipeDeckSessionStore.getState().tracks ?? []
     const playback =
       plan.mode === 'single-track'
         ? getPlaybackIntent().playSearchTrack({ track: plan.track, query: plan.query })
-        : plan.tracks.length > 0
+        : legacyDeck.length > 0
           ? getPlaybackIntent().playFromSwipe({
-              tracks: [...plan.tracks],
+              tracks: [...legacyDeck],
               startIndex: 0,
               explicitUserPlay: true,
             })

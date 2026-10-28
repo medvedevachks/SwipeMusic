@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { isSearchFlowHarnessEnabled } from '../services/continuation/searchFlowHarnessFlag.ts'
 import { withoutDemoTracks } from '../sources/demoSource'
 import type { Track } from '../types/track'
 
@@ -31,7 +32,8 @@ export const useSwipeDeckSessionStore = create<SwipeDeckSessionState>((set) => {
     tracks,
     options = {},
   ) => {
-    const visible = withoutDemoTracks(tracks)
+    // Harness acceptance: контролируемые mock-hits должны попасть в колоду Home.
+    const visible = isSearchFlowHarnessEnabled() ? [...tracks] : withoutDemoTracks(tracks)
     if (visible.length === 0) {
       return
     }

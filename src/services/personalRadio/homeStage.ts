@@ -1,3 +1,4 @@
+import { isSearchFlowHarnessEnabled } from '../continuation/searchFlowHarnessFlag.ts'
 import { isDemoSourceId } from '../../sources/demoSource.ts'
 import type { Track } from '../../types/track.ts'
 
@@ -15,10 +16,12 @@ export function homeCardTracks(input: {
   radioQueue: readonly Track[]
   radioActive: boolean
 }): Track[] {
+  const keepDemo = isSearchFlowHarnessEnabled()
+  const accept = (track: Track) => keepDemo || !isDemoSourceId(track.sourceId)
   if (input.stage === 'wave' && input.radioActive) {
-    return input.radioQueue.filter((track) => !isDemoSourceId(track.sourceId))
+    return input.radioQueue.filter(accept)
   }
-  return input.feed.filter((track) => !isDemoSourceId(track.sourceId))
+  return input.feed.filter(accept)
 }
 
 export function cardPlaybackPlan(input: {

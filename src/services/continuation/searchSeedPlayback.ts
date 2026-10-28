@@ -1,3 +1,4 @@
+import { isDemoSourceId } from '../../sources/demoSource.ts'
 import { PlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
 import {
   isSearchSeedContext,
@@ -5,6 +6,7 @@ import {
 } from '../../types/playbackContext.ts'
 import type { Track } from '../../types/track.ts'
 import { ContinuationSession } from './ContinuationSession.ts'
+import { noteSearchPlaybackEvent } from './searchPlaybackDebug.ts'
 import { isContinuationCandidateAvailable } from './types.ts'
 
 let searchSeedPlaybackEnabled = false
@@ -73,6 +75,21 @@ export function setSearchSeedPlaybackEnabled(enabled: boolean): void {
 export type SearchPlaybackPlan =
   | { mode: 'result-list'; tracks: readonly Track[] }
   | { mode: 'single-track'; track: Track; query: string }
+
+/**
+ * Кандидаты для seed/legacy playback из выдачи Search.
+ * В обычном режиме demo не стартуют playback (колода уже без них).
+ * Harness (`allowDemo`) оставляет mock-hits для DEV-приёмки.
+ */
+export function selectSearchPlaybackTracks(input: {
+  tracks: readonly Track[]
+  allowDemo: boolean
+}): Track[] {
+  if (input.allowDemo) {
+    return [...input.tracks]
+  }
+  return input.tracks.filter((track) => !isDemoSourceId(track.sourceId))
+}
 
 /**
  * Выключенный флаг оставляет выдачу очередью, как сейчас.
@@ -151,12 +168,20 @@ export function commitSearchSeedQueue(
   }
   queue.setQueue([input.track], 0, context)
   session.prepare(input.track, context, { force: true })
+  noteSearchPlaybackEvent('commit-search-seed', {
+    contextType: context.type,
+    queueLength: 1,
+    trackId: input.track.id,
+    source: 'playSearchTrack',
+    seedEnabled: true,
+  })
   return context
 }
 
 /**
- * Next/ended для search-seed.
+ * Next/ended для search-seed — общий путь персонального продолжения.
  * Чужой контекст не двигает: альбом, плейлист и волна остаются на своём next().
+ * Хвост из поисковой выдачи отбрасывается: результаты поиска не плейлист.
  * Без кандидата индекс не сдвигается и выдача не подставляется.
  */
 export function consumeSearchSeedAdvance(
@@ -175,8 +200,26 @@ export function consumeSearchSeedAdvance(
     return queue.next({ fromEnded: true })
   }
 
+  // Срез пачки hits; один insertNext впереди trimUnplayedTail оставляет (инвариант очереди).
+  const lengthBefore = queue.getItems().length
+  queue.trimUnplayedTail()
+  if (queue.getItems().length < lengthBefore) {
+    noteSearchPlaybackEvent('advance-trim', {
+      contextType: context.type,
+      queueLength: queue.getItems().length,
+      reason: fromEnded ? 'ended' : 'next',
+    })
+  }
+
   if (queue.peekNext()) {
-    return queue.next(fromEnded ? { fromEnded: true } : undefined)
+    const track = queue.next(fromEnded ? { fromEnded: true } : undefined)
+    noteSearchPlaybackEvent('advance-queued', {
+      contextType: context.type,
+      queueLength: queue.getItems().length,
+      trackId: track?.id ?? null,
+      reason: fromEnded ? 'ended' : 'next',
+    })
+    return track
   }
 
   const prepared = session.peekPrepared()
@@ -185,7 +228,15 @@ export function consumeSearchSeedAdvance(
     if (isContinuationCandidateAvailable(prepared, currentId, queue.getItems())) {
       session.takePrepared()
       queue.insertNext(prepared)
-      return queue.next(fromEnded ? { fromEnded: true } : undefined)
+      const track = queue.next(fromEnded ? { fromEnded: true } : undefined)
+      noteSearchPlaybackEvent('advance-continuation', {
+        contextType: context.type,
+        queueLength: queue.getItems().length,
+        trackId: track?.id ?? null,
+        reason: fromEnded ? 'ended' : 'next',
+        source: 'library-continuation',
+      })
+      return track
     }
     session.takePrepared()
   }
@@ -194,5 +245,10 @@ export function consumeSearchSeedAdvance(
     return queue.next(fromEnded ? { fromEnded: true } : undefined)
   }
 
+  noteSearchPlaybackEvent('advance-stop', {
+    contextType: context.type,
+    queueLength: queue.getItems().length,
+    reason: fromEnded ? 'ended' : 'next',
+  })
   return null
 }
