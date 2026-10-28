@@ -1,5 +1,13 @@
 # SwipeMusic
 
+## Current state
+
+Актуальный снимок архитектуры, Git/production и незавершённых задач:
+
+**[docs/PROJECT_CURRENT_STATE.md](docs/PROJECT_CURRENT_STATE.md)**
+
+Читать его раньше `GPT.md` и `RELEASE_REPORT.md`. Исторические документы не удалять; при расхождении приоритет у кода, Git и этого снимка.
+
 ## Project
 
 SwipeMusic is a Progressive Web Application (PWA) for building a personal music library.
@@ -201,6 +209,8 @@ Update documentation whenever architecture or public behaviour changes.
 Keep README current.
 
 Document important decisions.
+
+When architecture, release HEAD, production baseline or unfinished priorities change, update `docs/PROJECT_CURRENT_STATE.md` in the same task (or a follow-up docs task). Do not treat `GPT.md` / `RELEASE_REPORT.md` as newer than that snapshot.
 
 ---
 

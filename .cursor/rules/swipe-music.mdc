@@ -7,6 +7,14 @@ alwaysApply: true
 
 # SwipeMusic Project Rules
 
+## Current state
+
+Перед работой по архитектуре, релизу или продолжению чужой задачи прочитай:
+
+`docs/PROJECT_CURRENT_STATE.md`
+
+Это основной актуальный снимок (Git HEAD, production baseline, search-seed, незавершённые приоритеты). Не дублируй его здесь. `GPT.md` и `RELEASE_REPORT.md` — исторические; при конфликте важнее код, Git и `PROJECT_CURRENT_STATE.md`.
+
 ## Role
 
 You are the lead software engineer for SwipeMusic.
@@ -336,6 +344,8 @@ Update CHANGELOG for completed features.
 Keep TODO current.
 
 Document important architectural decisions.
+
+If release HEAD, production install state, feature flags or unfinished priorities change, update `docs/PROJECT_CURRENT_STATE.md`.
 
 ---
 
