@@ -41,6 +41,23 @@ body,
   min-height: 100%;
 }
 
+/*
+ * Стабильный масштаб как у нативного плеера: прокрутка остаётся,
+ * pinch / page-zoom браузера на корне отключается через pan без pinch-zoom.
+ * Колода (.swipe-stage) и seekbar по-прежнему с touch-action: none.
+ * Глобальные JS-блокировки касаний не используем.
+ * Системное увеличение размера шрифта оставляем включённым.
+ */
+html,
+body {
+  touch-action: pan-x pan-y;
+}
+
+/* iOS меньше зумит поле фокуса, если кегль ≥ 16px; 1rem уважает системный масштаб текста. */
+html :is(input, textarea, select) {
+  font-size: max(16px, 1rem);
+}
+
 body {
   margin: 0;
   background:
