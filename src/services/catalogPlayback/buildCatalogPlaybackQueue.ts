@@ -14,6 +14,10 @@ import {
 } from '../../types/playableSourceSelection.ts'
 import type { PlaybackTrackLookup } from '../playbackAvailability/playbackTrackForSourceCopy.ts'
 import { CATALOG_PLAYBACK_MESSAGE } from './messages.ts'
+import {
+  CATALOG_PREPARE_CONCURRENCY,
+  mapPool,
+} from './mapPool.ts'
 
 export type CatalogQueueEntry = {
   canonicalTrackId: string
@@ -38,6 +42,16 @@ export type BuildCatalogPlaybackQueueInput = {
   now?: number
   /** Только для тестов / harness. В production demo не попадает в очередь. */
   allowDemo?: boolean
+  concurrency?: number
+  isCancelled?: () => boolean
+  onInFlight?: (count: number) => void
+  /**
+   * Уже готовые резолюции (например выбранный трек) — не перепроверять.
+   * Ключ: canonicalTrackId.
+   */
+  preResolved?: ReadonlyMap<string, CatalogItemResolution>
+  /** Сначала резолвится этот canonical id (порядок очереди не меняется). */
+  prioritizeCanonicalTrackId?: string | null
 }
 
 export type BuildCatalogPlaybackQueueResult = {
@@ -134,29 +148,98 @@ export async function resolveCatalogItemPlayback(
 /**
  * Собирает очередь только из реально доступных композиций (порядок каталога).
  * Demo-only и недоступные копии в очередь не попадают.
- * Availability резолвится параллельно — короче путь до AudioPlayer (iOS activation).
  */
 export async function buildCatalogPlaybackQueue(
   input: BuildCatalogPlaybackQueueInput,
 ): Promise<BuildCatalogPlaybackQueueResult> {
-  const resolutions = await Promise.all(
-    input.items.map((item) =>
-      resolveCatalogItemPlayback(item, {
-        port: input.port,
-        findTrack: input.findTrack,
-        resolveMissingTrack: input.resolveMissingTrack,
-        now: input.now,
-        allowDemo: input.allowDemo,
-      }),
-    ),
+  const concurrency = input.concurrency ?? CATALOG_PREPARE_CONCURRENCY
+  const preResolved = input.preResolved
+  const resolveOne = (item: CanonicalLibraryItem) => {
+    const cached = preResolved?.get(item.canonicalTrack.id)
+    if (cached) {
+      return Promise.resolve(cached)
+    }
+    return resolveCatalogItemPlayback(item, {
+      port: input.port,
+      findTrack: input.findTrack,
+      resolveMissingTrack: input.resolveMissingTrack,
+      now: input.now,
+      allowDemo: input.allowDemo,
+    })
+  }
+
+  const resolutions = new Array<CatalogItemResolution>(input.items.length)
+  const prioritizeId = input.prioritizeCanonicalTrackId ?? null
+  if (prioritizeId) {
+    const priorityIndex = input.items.findIndex(
+      (item) => item.canonicalTrack.id === prioritizeId,
+    )
+    if (priorityIndex >= 0) {
+      if (input.isCancelled?.()) {
+        return { queue: [], resolutions: [] }
+      }
+      resolutions[priorityIndex] = await resolveOne(input.items[priorityIndex]!)
+    }
+  }
+
+  const pendingIndexes: number[] = []
+  for (let index = 0; index < input.items.length; index += 1) {
+    if (!resolutions[index]) {
+      pendingIndexes.push(index)
+    }
+  }
+
+  await mapPool(
+    pendingIndexes,
+    concurrency,
+    async (index) => {
+      if (input.isCancelled?.()) {
+        return index
+      }
+      resolutions[index] = await resolveOne(input.items[index]!)
+      return index
+    },
+    {
+      isCancelled: input.isCancelled,
+      onInFlight: input.onInFlight,
+    },
   )
 
+  if (input.isCancelled?.()) {
+    return { queue: [], resolutions: resolutions.filter(Boolean) }
+  }
+
+  const complete = resolutions.map((row, index) => {
+    if (row) {
+      return row
+    }
+    // Отмена посреди пула — пометим оставшиеся как unavailable без probe.
+    const item = input.items[index]!
+    return {
+      status: 'unavailable' as const,
+      canonicalTrackId: item.canonicalTrack.id,
+      selection: {
+        canonicalTrackId: item.canonicalTrack.id,
+        selectedCopy: null,
+        selectedTrack: null,
+        availability: {
+          canonicalTrackId: item.canonicalTrack.id,
+          copies: [],
+          playableCopies: [],
+          hasPlayableCopy: false,
+        },
+        reason: PLAYABLE_SOURCE_SELECTION_REASON.NO_PLAYABLE_COPY,
+      },
+      message: CATALOG_PLAYBACK_MESSAGE.TRACK_UNAVAILABLE,
+    }
+  })
+
   const queue: CatalogQueueEntry[] = []
-  for (const resolved of resolutions) {
+  for (const resolved of complete) {
     if (resolved.status === 'ready') {
       queue.push(resolved.entry)
     }
   }
 
-  return { queue, resolutions }
+  return { queue, resolutions: complete }
 }

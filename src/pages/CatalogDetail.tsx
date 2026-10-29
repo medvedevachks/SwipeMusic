@@ -42,6 +42,7 @@ export default function CatalogDetail() {
   const [removed, setRemoved] = useState(false)
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [playError, setPlayError] = useState<string | null>(null)
+  const [playHint, setPlayHint] = useState<string | null>(null)
   const playGeneration = useRef(0)
 
   useEffect(() => {
@@ -89,6 +90,7 @@ export default function CatalogDetail() {
     const key = startCanonicalTrackId ?? 'catalog'
     setBusyKey(key)
     setPlayError(null)
+    setPlayHint(null)
     try {
       const result = await playUserCatalog({
         catalog: { id: catalog.id, name: catalog.name },
@@ -100,6 +102,9 @@ export default function CatalogDetail() {
       }
       if (result.status === 'played') {
         setPlayError(null)
+        if (result.needsUserPlayGesture) {
+          setPlayHint(CATALOG_PLAYBACK_MESSAGE.NEEDS_USER_PLAY)
+        }
         return
       }
       setPlayError(result.message)
@@ -177,6 +182,15 @@ export default function CatalogDetail() {
           role="alert"
         >
           {playError}
+        </p>
+      ) : null}
+
+      {playHint ? (
+        <p
+          className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-fg)]"
+          role="status"
+        >
+          {playHint}
         </p>
       ) : null}
 

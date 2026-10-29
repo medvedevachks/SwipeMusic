@@ -159,6 +159,13 @@ test('single catalog track play starts playlist queue at that position', async (
           context: options.context,
         })
       },
+      replaceQueue: async (options) => {
+        calls.push({
+          tracks: options.tracks.map((track) => track.id),
+          startIndex: options.startIndex,
+          context: options.context,
+        })
+      },
     },
   )
 
@@ -169,12 +176,18 @@ test('single catalog track play starts playlist queue at that position', async (
     b.sourceTrackKey,
   ])
   assert.equal(result.startIndex, 1)
-  assert.deepEqual(calls[0]?.context, {
-    type: 'playlist',
-    id: CATALOG.id,
-    title: CATALOG.name,
+  // Ранний старт выбранного трека, затем полная playlist-очередь.
+  assert.deepEqual(calls[0], {
+    tracks: [b.sourceTrackKey],
+    startIndex: 0,
+    context: {
+      type: 'playlist',
+      id: CATALOG.id,
+      title: CATALOG.name,
+    },
   })
-  assert.equal(calls[0]?.startIndex, 1)
+  assert.equal(calls[1]?.startIndex, 1)
+  assert.deepEqual(calls[1]?.tracks, [a.sourceTrackKey, b.sourceTrackKey])
 })
 
 test('listen catalog starts the first available track and skips unavailable rows', async () => {
@@ -244,7 +257,10 @@ test('next/previous stay inside catalog playlist context and order', async () =>
         ),
       }),
       findTrack: findTrackMap([trackFor(a), trackFor(b), trackFor(c)]),
-      playSelection: async (options) => {
+      playSelection: async () => {
+        // early single-track start
+      },
+      replaceQueue: async (options) => {
         captured = options
       },
     },
@@ -252,7 +268,7 @@ test('next/previous stay inside catalog playlist context and order', async () =>
 
   assert.equal(result.status, 'played')
   assert.ok(captured)
-  assert.equal(captured!.context.type, 'playlist')
+  assert.equal((captured!.context as { type: string }).type, 'playlist')
   assert.equal(captured!.startIndex, 1)
   assert.deepEqual(
     captured!.tracks.map((track) => track.id),
@@ -351,6 +367,9 @@ test('disabled source leaves the composition unavailable and keeps catalog membe
       findTrack: findTrackMap([trackFor(yandex)]),
       playSelection: async () => {
         assert.fail('must not start playback')
+      },
+      replaceQueue: async () => {
+        assert.fail('must not expand queue')
       },
     },
   )
@@ -468,7 +487,7 @@ test('playback failure does not invent another track and returns error', async (
   assert.equal(result.message, CATALOG_PLAYBACK_MESSAGE.FAILED)
 })
 
-test('NotAllowedError after queue setup counts as played, not FAILED', async () => {
+test('NotAllowedError after queue setup counts as played with gesture hint', async () => {
   resetPlaybackAvailability()
   resetCatalogPlaybackGate()
   const a = copyOf('can_ios', 'local-folder', 'ios.mp3', 'iOS')
@@ -493,6 +512,7 @@ test('NotAllowedError after queue setup counts as played, not FAILED', async () 
   assert.equal(result.status, 'played')
   if (result.status !== 'played') return
   assert.equal(result.tracks[0]?.id, a.sourceTrackKey)
+  assert.equal(result.needsUserPlayGesture, true)
 })
 
 test('cancel during prepare returns busy and does not call playSelection', async () => {
@@ -558,6 +578,130 @@ test('adapter hydrate rejects a track with mismatched identity', async () => {
     result.reason,
     PLAYABLE_SOURCE_SELECTION_REASON.TRACK_SNAPSHOT_MISSING,
   )
+})
+
+test('UNKNOWN availability is not queued as PLAYABLE', async () => {
+  resetPlaybackAvailability()
+  const copy = copyOf('can_u', 'yandex-music', 'u1', 'Unknown')
+  const resolved = await resolveCatalogItemPlayback(itemOf('can_u', [copy], 'Unknown'), {
+    now: 31_000,
+    port: portFor({
+      'yandex-music': probeAdapter(
+        'yandex-music',
+        PLAYBACK_AVAILABILITY_STATUS.UNKNOWN,
+      ),
+    }),
+    findTrack: findTrackMap([trackFor(copy)]),
+  })
+  assert.equal(resolved.status, 'unavailable')
+})
+
+test('100+ items keep catalog order and never exceed prepare concurrency', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const items = Array.from({ length: 120 }, (_, index) => {
+    const copy = copyOf(`can_${index}`, 'local-folder', `f${index}.mp3`, `T${index}`)
+    return itemOf(`can_${index}`, [copy], `T${index}`)
+  })
+  const tracks = items.map((item) => trackFor(item.copies[0]!))
+  let inFlight = 0
+  let maxInFlight = 0
+
+  const built = await buildCatalogPlaybackQueue({
+    items,
+    now: 32_000,
+    concurrency: 4,
+    port: portFor({
+      'local-folder': {
+        id: 'local-folder',
+        capabilities: ['stream'],
+        supportsStreaming: true,
+        isAvailable: () => true,
+        async checkTrackAvailability() {
+          inFlight += 1
+          maxInFlight = Math.max(maxInFlight, inFlight)
+          await new Promise((resolve) => setTimeout(resolve, 5))
+          inFlight -= 1
+          return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+        },
+      },
+    }),
+    findTrack: findTrackMap(tracks),
+    onInFlight: (count) => {
+      maxInFlight = Math.max(maxInFlight, count)
+    },
+  })
+
+  assert.equal(built.queue.length, 120)
+  assert.deepEqual(
+    built.queue.map((entry) => entry.canonicalTrackId),
+    items.map((item) => item.canonicalTrack.id),
+  )
+  assert.ok(maxInFlight <= 4, `maxInFlight=${maxInFlight}`)
+  assert.ok(maxInFlight >= 2)
+})
+
+test('selected track starts before the rest of a large catalog finishes', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const items = Array.from({ length: 40 }, (_, index) => {
+    const copy = copyOf(`can_p_${index}`, 'local-folder', `p${index}.mp3`, `P${index}`)
+    return itemOf(`can_p_${index}`, [copy], `P${index}`)
+  })
+  const tracks = items.map((item) => trackFor(item.copies[0]!))
+  const events: string[] = []
+  let releaseRest!: () => void
+  const holdRest = new Promise<void>((resolve) => {
+    releaseRest = resolve
+  })
+  let earlyStarted!: () => void
+  const earlyGate = new Promise<void>((resolve) => {
+    earlyStarted = resolve
+  })
+
+  const pending = playUserCatalog(
+    {
+      catalog: CATALOG,
+      items,
+      startCanonicalTrackId: 'can_p_7',
+    },
+    {
+      now: 33_000,
+      concurrency: 4,
+      port: portFor({
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(track) {
+            if (track.externalId !== 'p7.mp3') {
+              await holdRest
+            }
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap(tracks),
+      playSelection: async (options) => {
+        events.push(`play:${options.tracks.map((track) => track.externalId).join(',')}`)
+        earlyStarted()
+      },
+      replaceQueue: async (options) => {
+        events.push(`expand:${options.tracks.length}:${options.startIndex}`)
+      },
+    },
+  )
+
+  await earlyGate
+  assert.deepEqual(events, ['play:p7.mp3'])
+  releaseRest()
+  const result = await pending
+  assert.equal(result.status, 'played')
+  if (result.status !== 'played') return
+  assert.equal(result.startIndex, 7)
+  assert.equal(result.tracks.length, 40)
+  assert.ok(events.includes('expand:40:7'))
 })
 
 test('rapid repeated play rejects the second start while the first is in flight', async () => {

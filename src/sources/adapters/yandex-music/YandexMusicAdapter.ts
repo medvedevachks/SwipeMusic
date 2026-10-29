@@ -16,6 +16,7 @@ import {
   saveYandexConnection,
 } from './sessionClient'
 import type { PlaybackCandidate } from '../../../services/playbackResolver'
+import type { TrackAvailabilityProbe } from '../../../types/playbackAvailability'
 import type { MusicSourceAdapter, SearchResult } from '../../MusicSourceAdapter'
 import type {
   FetchTracksParams,
@@ -30,6 +31,7 @@ import { runYandexDeviceAuth } from './auth'
 import { pushYandexDevLog } from './devLog'
 import { mapYandexTrackToTrack } from './mapTrack'
 import { buildYandexPlaybackCandidates } from './playbackCandidates'
+import { probeYandexTrackAvailability } from './trackAvailability'
 import type {
   YandexAuthSession,
   YandexDeviceCode,
@@ -225,6 +227,26 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
       api: this.isAvailable() ? this.api : null,
       authenticated: this.isAvailable(),
       hasPlus: this.syncMeta.hasPlus,
+    })
+  }
+
+  /**
+   * Availability без playback: только /tracks metadata.
+   * Не вызывает resolveDirectStreamUrl / getDownloadInfo / getPlaybackCandidates.
+   */
+  async checkTrackAvailability(track: Track): Promise<TrackAvailabilityProbe> {
+    await this.ready
+    const externalId = track.externalId?.trim()
+      ? track.externalId
+      : track.id.startsWith(`${SOURCE_ID}:`)
+        ? track.id.slice(SOURCE_ID.length + 1)
+        : track.id
+
+    return probeYandexTrackAvailability({
+      isAvailable: this.isAvailable(),
+      hasPlus: this.syncMeta.hasPlus,
+      externalId,
+      getTracksByIds: (ids) => this.api.getTracksByIds(ids),
     })
   }
 

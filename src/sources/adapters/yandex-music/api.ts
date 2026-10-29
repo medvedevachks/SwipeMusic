@@ -1,13 +1,13 @@
-import { md5Hex } from './md5'
-import { pushYandexDevLog } from './devLog'
-import { yandexMusicRequestHeaders } from './requestHeaders'
+import { md5Hex } from './md5.ts'
+import { pushYandexDevLog } from './devLog.ts'
+import { yandexMusicRequestHeaders } from './requestHeaders.ts'
 import type {
   YandexAccountStatus,
   YandexDownloadInfo,
   YandexPlaylistShort,
   YandexSearchResponse,
   YandexTrack,
-} from './types'
+} from './types.ts'
 
 const API_BASE = '/api/yandex-music'
 const STREAM_URL_TTL_MS = 45_000

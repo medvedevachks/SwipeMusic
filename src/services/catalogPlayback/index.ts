@@ -20,3 +20,7 @@ export {
   CATALOG_PLAYBACK_MESSAGE,
   type CatalogPlaybackMessage,
 } from './messages.ts'
+export {
+  CATALOG_PREPARE_CONCURRENCY,
+  mapPool,
+} from './mapPool.ts'
