@@ -558,12 +558,72 @@ body {
   height: 3.5rem;
 }
 
+/*
+ * Колода: ↑/↓ — собственные ряды над и под карточкой,
+ * ←/→ — боковые колонки. Подсказки не absolute поверх карточки.
+ */
 .swipe-deck {
   position: relative;
+  display: grid;
   box-sizing: border-box;
   width: min(100%, 28rem);
   margin: 0.25rem auto 2rem;
-  padding: 0.5rem 4.5rem 0.35rem;
+  padding: 0.35rem 0.4rem 0.55rem;
+  column-gap: 0.2rem;
+  row-gap: 0.28rem;
+  grid-template-columns: 4.25rem minmax(0, 1fr) 4.25rem;
+  grid-template-areas:
+    'notice notice notice'
+    'caption caption caption'
+    '. up .'
+    'left stage right'
+    '. down .';
+}
+
+.swipe-deck-caption {
+  grid-area: caption;
+  margin: 0;
+  text-align: center;
+}
+
+.swipe-hint {
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.85rem;
+  padding: 0.1rem 0.15rem;
+  text-align: center;
+}
+
+.swipe-hint-up {
+  grid-area: up;
+  align-items: flex-end;
+  min-height: 2.1rem;
+  padding-bottom: 0.15rem;
+}
+
+.swipe-hint-down {
+  grid-area: down;
+  align-items: flex-start;
+  min-height: 2.1rem;
+  padding-top: 0.15rem;
+}
+
+.swipe-hint-left {
+  grid-area: left;
+  width: 100%;
+}
+
+.swipe-hint-right {
+  grid-area: right;
+  width: 100%;
+}
+
+.swipe-stage-slot {
+  grid-area: stage;
+  position: relative;
+  min-width: 0;
 }
 
 .swipe-stage {
@@ -661,14 +721,51 @@ body {
     height: 3rem;
   }
 
+  .app-main-frame {
+    padding-top: 0.85rem;
+    padding-bottom: 0.85rem;
+  }
+
   .swipe-deck {
-    margin-bottom: 0.7rem;
+    margin-bottom: 0.55rem;
     padding-top: 0.15rem;
-    padding-bottom: 0.15rem;
+    padding-bottom: 0.3rem;
+    row-gap: 0.18rem;
+  }
+
+  .swipe-hint-up,
+  .swipe-hint-down {
+    min-height: 1.75rem;
   }
 
   .swipe-stage {
-    height: clamp(232px, 40svh, 280px);
+    height: clamp(176px, 32svh, 240px);
+  }
+}
+
+/* Короткие телефоны: ↓ Назад остаётся выше нижнего плеера без наложения. */
+@media (max-height: 620px) {
+  .app-main-frame {
+    padding-top: 0.65rem;
+    padding-bottom: 0.65rem;
+  }
+
+  .swipe-deck {
+    margin-bottom: 0.35rem;
+    row-gap: 0.12rem;
+  }
+
+  .swipe-hint {
+    min-height: 1.55rem;
+  }
+
+  .swipe-hint-up,
+  .swipe-hint-down {
+    min-height: 1.55rem;
+  }
+
+  .swipe-stage {
+    height: clamp(152px, 28svh, 196px);
   }
 }
 

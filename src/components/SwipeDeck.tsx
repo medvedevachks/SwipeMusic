@@ -746,62 +746,63 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
             {gestureNotice}
           </p>
         ) : null}
+
+        {playbackCaption ? (
+          <p
+            role="status"
+            className="swipe-deck-caption text-xs text-[var(--color-muted)]"
+          >
+            {playbackCaption}
+          </p>
+        ) : null}
+
         <SwipeDirectionHints
           gestureConfig={gestureConfig}
           activeDirection={dragDirection}
           progress={dragProgress}
         />
 
-        {playbackCaption ? (
-          <p
-            role="status"
-            className="mb-2 text-center text-xs text-[var(--color-muted)]"
-          >
-            {playbackCaption}
-          </p>
-        ) : null}
-
-        <div className="relative z-[1]">
-        <div className="swipe-stage">
-          {next && (
-            <SwipeCard
-              key={`back-${next.id}`}
-              track={next}
-              sourceLabel={getSourceDisplayName(next.sourceId)}
-              x={back.x}
-              y={back.y}
-              rot={back.rot}
-              scale={back.scale}
-              opacity={back.opacity}
-              zIndex={1}
-            />
-          )}
-
-          <SwipeCard
-            key={`front-${current.id}`}
-            track={current}
-            sourceLabel={getSourceDisplayName(current.sourceId)}
-            x={front.x}
-            y={front.y}
-            rot={front.rot}
-            scale={front.scale}
-            opacity={front.opacity}
-            bind={() => bind()}
-            interactive
-            dragOverlayText={dragOverlayText}
-            dragDirection={dragDirection}
-            dragProgress={dragProgress}
-            zIndex={2}
-            playback={playbackForCard}
-            onTogglePlay={onTogglePlay ? () => onTogglePlay(current) : undefined}
-            isPlaying={playerIsPlaying && cardAudible}
-            isStarting={Boolean(
-              current &&
-                startingTrackId === current.id &&
-                !(playerIsPlaying && cardAudible),
+        <div className="swipe-stage-slot">
+          <div className="swipe-stage">
+            {next && (
+              <SwipeCard
+                key={`back-${next.id}`}
+                track={next}
+                sourceLabel={getSourceDisplayName(next.sourceId)}
+                x={back.x}
+                y={back.y}
+                rot={back.rot}
+                scale={back.scale}
+                opacity={back.opacity}
+                zIndex={1}
+              />
             )}
-          />
-        </div>
+
+            <SwipeCard
+              key={`front-${current.id}`}
+              track={current}
+              sourceLabel={getSourceDisplayName(current.sourceId)}
+              x={front.x}
+              y={front.y}
+              rot={front.rot}
+              scale={front.scale}
+              opacity={front.opacity}
+              bind={() => bind()}
+              interactive
+              dragOverlayText={dragOverlayText}
+              dragDirection={dragDirection}
+              dragProgress={dragProgress}
+              zIndex={2}
+              playback={playbackForCard}
+              onTogglePlay={onTogglePlay ? () => onTogglePlay(current) : undefined}
+              isPlaying={playerIsPlaying && cardAudible}
+              isStarting={Boolean(
+                current &&
+                  startingTrackId === current.id &&
+                  !(playerIsPlaying && cardAudible),
+              )}
+            />
+          </div>
           {heart ? (
             <div
               key={heart.token}

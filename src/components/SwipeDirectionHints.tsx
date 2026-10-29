@@ -12,12 +12,12 @@ type SwipeDirectionHintsProps = {
 
 const DIRECTION_ORDER: SwipeDirection[] = ['up', 'left', 'right', 'down']
 
-/** Боковые hints строго в gutter (не заходят под карточку). */
-const positionClass: Record<SwipeDirection, string> = {
-  up: 'left-1/2 top-0 -translate-x-1/2 text-center',
-  down: 'bottom-0 left-1/2 -translate-x-1/2 text-center',
-  left: 'left-0 top-1/2 w-[4.5rem] -translate-y-1/2 text-center',
-  right: 'right-0 top-1/2 w-[4.5rem] -translate-y-1/2 text-center',
+/** Ячейки CSS grid колоды — не absolute поверх карточки. */
+const areaClass: Record<SwipeDirection, string> = {
+  up: 'swipe-hint swipe-hint-up',
+  down: 'swipe-hint swipe-hint-down',
+  left: 'swipe-hint swipe-hint-left',
+  right: 'swipe-hint swipe-hint-right',
 }
 
 const arrowPrefix: Record<SwipeDirection, string> = {
@@ -28,10 +28,10 @@ const arrowPrefix: Record<SwipeDirection, string> = {
 }
 
 const accentByAction: Record<SwipeAction, string> = {
-  categorize: 'text-teal-600 dark:text-teal-400',
-  like: 'text-rose-600 dark:text-rose-400',
-  skip: 'text-sky-600 dark:text-sky-400',
-  previous: 'text-amber-600 dark:text-amber-400',
+  categorize: 'text-teal-700 dark:text-teal-300',
+  like: 'text-rose-700 dark:text-rose-300',
+  skip: 'text-sky-700 dark:text-sky-300',
+  previous: 'text-amber-700 dark:text-amber-300',
 }
 
 /**
@@ -44,45 +44,46 @@ export function SwipeDirectionHints({
   progress,
 }: SwipeDirectionHintsProps) {
   return (
-    <div
-      className="pointer-events-none absolute inset-0 z-0"
-      aria-hidden={false}
-      aria-label="Значения направлений свайпа"
-    >
+    <>
       {DIRECTION_ORDER.map((direction) => {
         const action = gestureConfig[direction]
         const label = gestureActionLabels[action]
         const isActive = activeDirection === direction
         const ready = isActive && progress >= 1
         const opacity = isActive
-          ? 0.4 + Math.min(progress, 1) * 0.6
-          : 0.45
+          ? 0.55 + Math.min(progress, 1) * 0.45
+          : 0.88
 
         return (
           <div
             key={direction}
-            className={`absolute px-0.5 ${positionClass[direction]}`}
+            className={areaClass[direction]}
             style={{ opacity }}
+            aria-hidden="true"
           >
             <p
               className={[
-                'text-[10px] font-medium leading-tight tracking-wide sm:text-[11px]',
+                'text-[11px] font-semibold leading-tight tracking-wide sm:text-[12px]',
                 isActive
                   ? accentByAction[action]
-                  : 'text-[var(--color-muted)]',
-                ready ? 'scale-105 font-semibold' : '',
+                  : 'text-[var(--color-fg)]',
+                ready ? 'scale-105' : '',
               ].join(' ')}
             >
-              <span className="block text-[12px] leading-none opacity-80 sm:text-[13px]">
+              <span className="block text-[13px] leading-none sm:text-[14px]">
                 {arrowPrefix[direction]}
               </span>
-              <span className="mt-0.5 block break-words hyphens-auto">
-                {label}
+              <span className="mt-0.5 block break-words hyphens-auto text-[var(--color-muted)]">
+                {isActive ? (
+                  <span className={accentByAction[action]}>{label}</span>
+                ) : (
+                  label
+                )}
               </span>
             </p>
           </div>
         )
       })}
-    </div>
+    </>
   )
 }
