@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { getCategoryGlyph } from '../config/categoryPresets'
+import { PlayIcon } from '../components/icons'
 import { removeCanonicalFromCatalog } from '../services/canonical/userOrganization'
 import {
   canonicalCatalogCount,
@@ -13,6 +14,11 @@ import {
   formatCatalogTrackCount,
   getCatalogById,
 } from '../services/catalogs/selectCatalogs'
+import {
+  CATALOG_PLAYBACK_MESSAGE,
+  cancelCatalogPlaybackGate,
+  playUserCatalog,
+} from '../services/catalogPlayback'
 import { useCanonicalLibraryStore } from '../store/canonicalLibraryStore'
 import { useCollectionStore } from '../store/collectionStore'
 import { getSourceDisplayName } from '../utils/sourceDisplay'
@@ -34,6 +40,16 @@ export default function CatalogDetail() {
   const [name, setName] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [removed, setRemoved] = useState(false)
+  const [busyKey, setBusyKey] = useState<string | null>(null)
+  const [playError, setPlayError] = useState<string | null>(null)
+  const playGeneration = useRef(0)
+
+  useEffect(() => {
+    return () => {
+      playGeneration.current += 1
+      cancelCatalogPlaybackGate()
+    }
+  }, [catalogId])
 
   if (removed) {
     return null
@@ -64,6 +80,43 @@ export default function CatalogDetail() {
     setRenaming(false)
   }
 
+  const runPlay = async (startCanonicalTrackId?: string) => {
+    if (busyKey) {
+      setPlayError(CATALOG_PLAYBACK_MESSAGE.BUSY)
+      return
+    }
+    const generation = ++playGeneration.current
+    const key = startCanonicalTrackId ?? 'catalog'
+    setBusyKey(key)
+    setPlayError(null)
+    try {
+      const result = await playUserCatalog({
+        catalog: { id: catalog.id, name: catalog.name },
+        items: tracks,
+        startCanonicalTrackId,
+      })
+      if (generation !== playGeneration.current) {
+        return
+      }
+      if (result.status === 'played') {
+        setPlayError(null)
+        return
+      }
+      setPlayError(result.message)
+    } catch {
+      if (generation === playGeneration.current) {
+        setPlayError(CATALOG_PLAYBACK_MESSAGE.FAILED)
+      }
+    } finally {
+      if (generation === playGeneration.current) {
+        setBusyKey(null)
+      }
+    }
+  }
+
+  const catalogBusy = busyKey === 'catalog'
+  const anyBusy = busyKey !== null
+
   return (
     <section className="space-y-4 pb-8">
       <Link
@@ -81,7 +134,7 @@ export default function CatalogDetail() {
         >
           {getCategoryGlyph(catalog.icon)}
         </span>
-        <div className="min-w-0 space-y-1">
+        <div className="min-w-0 flex-1 space-y-1">
           <h1 className="font-display text-2xl font-semibold tracking-tight text-[var(--color-fg)]">
             {catalog.name}
             {catalog.favorite ? ' ★' : ''}
@@ -94,6 +147,38 @@ export default function CatalogDetail() {
           </p>
         </div>
       </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-xl bg-[var(--color-accent)] px-4 text-sm font-medium text-white disabled:opacity-60"
+          disabled={anyBusy || tracks.length === 0}
+          aria-busy={catalogBusy || undefined}
+          aria-label="Слушать каталог"
+          onClick={() => {
+            void runPlay()
+          }}
+        >
+          {catalogBusy ? (
+            <span
+              className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+          ) : (
+            <PlayIcon className="h-5 w-5 translate-x-0.5" />
+          )}
+          Слушать каталог
+        </button>
+      </div>
+
+      {playError ? (
+        <p
+          className="rounded-xl border border-rose-300/70 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/40 dark:bg-rose-950/40 dark:text-rose-100"
+          role="alert"
+        >
+          {playError}
+        </p>
+      ) : null}
 
       {renaming ? (
         <form
@@ -187,11 +272,32 @@ export default function CatalogDetail() {
         </p>
       ) : (
         <ul className="space-y-2">
-          {tracks.map((item) => (
+          {tracks.map((item) => {
+            const rowBusy = busyKey === item.canonicalTrack.id
+            return (
               <li
                 key={item.canonicalTrack.id}
-                className="flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2"
+                className="flex min-w-0 items-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-2 sm:gap-3 sm:px-3"
               >
+                <button
+                  type="button"
+                  className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] text-white disabled:opacity-60"
+                  disabled={anyBusy}
+                  aria-busy={rowBusy || undefined}
+                  aria-label={`Слушать «${item.canonicalTrack.title}»`}
+                  onClick={() => {
+                    void runPlay(item.canonicalTrack.id)
+                  }}
+                >
+                  {rowBusy ? (
+                    <span
+                      className="h-5 w-5 animate-spin rounded-full border-2 border-white border-t-transparent motion-reduce:animate-none"
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <PlayIcon className="h-5 w-5 translate-x-0.5" />
+                  )}
+                </button>
                 <span
                   className="h-12 w-12 shrink-0 rounded-lg border border-[var(--color-border)]"
                   style={{
@@ -204,7 +310,7 @@ export default function CatalogDetail() {
                   }}
                   aria-hidden="true"
                 />
-                <span className="min-w-0 flex-1">
+                <span className="min-w-0 flex-1 overflow-hidden">
                   <span className="block truncate text-sm font-medium text-[var(--color-fg)]">
                     {item.canonicalTrack.title}
                     {item.state.liked ? ' · лайк' : ''}
@@ -228,15 +334,21 @@ export default function CatalogDetail() {
                 </span>
                 <button
                   type="button"
-                  className="min-h-11 shrink-0 rounded-xl border border-[var(--color-border)] px-3 text-xs"
+                  className="min-h-11 shrink-0 rounded-xl border border-[var(--color-border)] px-2 text-xs sm:px-3"
+                  aria-label={`Убрать «${item.canonicalTrack.title}» из каталога`}
                   onClick={() => {
-                    void removeCanonicalFromCatalog(item.canonicalTrack.id, catalog.id)
+                    void removeCanonicalFromCatalog(
+                      item.canonicalTrack.id,
+                      catalog.id,
+                    )
                   }}
                 >
-                  Убрать из каталога
+                  <span className="sm:hidden">Убрать</span>
+                  <span className="hidden sm:inline">Убрать из каталога</span>
                 </button>
               </li>
-            ))}
+            )
+          })}
         </ul>
       )}
     </section>

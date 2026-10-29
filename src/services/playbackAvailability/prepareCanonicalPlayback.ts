@@ -1,4 +1,5 @@
 import type { SourceCopy } from '../../types/canonical.ts'
+import type { Track } from '../../types/track.ts'
 import {
   PLAYABLE_SOURCE_SELECTION_REASON,
   type PlayableSourceSelection,
@@ -20,11 +21,20 @@ export type PrepareCanonicalPlaybackInput = {
   preferredSourceTrackKey?: string | null
 }
 
+export type ResolveMissingPlaybackTrack = (
+  copy: SourceCopy,
+) => Promise<Track | null> | Track | null
+
 export type PrepareCanonicalPlaybackOptions = {
   port: AvailabilityPort
   now?: number
   ttlMs?: number
   findTrack?: PlaybackTrackLookup
+  /**
+   * Официальный путь адаптера (getTrack), если снимка нет в CollectionEngine.
+   * URL и SourceCopy здесь не выдумываются; identity должна совпасть с copy.
+   */
+  resolveMissingTrack?: ResolveMissingPlaybackTrack
 }
 
 /**
@@ -57,19 +67,34 @@ export async function prepareCanonicalPlayback(
     return selected
   }
 
-  const snapshot = getPlaybackTrackForSourceCopy(
-    selected.selectedCopy,
-    options.findTrack ?? findCollectionPlaybackTrack,
-  )
-  if (!snapshot.track) {
+  const findTrack = options.findTrack ?? findCollectionPlaybackTrack
+  const snapshot = getPlaybackTrackForSourceCopy(selected.selectedCopy, findTrack)
+  if (snapshot.track) {
     return {
       ...selected,
-      selectedTrack: null,
-      reason: PLAYABLE_SOURCE_SELECTION_REASON.TRACK_SNAPSHOT_MISSING,
+      selectedTrack: snapshot.track,
     }
   }
+
+  if (options.resolveMissingTrack) {
+    const hydrated = await options.resolveMissingTrack(selected.selectedCopy)
+    if (hydrated) {
+      const fromAdapter = getPlaybackTrackForSourceCopy(
+        selected.selectedCopy,
+        () => hydrated,
+      )
+      if (fromAdapter.track) {
+        return {
+          ...selected,
+          selectedTrack: fromAdapter.track,
+        }
+      }
+    }
+  }
+
   return {
     ...selected,
-    selectedTrack: snapshot.track,
+    selectedTrack: null,
+    reason: PLAYABLE_SOURCE_SELECTION_REASON.TRACK_SNAPSHOT_MISSING,
   }
 }
