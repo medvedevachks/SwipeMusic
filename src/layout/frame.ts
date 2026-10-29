@@ -4,7 +4,8 @@ export const PLAY_CONTROL = {
 } as const
 
 export const PAGE_PADDING = 32
-export const DECK_GUTTER = 72
+/** Боковая колонка подсказки (2.75rem) в .swipe-deck grid. */
+export const DECK_GUTTER = 44
 export const FRAME_MAX = 42 * 16
 export const DECK_MAX = 28 * 16
 

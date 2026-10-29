@@ -571,7 +571,8 @@ body {
   padding: 0.35rem 0.4rem 0.55rem;
   column-gap: 0.2rem;
   row-gap: 0.28rem;
-  grid-template-columns: 4.25rem minmax(0, 1fr) 4.25rem;
+  /* Узкие боковые колонки: подсказки ←/→ не должны съедать ширину карточки. */
+  grid-template-columns: 2.75rem minmax(0, 1fr) 2.75rem;
   grid-template-areas:
     'notice notice notice'
     'caption caption caption'
@@ -721,51 +722,13 @@ body {
     height: 3rem;
   }
 
-  .app-main-frame {
-    padding-top: 0.85rem;
-    padding-bottom: 0.85rem;
-  }
-
+  /*
+   * Высоту карточки не сжимаем ниже рабочего минимума (~cover + meta + seek).
+   * На коротком экране .app-main остаётся прокручиваемым — подсказки ↑/↓
+   * сохраняют свои ряды, а контент карточки не режется overflow: hidden.
+   */
   .swipe-deck {
-    margin-bottom: 0.55rem;
-    padding-top: 0.15rem;
-    padding-bottom: 0.3rem;
-    row-gap: 0.18rem;
-  }
-
-  .swipe-hint-up,
-  .swipe-hint-down {
-    min-height: 1.75rem;
-  }
-
-  .swipe-stage {
-    height: clamp(176px, 32svh, 240px);
-  }
-}
-
-/* Короткие телефоны: ↓ Назад остаётся выше нижнего плеера без наложения. */
-@media (max-height: 620px) {
-  .app-main-frame {
-    padding-top: 0.65rem;
-    padding-bottom: 0.65rem;
-  }
-
-  .swipe-deck {
-    margin-bottom: 0.35rem;
-    row-gap: 0.12rem;
-  }
-
-  .swipe-hint {
-    min-height: 1.55rem;
-  }
-
-  .swipe-hint-up,
-  .swipe-hint-down {
-    min-height: 1.55rem;
-  }
-
-  .swipe-stage {
-    height: clamp(152px, 28svh, 196px);
+    margin-bottom: 0.75rem;
   }
 }
 
