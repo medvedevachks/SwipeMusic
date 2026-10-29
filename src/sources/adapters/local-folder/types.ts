@@ -5,6 +5,9 @@ export type LocalAccessState =
   | 'prompt'
   | 'denied'
 
+/** Постоянный directory handle или временный FileList до перезагрузки. */
+export type LocalLibraryMode = 'handle' | 'session-files'
+
 export type LocalScanProgress = {
   phase: 'idle' | 'counting' | 'scanning' | 'done' | 'error'
   /** Сколько файлов уже обработано на текущем проходе. */
@@ -22,6 +25,9 @@ export type LocalLibraryStats = {
   subdirectoryCount: number
   lastScanAt: number | null
   accessState: LocalAccessState
+  libraryMode: LocalLibraryMode | null
+  /** После перезагрузки для session-files: нужна повторная выдача файлов. */
+  reselectRequired: boolean
 }
 
 export type LocalLibrarySnapshot = {
@@ -31,13 +37,17 @@ export type LocalLibrarySnapshot = {
   lastScanAt: number
   /** Относительные пути файлов — для диагностики / будущей быстрой переиндексации. */
   relativePaths: string[]
+  libraryMode?: LocalLibraryMode
 }
 
 export type IndexedLocalFile = {
   /** Стабильный ключ внутри источника: относительный путь. */
   relativePath: string
   fileName: string
-  handle: FileSystemFileHandle
+  /** Постоянный handle из File System Access API. */
+  handle?: FileSystemFileHandle
+  /** Временный File из FileList — только в памяти сессии. */
+  file?: File
 }
 
 export type LocalLibraryListener = (stats: LocalLibraryStats) => void

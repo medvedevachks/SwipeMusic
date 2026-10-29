@@ -57,3 +57,8 @@ interface Window {
   /** Включить безопасную диагностику search-seed в production-сборке. */
   __SWIPE_SEARCH_DEBUG__?: boolean
 }
+
+interface HTMLInputElement {
+  webkitdirectory: boolean
+  showPicker?: () => void
+}

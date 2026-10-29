@@ -1,6 +1,7 @@
 import { useLocalMusicStore } from '../store/localMusicStore'
 import type { LocalAccessState } from '../sources/adapters/local-folder'
 import { readLocalCapability } from '../sources/adapters/local-folder/localCapability'
+import { readFileListCapability } from '../sources/adapters/local-folder/localFilePicker'
 
 function accessLabel(state: LocalAccessState): string {
   switch (state) {
@@ -30,15 +31,27 @@ export function LocalMusicPanel() {
   const isBusy = useLocalMusicStore((state) => state.isBusy)
   const error = useLocalMusicStore((state) => state.error)
   const connectFolder = useLocalMusicStore((state) => state.connectFolder)
+  const connectFolderViaFileInput = useLocalMusicStore(
+    (state) => state.connectFolderViaFileInput,
+  )
+  const connectAudioFiles = useLocalMusicStore((state) => state.connectAudioFiles)
   const requestAccess = useLocalMusicStore((state) => state.requestAccess)
   const rescan = useLocalMusicStore((state) => state.rescan)
   const disconnect = useLocalMusicStore((state) => state.disconnect)
 
+  const directoryCapability = readLocalCapability()
+  const fileListCapability = readFileListCapability()
   const hasFolder = Boolean(stats.folderName)
   const needsPermission =
     stats.accessState === 'prompt' || stats.accessState === 'denied'
   const isScanning =
     progress.phase === 'counting' || progress.phase === 'scanning'
+  const sessionMode = stats.libraryMode === 'session-files'
+  const canRescan =
+    hasFolder &&
+    !needsPermission &&
+    !stats.reselectRequired &&
+    stats.libraryMode === 'handle'
 
   return (
     <section className="space-y-4 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
@@ -47,7 +60,8 @@ export function LocalMusicPanel() {
           Local Music
         </h2>
         <p className="text-sm text-[var(--color-muted)]">
-          Папка на устройстве через File System Access API.
+          Папка на устройстве. Основной способ — File System Access API; на
+          Android доступны отдельные кнопки через системный выбор файлов.
         </p>
       </div>
 
@@ -55,7 +69,7 @@ export function LocalMusicPanel() {
         <button
           type="button"
           className="rounded-xl bg-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-white disabled:opacity-40"
-          disabled={isBusy || stats.accessState === 'unsupported'}
+          disabled={isBusy || !directoryCapability.supported}
           onClick={() => {
             void connectFolder()
           }}
@@ -63,7 +77,29 @@ export function LocalMusicPanel() {
           Выбрать папку
         </button>
 
-        {needsPermission && hasFolder ? (
+        <button
+          type="button"
+          className="rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm font-medium text-[var(--color-fg)] disabled:opacity-40"
+          disabled={isBusy || !fileListCapability.supported}
+          onClick={() => {
+            void connectFolderViaFileInput()
+          }}
+        >
+          Выбрать папку другим способом
+        </button>
+
+        <button
+          type="button"
+          className="rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm font-medium text-[var(--color-fg)] disabled:opacity-40"
+          disabled={isBusy || !fileListCapability.supported}
+          onClick={() => {
+            void connectAudioFiles()
+          }}
+        >
+          Выбрать аудиофайлы
+        </button>
+
+        {needsPermission && hasFolder && !stats.reselectRequired && !sessionMode ? (
           <button
             type="button"
             className="rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm font-medium text-[var(--color-fg)] disabled:opacity-40"
@@ -79,7 +115,7 @@ export function LocalMusicPanel() {
         <button
           type="button"
           className="rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm font-medium text-[var(--color-fg)] disabled:opacity-40"
-          disabled={isBusy || !hasFolder || needsPermission}
+          disabled={isBusy || !canRescan}
           onClick={() => {
             void rescan()
           }}
@@ -90,7 +126,7 @@ export function LocalMusicPanel() {
         <button
           type="button"
           className="rounded-xl border border-rose-300 px-4 py-2.5 text-sm font-medium text-rose-600 disabled:opacity-40 dark:border-rose-800 dark:text-rose-400"
-          disabled={isBusy || !hasFolder}
+          disabled={isBusy || (!hasFolder && !stats.reselectRequired)}
           onClick={() => {
             void disconnect()
           }}
@@ -109,7 +145,9 @@ export function LocalMusicPanel() {
         <div>
           <dt className="text-[var(--color-muted)]">Доступ</dt>
           <dd className="font-medium text-[var(--color-fg)]">
-            {accessLabel(stats.accessState)}
+            {stats.reselectRequired
+              ? 'Требуется повторно выбрать папку'
+              : accessLabel(stats.accessState)}
           </dd>
         </div>
         <div>
@@ -131,6 +169,13 @@ export function LocalMusicPanel() {
           </dd>
         </div>
       </dl>
+
+      {stats.reselectRequired ? (
+        <p className="text-sm text-[var(--color-muted)]" role="status">
+          После перезапуска временный выбор файлов недоступен. Снова нажмите
+          «Выбрать папку другим способом» или «Выбрать аудиофайлы».
+        </p>
+      ) : null}
 
       {isScanning || progress.phase === 'done' || progress.phase === 'error' ? (
         <div
@@ -155,10 +200,18 @@ export function LocalMusicPanel() {
         </p>
       ) : null}
 
-      {stats.accessState === 'unsupported' ? (
+      {!directoryCapability.supported && !fileListCapability.supported ? (
         <p className="text-sm text-[var(--color-muted)]">
-          {readLocalCapability().message ??
+          {directoryCapability.message ??
+            fileListCapability.message ??
             'Локальная папка в этом браузере недоступна.'}
+        </p>
+      ) : null}
+
+      {!directoryCapability.supported && fileListCapability.supported ? (
+        <p className="text-sm text-[var(--color-muted)]">
+          Directory picker недоступен. Используйте «Выбрать папку другим
+          способом» или «Выбрать аудиофайлы».
         </p>
       ) : null}
     </section>

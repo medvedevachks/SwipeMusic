@@ -387,6 +387,24 @@ test('local file without a handle is not PLAYABLE', () => {
     }).status,
     PLAYBACK_AVAILABILITY_STATUS.PLAYABLE,
   )
+  assert.equal(
+    assessLocalFileAvailability({
+      accessState: 'granted',
+      hasDirectoryHandle: false,
+      hasFileHandle: false,
+      hasSessionFile: true,
+    }).status,
+    PLAYBACK_AVAILABILITY_STATUS.PLAYABLE,
+  )
+  assert.equal(
+    assessLocalFileAvailability({
+      accessState: 'prompt',
+      hasDirectoryHandle: false,
+      hasFileHandle: false,
+      hasSessionFile: false,
+    }).status,
+    PLAYBACK_AVAILABILITY_STATUS.UNAVAILABLE,
+  )
 })
 
 test('mock demo track with a preview is PLAYABLE', async () => {

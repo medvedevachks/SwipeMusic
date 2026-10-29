@@ -4,6 +4,7 @@ import { PLAYBACK_AVAILABILITY_STATUS } from '../../../types/playbackAvailabilit
 import { createTrack } from '../../normalizeTrack.ts'
 import { ObjectUrlCache } from './ObjectUrlCache.ts'
 import { scanDirectoryForAudio } from './directoryScanner.ts'
+import { importAudioFromFileList } from './fileListImport.ts'
 import {
   FileSystemMusicAdapter,
   type LocalLibraryStoragePort,
@@ -11,10 +12,25 @@ import {
 } from './FileSystemMusicAdapter.ts'
 import {
   assessLocalCapability,
+  assessLocalFileListCapability,
   type LocalCapability,
 } from './localCapability.ts'
 import type { LocalLibrarySnapshot } from './types.ts'
 import type { Track } from '../../../types/track.ts'
+
+function audioFile(name: string, relativePath?: string): File {
+  const file = new File([Uint8Array.from([1, 2, 3, 4])], name, {
+    type: 'audio/mpeg',
+  })
+  if (relativePath) {
+    Object.defineProperty(file, 'webkitRelativePath', {
+      configurable: true,
+      enumerable: true,
+      value: relativePath,
+    })
+  }
+  return file
+}
 
 type FakeNode = { name: string; handle: object }
 type ScanMode = 'ok' | 'fail' | 'abort'
@@ -334,6 +350,129 @@ test('failed and aborted rescan keep the previous library', async () => {
   assert.deepEqual(pathsOf((await aborted.adapter.fetchTracks()).tracks), ['keep.ogg'])
   assert.deepEqual(aborted.indexed.at(-1), ['keep.ogg'])
   assert.equal(aborted.adapter.getScanProgress().phase, 'idle')
+})
+
+test('file list import keeps relative paths, skips duplicates and unsupported files', () => {
+  assert.equal(
+    assessLocalFileListCapability({ hasDocument: true, hasObjectUrl: true }).supported,
+    true,
+  )
+  assert.equal(
+    assessLocalFileListCapability({ hasDocument: false, hasObjectUrl: true }).supported,
+    false,
+  )
+  const imported = importAudioFromFileList([
+    audioFile('notes.txt', 'Music/notes.txt'),
+    audioFile('song.mp3', 'Music/a/song.mp3'),
+    audioFile('song.mp3', 'Music/a/song.mp3'),
+    audioFile('track.flac', 'Music/b/nested/track.flac'),
+    audioFile('alone.mp3'),
+  ])
+  assert.deepEqual(
+    imported.files.map((file) => file.relativePath).sort(),
+    ['Music/a/song.mp3', 'Music/b/nested/track.flac', 'alone.mp3'],
+  )
+  assert.equal(imported.files.every((file) => Boolean(file.file) && !file.handle), true)
+  assert.equal(imported.folderName, 'Music')
+  assert.equal(imported.subdirectoryCount >= 2, true)
+})
+
+test('session file list plays without a directory handle and needs reselect after restart', async () => {
+  let handle: FileSystemDirectoryHandle | null = null
+  let snapshot: LocalLibrarySnapshot | null = null
+  const indexed: string[][] = []
+  const cleared: string[] = []
+  const storage: LocalLibraryStoragePort = {
+    async saveDirectoryHandle(value) {
+      handle = value
+    },
+    async loadDirectoryHandle() {
+      return handle
+    },
+    async saveLibrarySnapshot(value) {
+      snapshot = value
+    },
+    async loadLibrarySnapshot() {
+      return snapshot
+    },
+    async clear() {
+      handle = null
+      snapshot = null
+    },
+  }
+  const mediaIndex: LocalMediaIndexPort = {
+    async indexTracks(_sourceId, tracks: Track[]) {
+      indexed.push(tracks.map((track) => track.externalId))
+    },
+    async clearSource(sourceId) {
+      cleared.push(sourceId)
+    },
+  }
+  const adapter = new FileSystemMusicAdapter({
+    id: 'local-folder',
+    capability: () => ({
+      supported: false,
+      blocker: 'directory-picker-missing',
+      message: 'Directory picker недоступен.',
+    }),
+    storage,
+    mediaIndex,
+  })
+
+  await adapter.connectFromFileList([
+    audioFile('song.mp3', 'Car/a/song.mp3'),
+    audioFile('deep.flac', 'Car/a/nested/deep.flac'),
+  ])
+  assert.equal(adapter.accessState, 'granted')
+  assert.equal(adapter.getStats().libraryMode, 'session-files')
+  assert.equal(adapter.getStats().reselectRequired, false)
+  assert.equal(handle, null)
+  assert.equal(snapshot?.libraryMode, 'session-files')
+  assert.equal(JSON.stringify(snapshot).includes('blob:'), false)
+  assert.equal(adapter.isAvailable(), true)
+  const page = await adapter.fetchTracks()
+  assert.deepEqual(pathsOf(page.tracks), ['Car/a/nested/deep.flac', 'Car/a/song.mp3'])
+  const playable = await adapter.checkTrackAvailability(page.tracks[0]!)
+  assert.equal(playable.status, PLAYBACK_AVAILABILITY_STATUS.PLAYABLE)
+
+  const created: string[] = []
+  const originalCreate = URL.createObjectURL
+  URL.createObjectURL = (() => {
+    const url = `blob:session-${created.length}`
+    created.push(url)
+    return url
+  }) as typeof URL.createObjectURL
+  try {
+    const stream = await adapter.getStream(page.tracks[0]!)
+    assert.equal(stream.startsWith('blob:'), true)
+    assert.equal(created.length, 1)
+  } finally {
+    URL.createObjectURL = originalCreate
+  }
+
+  await assert.rejects(adapter.rescan(), /повторно выбрать/)
+
+  const restored = new FileSystemMusicAdapter({
+    id: 'local-folder',
+    capability: supportedCapability,
+    storage,
+    mediaIndex,
+  })
+  await restored.initialize()
+  assert.equal(restored.getStats().reselectRequired, true)
+  assert.equal(restored.getStats().libraryMode, 'session-files')
+  assert.equal(restored.accessState, 'prompt')
+  assert.equal(restored.isAvailable(), false)
+  assert.equal((await restored.fetchTracks()).tracks.length, 0)
+  assert.equal(cleared.includes('local-folder'), true)
+  const stale = createTrack({
+    sourceId: 'local-folder',
+    externalId: 'Car/a/song.mp3',
+    title: 'song',
+    artist: 'Unknown Artist',
+  })
+  const unavailable = await restored.checkTrackAvailability(stale)
+  assert.equal(unavailable.status, PLAYBACK_AVAILABILITY_STATUS.UNAVAILABLE)
 })
 
 test('object URL is cached, replaced and revoked without being stored on the track', async () => {

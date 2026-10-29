@@ -12,6 +12,7 @@ import type { TrackAvailabilityProbe } from '../../../types/playbackAvailability
 import { assessLocalFileAvailability } from '../../../services/playbackAvailability/localProbe.ts'
 import { stripFileExtension, mimeTypeForAudioFileName } from './audioFormats.ts'
 import { scanDirectoryForAudio } from './directoryScanner.ts'
+import { importAudioFromFileList } from './fileListImport.ts'
 import {
   clearLocalLibraryStorage,
   loadDirectoryHandle,
@@ -28,6 +29,7 @@ import type {
   IndexedLocalFile,
   LocalAccessState,
   LocalLibraryListener,
+  LocalLibraryMode,
   LocalLibrarySnapshot,
   LocalLibraryStats,
   LocalScanProgress,
@@ -146,6 +148,8 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
   private readonly progressListeners = new Set<LocalScanProgressListener>()
 
   private directoryHandle: FileSystemDirectoryHandle | null = null
+  private libraryMode: LocalLibraryMode | null = null
+  private reselectRequired = false
   private folderName: string | null = null
   private subdirectoryCount = 0
   private lastScanAt: number | null = null
@@ -191,11 +195,13 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
   }
 
   isAvailable(): boolean {
-    return (
-      this.accessState === 'granted' &&
-      this.directoryHandle !== null &&
-      this.tracksById.size > 0
-    )
+    if (this.accessState !== 'granted' || this.tracksById.size === 0) {
+      return false
+    }
+    if (this.libraryMode === 'session-files') {
+      return true
+    }
+    return this.directoryHandle !== null
   }
 
   async dispose(): Promise<void> {
@@ -213,6 +219,8 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
       subdirectoryCount: this.subdirectoryCount,
       lastScanAt: this.lastScanAt,
       accessState: this.accessState,
+      libraryMode: this.libraryMode,
+      reselectRequired: this.reselectRequired,
     }
   }
 
@@ -259,6 +267,8 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
       throw new Error('Нет разрешения на чтение папки')
     }
 
+    this.reselectRequired = false
+    this.libraryMode = 'handle'
     this.directoryHandle = handle
     this.folderName = handle.name
     this.accessState = 'granted'
@@ -268,8 +278,87 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
     return this.getStats()
   }
 
+  /**
+   * Временный режим из FileList (webkitdirectory или multiple audio).
+   * Directory handle не создаётся и в IndexedDB не пишется.
+   */
+  async connectFromFileList(
+    list: FileList | readonly File[],
+    options?: { fallbackFolderName?: string },
+  ): Promise<LocalLibraryStats> {
+    this.scanAbort?.abort()
+    const controller = new AbortController()
+    this.scanAbort = controller
+    const hadLibrary = this.tracksById.size > 0
+
+    try {
+      const result = importAudioFromFileList(list, {
+        signal: controller.signal,
+        fallbackFolderName: options?.fallbackFolderName,
+        onProgress: (progress) => {
+          if (this.scanAbort === controller) {
+            this.setProgress(progress)
+          }
+        },
+      })
+      if (result.files.length === 0) {
+        this.setProgress({
+          phase: 'error',
+          processedFiles: result.totalFilesSeen,
+          totalFiles: result.totalFilesSeen,
+          foundTracks: 0,
+          message: 'В выборе нет поддерживаемых аудиофайлов.',
+        })
+        throw new Error('В выборе нет поддерживаемых аудиофайлов.')
+      }
+
+      this.directoryHandle = null
+      this.libraryMode = 'session-files'
+      this.reselectRequired = false
+      this.accessState = 'granted'
+      await this.storage.clear()
+      await this.commitIndexedFiles(result.files, {
+        folderName: result.folderName,
+        subdirectoryCount: result.subdirectoryCount,
+        libraryMode: 'session-files',
+      }, controller)
+      return this.getStats()
+    } catch (error) {
+      if (this.scanAbort !== controller) {
+        throw error
+      }
+      if (!hadLibrary) {
+        await this.mediaIndex.clearSource(this.id)
+      }
+      if (isAbortError(error)) {
+        this.setProgress({
+          phase: 'idle',
+          processedFiles: 0,
+          totalFiles: 0,
+          foundTracks: this.tracksById.size,
+        })
+        throw error
+      }
+      this.setProgress({
+        phase: 'error',
+        processedFiles: this.scanProgress.processedFiles,
+        totalFiles: this.scanProgress.totalFiles,
+        foundTracks: this.tracksById.size,
+        message: error instanceof Error ? error.message : 'Ошибка импорта файлов',
+      })
+      throw error
+    } finally {
+      if (this.scanAbort === controller) {
+        this.scanAbort = null
+      }
+    }
+  }
+
   /** Повторный запрос разрешения для сохранённого handle. */
   async requestAccess(): Promise<LocalLibraryStats> {
+    if (this.libraryMode === 'session-files' || this.reselectRequired) {
+      throw new Error('Требуется повторно выбрать папку или аудиофайлы.')
+    }
     if (!this.directoryHandle) {
       return this.connectFolder()
     }
@@ -287,6 +376,9 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
   }
 
   async rescan(): Promise<LocalLibraryStats> {
+    if (this.libraryMode === 'session-files' || this.reselectRequired) {
+      throw new Error('Требуется повторно выбрать папку или аудиофайлы.')
+    }
     if (!this.directoryHandle) {
       throw new Error('Папка не подключена')
     }
@@ -307,6 +399,8 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
     this.scanAbort?.abort()
     this.scanAbort = null
     this.directoryHandle = null
+    this.libraryMode = null
+    this.reselectRequired = false
     this.folderName = null
     this.subdirectoryCount = 0
     this.lastScanAt = null
@@ -411,26 +505,47 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
       accessState: this.accessState,
       hasDirectoryHandle: this.directoryHandle !== null,
       hasFileHandle: Boolean(file?.handle),
+      hasSessionFile: Boolean(file?.file),
     })
   }
 
   private async restoreFromStorage(): Promise<void> {
-    if (!this.capability().supported) {
-      this.accessState = 'unsupported'
+    const handle = await this.storage.loadDirectoryHandle()
+    const snapshot = await this.storage.loadLibrarySnapshot()
+
+    if (!handle && snapshot?.libraryMode === 'session-files') {
+      this.directoryHandle = null
+      this.libraryMode = 'session-files'
+      this.reselectRequired = true
+      this.folderName = snapshot.folderName
+      this.subdirectoryCount = snapshot.subdirectoryCount
+      this.lastScanAt = snapshot.lastScanAt
+      this.accessState = 'prompt'
+      this.clearIndexedData()
+      await this.mediaIndex.clearSource(this.id)
       this.emitStats()
       return
     }
 
-    const handle = await this.storage.loadDirectoryHandle()
-    const snapshot = await this.storage.loadLibrarySnapshot()
+    if (!this.capability().supported) {
+      this.accessState = 'unsupported'
+      this.libraryMode = null
+      this.reselectRequired = false
+      this.emitStats()
+      return
+    }
 
     if (!handle) {
       this.accessState = 'idle'
+      this.libraryMode = null
+      this.reselectRequired = false
       this.emitStats()
       return
     }
 
     this.directoryHandle = handle
+    this.libraryMode = 'handle'
+    this.reselectRequired = false
     this.folderName = handle.name || snapshot?.folderName || null
 
     let permission: PermissionState
@@ -520,12 +635,40 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
     result: Awaited<ReturnType<typeof scanDirectoryForAudio>>,
     controller: AbortController,
   ): Promise<void> {
+    this.libraryMode = 'handle'
+    this.reselectRequired = false
+    await this.commitIndexedFiles(
+      result.files,
+      {
+        folderName: handle.name,
+        subdirectoryCount: result.subdirectoryCount,
+        libraryMode: 'handle',
+      },
+      controller,
+    )
+  }
+
+  private async commitIndexedFiles(
+    files: readonly IndexedLocalFile[],
+    meta: {
+      folderName: string
+      subdirectoryCount: number
+      libraryMode: LocalLibraryMode
+    },
+    controller: AbortController,
+  ): Promise<void> {
     if (this.scanAbort !== controller || controller.signal.aborted) {
       throw new DOMException('Scanning aborted', 'AbortError')
     }
 
-    const tracks = result.files.map((file) => this.buildTrackShell(file))
-    const mediaFiles = result.files.map((file) => ({
+    for (const file of files) {
+      if (!file.handle && !file.file) {
+        throw new Error(`Локальный файл без источника: ${file.relativePath}`)
+      }
+    }
+
+    const tracks = files.map((file) => this.buildTrackShell(file))
+    const mediaFiles = files.map((file) => ({
       sourceId: this.id,
       externalId: file.relativePath,
       path: file.relativePath,
@@ -537,22 +680,25 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
     }
 
     this.clearIndexedData()
-    for (const file of result.files) {
+    for (const file of files) {
       this.filesByPath.set(file.relativePath, file)
     }
     for (const track of tracks) {
       this.tracksById.set(track.id, track)
     }
 
-    this.subdirectoryCount = result.subdirectoryCount
+    this.subdirectoryCount = meta.subdirectoryCount
     this.lastScanAt = Date.now()
-    this.folderName = handle.name
+    this.folderName = meta.folderName
+    this.libraryMode = meta.libraryMode
+    this.reselectRequired = false
     const snapshot: LocalLibrarySnapshot = {
-      folderName: handle.name,
-      trackCount: result.files.length,
-      subdirectoryCount: result.subdirectoryCount,
+      folderName: meta.folderName,
+      trackCount: files.length,
+      subdirectoryCount: meta.subdirectoryCount,
       lastScanAt: this.lastScanAt,
-      relativePaths: result.files.map((file) => file.relativePath),
+      relativePaths: files.map((file) => file.relativePath),
+      libraryMode: meta.libraryMode,
     }
     await this.storage.saveLibrarySnapshot(snapshot)
     this.emitStats()
@@ -583,15 +729,15 @@ export class FileSystemMusicAdapter implements MusicSourceAdapter {
       throw new Error(`[${this.id}] File not found: ${externalId}`)
     }
 
-    const fileHandle = await file.handle.getFile()
+    const source = file.file ?? (file.handle ? await file.handle.getFile() : null)
+    if (!source) {
+      throw new Error(`[${this.id}] File source missing: ${externalId}`)
+    }
     const mime =
-      fileHandle.type ||
+      source.type ||
       mimeTypeForAudioFileName(file.fileName) ||
       'application/octet-stream'
-    const blob =
-      fileHandle.type === mime
-        ? fileHandle
-        : new Blob([fileHandle], { type: mime })
+    const blob = source.type === mime ? source : new Blob([source], { type: mime })
     const url = URL.createObjectURL(blob)
     return this.urlCache.set(externalId, url)
   }

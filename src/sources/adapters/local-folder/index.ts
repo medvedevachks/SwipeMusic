@@ -7,6 +7,16 @@ export {
   type LocalAudioExtension,
 } from './audioFormats'
 export { ObjectUrlCache } from './ObjectUrlCache'
+export { importAudioFromFileList } from './fileListImport'
+export {
+  openLocalFilePicker,
+  readFileListCapability,
+} from './localFilePicker'
+export {
+  assessLocalFileListCapability,
+  readLocalCapability,
+  readLocalFileListCapability,
+} from './localCapability'
 export {
   FileSystemMusicAdapter,
   createLocalFolderAdapter,
@@ -15,6 +25,7 @@ export {
 } from './FileSystemMusicAdapter'
 export type {
   LocalAccessState,
+  LocalLibraryMode,
   LocalLibrarySnapshot,
   LocalLibraryStats,
   LocalScanProgress,

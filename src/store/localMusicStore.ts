@@ -8,6 +8,7 @@ import type {
   LocalLibraryStats,
   LocalScanProgress,
 } from '../sources/adapters/local-folder'
+import { openLocalFilePicker } from '../sources/adapters/local-folder/localFilePicker'
 import { useSourceManagerStore } from './sourceManagerStore'
 
 type LocalMusicStore = {
@@ -17,9 +18,15 @@ type LocalMusicStore = {
   error: string | null
   libraryGeneration: number
   connectFolder: () => Promise<void>
+  connectFolderViaFileInput: () => Promise<void>
+  connectAudioFiles: () => Promise<void>
   requestAccess: () => Promise<void>
   rescan: () => Promise<void>
   disconnect: () => Promise<void>
+}
+
+function describeDirectoryPickerAbort(): string {
+  return 'Выбор папки отменён или системный диалог не открылся. Попробуйте «Выбрать папку другим способом».'
 }
 
 const idleProgress: LocalScanProgress = {
@@ -85,11 +92,103 @@ export const useLocalMusicStore = create<LocalMusicStore>((set, get) => {
         })
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
-          set({ isBusy: false })
+          set({
+            isBusy: false,
+            error: describeDirectoryPickerAbort(),
+            progress: adapter.getScanProgress(),
+          })
           return
         }
         set({
           error: error instanceof Error ? error.message : 'Не удалось выбрать папку',
+        })
+      } finally {
+        set({ isBusy: false, progress: adapter.getScanProgress() })
+      }
+    },
+
+    connectFolderViaFileInput: async () => {
+      set({ isBusy: true, error: null })
+      try {
+        const picked = await openLocalFilePicker('directory')
+        if (picked.status === 'cancelled') {
+          set({
+            isBusy: false,
+            error: 'Выбор папки отменён.',
+            progress: adapter.getScanProgress(),
+          })
+          return
+        }
+        if (picked.status === 'unavailable') {
+          set({ isBusy: false, error: picked.message })
+          return
+        }
+        await adapter.connectFromFileList(picked.files, {
+          fallbackFolderName: 'Выбранная папка',
+        })
+        syncEnabledFromAdapter()
+        set({
+          stats: adapter.getStats(),
+          libraryGeneration: get().libraryGeneration + 1,
+        })
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          set({
+            isBusy: false,
+            error: 'Импорт папки прерван.',
+            progress: adapter.getScanProgress(),
+          })
+          return
+        }
+        set({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Не удалось импортировать папку',
+        })
+      } finally {
+        set({ isBusy: false, progress: adapter.getScanProgress() })
+      }
+    },
+
+    connectAudioFiles: async () => {
+      set({ isBusy: true, error: null })
+      try {
+        const picked = await openLocalFilePicker('audio-files')
+        if (picked.status === 'cancelled') {
+          set({
+            isBusy: false,
+            error: 'Выбор аудиофайлов отменён.',
+            progress: adapter.getScanProgress(),
+          })
+          return
+        }
+        if (picked.status === 'unavailable') {
+          set({ isBusy: false, error: picked.message })
+          return
+        }
+        await adapter.connectFromFileList(picked.files, {
+          fallbackFolderName: 'Выбранные файлы',
+        })
+        syncEnabledFromAdapter()
+        set({
+          stats: adapter.getStats(),
+          libraryGeneration: get().libraryGeneration + 1,
+        })
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          set({
+            isBusy: false,
+            error: 'Импорт аудиофайлов прерван.',
+            progress: adapter.getScanProgress(),
+          })
+          return
+        }
+        set({
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Не удалось импортировать аудиофайлы',
         })
       } finally {
         set({ isBusy: false, progress: adapter.getScanProgress() })
@@ -107,7 +206,11 @@ export const useLocalMusicStore = create<LocalMusicStore>((set, get) => {
         })
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
-          set({ isBusy: false })
+          set({
+            isBusy: false,
+            error: describeDirectoryPickerAbort(),
+            progress: adapter.getScanProgress(),
+          })
           return
         }
         set({
@@ -132,7 +235,11 @@ export const useLocalMusicStore = create<LocalMusicStore>((set, get) => {
         })
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
-          set({ isBusy: false })
+          set({
+            isBusy: false,
+            error: 'Пересканирование прервано.',
+            progress: adapter.getScanProgress(),
+          })
           return
         }
         set({
