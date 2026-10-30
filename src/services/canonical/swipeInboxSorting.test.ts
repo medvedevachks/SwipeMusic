@@ -6,6 +6,7 @@ import { getPlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
 import { SYS_SWIPES_ID } from '../catalogs/systemFolders.ts'
 import { isRecommendationAdvanceContext } from '../recommendation/advance.ts'
 import {
+  getRecommendationAdvanceEpoch,
   getRecommendationSessionMode,
   resetRecommendationSessionRuntimeForTests,
 } from '../recommendation/sessionRuntime.ts'
@@ -137,6 +138,22 @@ test('startSwipeInboxSorting empty inbox', async () => {
     playTrack: async () => undefined,
   })
   assert.equal(result.status, 'empty')
+})
+
+test('startSwipeInboxSorting invalidates recommendation advance epoch', async () => {
+  installMemoryLocalStorage()
+  resetRecommendationSessionRuntimeForTests()
+  resetRecommendationSessionStateForTests()
+  resetSwipeInboxPlayGenerationForTests()
+  getPlaybackQueue().clear()
+  const before = getRecommendationAdvanceEpoch()
+  const result = await startSwipeInboxSorting({
+    items: [item('can_a', 'A')],
+    playTrack: async () => undefined,
+  })
+  assert.equal(result.status, 'played')
+  assert.equal(getRecommendationAdvanceEpoch(), before + 1)
+  getPlaybackQueue().clear()
 })
 
 test('startSwipeInboxSorting resets leftover search deck mode', async () => {

@@ -17,6 +17,7 @@ import { loadSessionTasteProfile } from '../taste/loadSessionTasteProfile.ts'
 import { recommendNext } from './engine.ts'
 import {
   getRecommendationAdvanceEpoch,
+  invalidateRecommendationAdvance,
   resetRecommendationAdvanceEpochForTests,
 } from './advanceEpoch.ts'
 import {
@@ -94,6 +95,8 @@ export function activateRecommendationSession(
 export function clearRecommendationSession(): void {
   clearRecommendationExhausted()
   setActiveRecommendationMode(null)
+  // Inbox/Catalog поверх Wave/Search: inflight Next/ended не должен stop()/playTrack.
+  invalidateRecommendationAdvance()
 }
 
 export function resetRecommendationSessionRuntimeForTests(): void {
@@ -140,6 +143,8 @@ export function commitRecommendationSeed(input: {
   mode: Exclude<ActiveRecommendationMode, 'search'>
   track: Track
 }): void {
+  // Новый seed (wave/swipe) отменяет inflight advance предыдущей сессии.
+  invalidateRecommendationAdvance()
   activateRecommendationSession(input.mode, { forceProvider: true })
   const queue = getPlaybackQueue()
   if (input.mode === 'wave') {

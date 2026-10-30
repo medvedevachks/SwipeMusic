@@ -8,7 +8,7 @@
 | Дата снимка | 2026-10-30 (UX-10 pre-production release gate) |
 | Канонический репозиторий | https://github.com/medvedevachks/SwipeMusic |
 | Ветка снимка | `fix/ux-10a-left-up-race` → PR #2 в `feature/deploy-windows-01` |
-| Проверенный HEAD | Pre-prod gate: stale adapter pause fix + inbox Play без ожидания провайдера + session buckets. S1 deploy не выполнялся. |
+| Проверенный HEAD | Pre-prod gate + follow-up: advance epoch invalidate на inbox/seed, session mid-flight guards, identityFlights finally. S1 deploy не выполнялся. |
 | Исторический upstream | https://github.com/r-sh-galimov/SwipeMusic |
 
 **Легенда источников фактов**

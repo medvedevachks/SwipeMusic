@@ -123,7 +123,13 @@ export async function runLibraryMutation<T>(task: () => Promise<T>): Promise<T |
   }
 }
 
-function enqueue(task: () => Promise<void>): void {
+function assertEnqueueSession(session: AuthSessionSnapshot): void {
+  if (!isLibraryPersistenceArmed() || !isAuthSessionCurrent(session)) {
+    throw new StaleLibrarySessionError()
+  }
+}
+
+function enqueue(task: (session: AuthSessionSnapshot) => Promise<void>): void {
   if (!isLibraryPersistenceArmed()) {
     return
   }
@@ -138,7 +144,7 @@ function enqueue(task: () => Promise<void>): void {
       if (!isLibraryPersistenceArmed() || !isAuthSessionCurrent(session)) {
         return
       }
-      await task()
+      await task(session)
     } catch (error) {
       if (!(error instanceof StaleLibrarySessionError)) {
         applyFailureIfCurrent(session, error, 'save')
@@ -184,11 +190,13 @@ export function persistTrackDelete(trackId: string): void {
 }
 
 export function persistAssignment(track: Track, assignment: TrackAssignment): void {
-  enqueue(async () => {
+  enqueue(async (session) => {
     await libraryClient.upsertTrack(
       track.id,
       toTrackUpsertBody(trackFromDomain(track), null, { includeUserFields: false }),
     )
+    // Mid-flight logout/login: cookie уже B — не писать assign в чужую библиотеку.
+    assertEnqueueSession(session)
     await libraryClient.assign(track.id, assignment)
   })
 }
@@ -198,11 +206,12 @@ export function persistUnassign(trackId: string, categoryId: string): void {
 }
 
 export function persistHistory(entry: HistoryEntry): void {
-  enqueue(async () => {
+  enqueue(async (session) => {
     await libraryClient.upsertTrack(
       entry.track.id,
       toTrackUpsertBody(trackFromDomain(entry.track), null, { includeUserFields: false }),
     )
+    assertEnqueueSession(session)
     await libraryClient.appendHistory(entry)
   })
 }

@@ -81,7 +81,10 @@ export async function ensureCanonicalForTrack(track: Track): Promise<CanonicalLi
       return useCanonicalLibraryStore.getState().absorbIdentity(identity)
     })
     .finally(() => {
-      identityFlights.delete(key)
+      // Не сносить flight B после clear + ensure того же sourceTrackKey.
+      if (identityFlights.get(key) === pending) {
+        identityFlights.delete(key)
+      }
     })
   identityFlights.set(key, pending)
   return pending
@@ -204,6 +207,7 @@ export async function commitCatalogChoice(
     return { status: 'failed' }
   }
 
+  const session = captureAuthSession()
   const key = sourceTrackKeyOf(track)
   const before = useCanonicalLibraryStore.getState()
   const priorId = before.sourceKeyToCanonicalId[key]
@@ -212,9 +216,13 @@ export async function commitCatalogChoice(
 
   if (!alreadyInTarget) {
     const saved = await assignSourceToCatalog(track, catalogId)
-    if (!saved) {
+    if (!saved || !isAuthSessionCurrent(session)) {
       return { status: 'failed' }
     }
+  }
+
+  if (!isAuthSessionCurrent(session)) {
+    return { status: 'failed' }
   }
 
   const after = useCanonicalLibraryStore.getState()
@@ -227,6 +235,9 @@ export async function commitCatalogChoice(
   if (stillInInbox && canonicalId) {
     // liked не трогаем. Не откатываем assign при ошибке unassign.
     const removed = await removeCanonicalFromCatalog(canonicalId, SYS_SWIPES_ID)
+    if (!isAuthSessionCurrent(session)) {
+      return { status: 'failed' }
+    }
     if (!removed) {
       if (!alreadyInTarget) {
         useCollectionStore.getState().recordHistory({
@@ -241,6 +252,10 @@ export async function commitCatalogChoice(
         canonicalTrackId: canonicalId,
       }
     }
+  }
+
+  if (!isAuthSessionCurrent(session)) {
+    return { status: 'failed' }
   }
 
   if (!alreadyInTarget) {

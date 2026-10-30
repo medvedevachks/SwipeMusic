@@ -7,6 +7,7 @@ import {
 } from '../auth/sessionEpoch.ts'
 import { LibraryHttpError } from './client.ts'
 import {
+  persistAssignment,
   resetLibraryMutationQueuesForTests,
   runLibraryMutation,
 } from './mutations.ts'
@@ -218,4 +219,70 @@ test('A completes after B while B still has parallel saves; B reaches ready', as
   gateB2.resolve('b2')
   assert.equal(await pendingB2, 'b2')
   assert.equal(useLibraryPersistenceStore.getState().status, 'ready')
+})
+
+test('persistAssignment mid-flight session switch does not call assign for B', async () => {
+  reset()
+  bindAuthSessionEpoch('user-a')
+  useLibraryPersistenceStore.setState({
+    armed: true,
+    status: 'ready',
+    message: null,
+  })
+
+  let releaseUpsert!: () => void
+  const upsertGate = new Promise<void>((resolve) => {
+    releaseUpsert = resolve
+  })
+  const calls: string[] = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    const method = init?.method ?? 'GET'
+    if (method === 'PUT' && url.includes('/categories/')) {
+      calls.push('assign')
+      return new Response(null, { status: 204 })
+    }
+    if (method === 'PUT' && url.includes('/collection/tracks/')) {
+      calls.push('upsert')
+      await upsertGate
+      return new Response(null, { status: 204 })
+    }
+    calls.push(`${method} ${url}`)
+    return new Response(null, { status: 204 })
+  }) as typeof fetch
+
+  try {
+    persistAssignment(
+      {
+        id: 'yandex-music:1',
+        sourceId: 'yandex-music',
+        externalId: '1',
+        title: 'T',
+        artist: 'A',
+      },
+      {
+        id: 'asg_1',
+        trackId: 'yandex-music:1',
+        categoryId: 'cat_car',
+        createdAt: '2026-10-30T00:00:00.000Z',
+      },
+    )
+    await Promise.resolve()
+    await Promise.resolve()
+    assert.deepEqual(calls, ['upsert'])
+
+    bindAuthSessionEpoch('user-b')
+    useLibraryPersistenceStore.setState({
+      armed: true,
+      status: 'ready',
+      message: null,
+    })
+    releaseUpsert()
+    await new Promise((r) => setTimeout(r, 20))
+    assert.deepEqual(calls, ['upsert'])
+    assert.equal(useLibraryPersistenceStore.getState().status, 'ready')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })

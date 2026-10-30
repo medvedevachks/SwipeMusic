@@ -124,10 +124,6 @@ export async function startSwipeInboxSorting(
       return { status: 'error', message: 'Не удалось начать воспроизведение.' }
     }
 
-    if (generation !== inboxPlayGeneration) {
-      return { status: 'error', message: 'Не удалось начать воспроизведение.' }
-    }
-
     const play =
       input.playTrack ??
       (async (track: Track) => {

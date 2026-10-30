@@ -912,6 +912,11 @@ export class AudioPlayer {
       return
     }
 
+    // Inbox/Catalog/другой seed уже сменил контекст — не stop и не playTrack поверх.
+    if (!isRecommendationAdvanceContext(getPlaybackQueue().getPlaybackContext())) {
+      return
+    }
+
     if (!advanced) {
       // Сохраняем последнюю рекомендацию для карточки; не сбрасываем queueIndex на -1
       // (иначе focus падает на queue[0] и Home выглядит как search hits).
@@ -933,6 +938,9 @@ export class AudioPlayer {
 
     await this.playTrack(advanced.track)
     if (epoch !== getRecommendationAdvanceEpoch()) {
+      return
+    }
+    if (!isRecommendationAdvanceContext(getPlaybackQueue().getPlaybackContext())) {
       return
     }
     // Prefetch только после новой рекомендации на конце истории — не при Previous/Next по хвосту.
