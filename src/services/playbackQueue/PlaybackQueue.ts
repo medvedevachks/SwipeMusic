@@ -8,9 +8,24 @@ import {
   noteContextChange,
   noteSearchFlowEvent,
 } from '../continuation/searchFlowDiag.ts'
+import {
+  buildDurableSessionState,
+  validatePlaybackQueueSessionState,
+  type PlaybackQueueSessionState,
+  type SessionStateIssue,
+} from './playbackQueueSessionState.ts'
 
 export type RepeatMode = 'OFF' | 'ONE' | 'ALL'
 export type ShuffleMode = 'OFF' | 'ON'
+
+export type {
+  PlaybackQueueSessionState,
+  SessionStateIssue,
+} from './playbackQueueSessionState.ts'
+
+export type ImportSessionStateResult =
+  | { ok: true; state: PlaybackQueueSessionState }
+  | { ok: false; issues: SessionStateIssue[] }
 
 export type PlaybackQueueSnapshot = {
   items: Track[]
@@ -512,6 +527,77 @@ export class PlaybackQueue {
   /** Id, отложенно снятые с очереди, но ещё звучащие. Для тестов / UI. */
   getPendingRemovalIds(): readonly string[] {
     return [...this.pendingRemovalIds]
+  }
+
+  /** Provenance insertNext / continuation tail. */
+  getSessionTailIds(): readonly string[] {
+    return [...this.sessionTailIds]
+  }
+
+  /**
+   * Полный durable-экспорт для PlaybackSessionStore (PLAYBACK-DEV-03).
+   * Не мутирует live-очередь. Не трогает AudioPlayer.
+   *
+   * pendingRemovalIds: runtime-only. В экспорт попадают только треки,
+   * которые должны остаться в будущей очереди после восстановления —
+   * «призраки» (удалены из каталога, но ещё играют) исключаются.
+   */
+  exportSessionState(): PlaybackQueueSessionState {
+    return buildDurableSessionState({
+      items: this.items,
+      currentIndex: this.currentIndex,
+      playOrder: this.playOrder,
+      playOrderIndex: this.playOrderIndex,
+      repeatMode: this.repeatMode,
+      shuffleMode: this.shuffleMode,
+      history: this.history,
+      historyIndex: this.historyIndex,
+      context: this.context,
+      sessionTailIds: this.sessionTailIds,
+      pendingRemovalIds: this.pendingRemovalIds,
+    })
+  }
+
+  /**
+   * Атомарное восстановление полного состояния без setQueue().
+   * Валидация до мутации: при ошибке очередь не меняется.
+   * Один emit() подписчикам. Не запускает / не останавливает AudioPlayer.
+   * pendingRemovalIds после импорта пусты (durable).
+   */
+  importSessionState(raw: unknown): ImportSessionStateResult {
+    const validated = validatePlaybackQueueSessionState(raw)
+    if (!validated.ok) {
+      return validated
+    }
+    const next = validated.value
+    const contextBefore = this.context.type
+    const lengthBefore = this.items.length
+
+    this.items = next.items.map(stripPreview)
+    this.currentIndex = next.currentIndex
+    this.playOrder = [...next.playOrder]
+    this.playOrderIndex = next.playOrderIndex
+    this.repeatMode = next.repeatMode
+    this.shuffleMode = next.shuffleMode
+    this.history = [...next.history]
+    this.historyIndex = next.historyIndex
+    this.context = next.context
+    this.sessionTailIds = new Set(next.sessionTailIds)
+    this.pendingRemovalIds.clear()
+
+    noteSearchFlowEvent({
+      source: 'PlaybackQueue.importSessionState',
+      contextBefore,
+      contextAfter: this.context.type,
+      queueLengthBefore: lengthBefore,
+      queueLengthAfter: this.items.length,
+      currentIndex: this.currentIndex,
+      trackId: this.items[this.currentIndex]?.id ?? null,
+      detail: 'session-state-import',
+    })
+
+    this.emit()
+    return { ok: true, state: this.exportSessionState() }
   }
 
   move(from: number, to: number): void {

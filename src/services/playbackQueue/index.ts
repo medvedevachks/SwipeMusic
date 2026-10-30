@@ -7,4 +7,11 @@ export {
   type PlaybackQueueSnapshot,
   type PlaybackQueueListener,
   type PersistedPlaybackQueue,
+  type PlaybackQueueSessionState,
+  type SessionStateIssue,
+  type ImportSessionStateResult,
 } from './PlaybackQueue'
+export {
+  validatePlaybackQueueSessionState,
+  buildDurableSessionState,
+} from './playbackQueueSessionState.ts'
