@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import CategoryPickerSheet from '../components/CategoryPickerSheet'
 import { PlayIcon } from '../components/icons'
 import { getCategoryGlyph } from '../config/categoryPresets'
@@ -11,6 +11,7 @@ import {
   preferredTrackFromCanonical,
 } from '../services/canonical/selectors'
 import { removeSortedCanonicalFromSwipesQueue } from '../services/canonical/swipeInboxQueue'
+import { startSwipeInboxSorting } from '../services/canonical/swipeInboxSorting'
 import { commitCatalogChoice } from '../services/canonical/userOrganization'
 import { sourceTrackKeyOf } from '../services/canonical/mapCanonical'
 import { createCategoryConfirmed } from '../services/catalogs/createCategoryConfirmed'
@@ -37,6 +38,7 @@ export type LibraryFolderProps = {
 }
 
 export default function LibraryFolder({ folderId }: LibraryFolderProps) {
+  const navigate = useNavigate()
   const folder = LIBRARY_SYSTEM_FOLDERS.find((row) => row.id === folderId)!
   const itemsById = useCanonicalLibraryStore((state) => state.itemsById)
   const allCategories = useCollectionStore((state) => state.categories)
@@ -108,6 +110,24 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
     setPlayError(null)
     setPlayHint(null)
     try {
+      // UX-10: «Свайпы» → главная для разбора, не playlist-loop каталога.
+      if (folderId === 'swipes') {
+        const result = await startSwipeInboxSorting({
+          startCanonicalTrackId,
+          items: tracks,
+        })
+        if (generation !== playGeneration.current) {
+          return
+        }
+        if (result.status === 'played') {
+          setPlayError(null)
+          navigate('/', { state: { focusHomeTab: 'sorting' } })
+          return
+        }
+        setPlayError(result.message)
+        return
+      }
+
       const result = await playUserCatalog({
         catalog: catalogRef,
         items: tracks,

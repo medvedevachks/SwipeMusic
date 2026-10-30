@@ -5,6 +5,7 @@
 import { isDemoSourceId } from '../../sources/demoSource.ts'
 import type { PlaybackContext } from '../../types/playbackContext.ts'
 import type { Track } from '../../types/track.ts'
+import { SYS_SWIPES_ID } from '../catalogs/systemFolders.ts'
 import { isSearchFlowHarnessEnabled } from '../continuation/searchFlowHarnessFlag.ts'
 
 export type HomeDeckStage = 'sorting' | 'wave'
@@ -40,6 +41,14 @@ export function isRecommendationHomeDeckContext(input: {
     return true
   }
   if (stage === 'sorting' && context.type === 'swipe' && sessionMode === 'catalog') {
+    return true
+  }
+  // Разбор папки «Свайпы»: колода = очередь inbox, sync с плеером.
+  if (
+    stage === 'sorting' &&
+    context.type === 'playlist' &&
+    context.id === SYS_SWIPES_ID
+  ) {
     return true
   }
   if (

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { AlbumModeBanner } from '../components/AlbumModeBanner'
 import { HomeCatalogsPanel } from '../components/catalog/HomeCatalogsPanel'
 import CategoryPickerSheet from '../components/CategoryPickerSheet'
@@ -7,8 +8,10 @@ import WaveStartCard from '../components/WaveStartCard'
 import { cancelCatalogPlaybackGate } from '../services/catalogPlayback'
 import { useSwipeFeed } from '../hooks/useSwipeFeed'
 import { getAudioPlayer } from '../services/audioPlayer'
+import { removeSortedCanonicalFromSwipesQueue } from '../services/canonical/swipeInboxQueue.ts'
 import { commitCatalogChoice } from '../services/canonical/userOrganization.ts'
 import { createCategoryConfirmed } from '../services/catalogs/createCategoryConfirmed.ts'
+import { SYS_SWIPES_ID } from '../services/catalogs/systemFolders.ts'
 import { SAVE_FAILED_MESSAGE } from '../services/libraryPersistence/statusStore.ts'
 import {
   beginSearchFlowCommand,
@@ -53,6 +56,10 @@ function initialHomeTab(): HomeTab {
   if (context.type === 'radio') {
     return 'wave'
   }
+  // Разбор inbox — вкладка «Свайпы», не «Каталоги».
+  if (context.type === 'playlist' && context.id === SYS_SWIPES_ID) {
+    return 'sorting'
+  }
   if (context.type === 'playlist') {
     return 'catalogs'
   }
@@ -60,6 +67,8 @@ function initialHomeTab(): HomeTab {
 }
 
 export default function Home() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const { tracks, isLoading, error, mode, searchQuery } = useSwipeFeed()
   const resetToCatalog = useSwipeDeckSessionStore((state) => state.resetToCatalog)
   const gestureConfig = useCollectionStore((state) => state.gestureConfig)
@@ -99,6 +108,15 @@ export default function Home() {
   const [pendingTrack, setPendingTrack] = useState<Track | null>(null)
   const [categorizeNotice, setCategorizeNotice] = useState<string | null>(null)
   const [categorizeBusy, setCategorizeBusy] = useState(false)
+
+  // Play из /library/swipes → сразу вкладка «Свайпы».
+  useEffect(() => {
+    const state = location.state as { focusHomeTab?: HomeTab } | null
+    if (state?.focusHomeTab === 'sorting' || state?.focusHomeTab === 'wave' || state?.focusHomeTab === 'catalogs') {
+      setHomeTab(state.focusHomeTab)
+      navigate('.', { replace: true, state: null })
+    }
+  }, [location.state, navigate])
   const likedCount = useCanonicalLibraryStore((state) =>
     Object.values(state.itemsById).filter(
       (item) =>
@@ -209,7 +227,11 @@ export default function Home() {
       sessionMode === 'catalog' &&
       active !== 'swipe'
     ) {
-      activateRecommendationSession('swipe')
+      // forceProvider только после wave (другой engine mode). search→swipe уже
+      // toEngineMode='swipe'; не сбрасываем очередь / exhausted лишний раз.
+      activateRecommendationSession('swipe', {
+        forceProvider: active === 'wave',
+      })
       return
     }
     if (radioActive && active !== 'wave') {
@@ -485,7 +507,11 @@ export default function Home() {
         playerTrackId &&
         playbackContext.type !== 'swipe' &&
         playbackContext.type !== 'none' &&
-        playbackContext.type !== 'search-seed' ? (
+        playbackContext.type !== 'search-seed' &&
+        !(
+          playbackContext.type === 'playlist' &&
+          playbackContext.id === SYS_SWIPES_ID
+        ) ? (
           <p className="text-center text-xs text-[var(--color-muted)] sm:text-left">
             {radioActive
               ? 'В плеере всё ещё играет «Моя волна». Play на карточке переключит очередь на свайпы.'
@@ -721,6 +747,10 @@ export default function Home() {
               setPendingTrack(null)
               setCategoryResolveKey((value) => value + 1)
               return
+            }
+            // Успех: убрать из будущих циклов inbox-очереди, звук не рвать.
+            if (result.canonicalTrackId) {
+              removeSortedCanonicalFromSwipesQueue(result.canonicalTrackId)
             }
             setCategorizeNotice(null)
             setPendingTrack(null)

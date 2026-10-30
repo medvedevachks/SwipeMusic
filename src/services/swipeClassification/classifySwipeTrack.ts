@@ -1,4 +1,7 @@
 import { commitSwipeLikeWithInbox } from '../canonical/swipeInbox.ts'
+import { sourceTrackKeyOf } from '../canonical/mapCanonical.ts'
+import { isSourceCopyLiked } from '../canonical/selectors.ts'
+import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
 import { useCollectionEngineStore } from '../../store/collectionEngineStore.ts'
 import { useCollectionStore } from '../../store/collectionStore.ts'
 import type { SwipeAction } from '../../types/swipe'
@@ -12,6 +15,7 @@ export type ClassifySwipeResult =
  * Единый semantic handler классификации свайпа.
  * Не трогает playback / queue / context.
  * like → liked + sys_swipes (накопитель). skip → skipped, без inbox.
+ * UP после лайка: только навигация — без markSkipped / history-skip / повторного like.
  */
 export function classifySwipeTrack(
   track: Track,
@@ -27,11 +31,20 @@ export function classifySwipeTrack(
       // Один liked + membership sys_swipes. Не markSkipped.
       return { kind: 'applied', action, saved: commitSwipeLikeWithInbox(track) }
 
-    case 'skip':
-      // «Дальше»: прежняя семантика skipped. В sys_swipes НЕ добавляем.
+    case 'skip': {
+      const alreadyLiked = isSourceCopyLiked(
+        useCanonicalLibraryStore.getState(),
+        sourceTrackKeyOf(track),
+      )
+      if (alreadyLiked) {
+        // Понравившаяся композиция: UP = «следующая», не негативный skip.
+        return { kind: 'applied', action }
+      }
+      // Не лайкнута: согласованная семантика пропуска. В sys_swipes НЕ добавляем.
       collection.recordHistory({ track, action: 'skip' })
       engine.markSkipped(track.id, track)
       return { kind: 'applied', action }
+    }
 
     case 'categorize':
       return { kind: 'needsCategory', action: 'categorize' }
