@@ -19,6 +19,10 @@ import {
   SWIPE_THRESHOLD,
   SWIPE_VERTICAL_THRESHOLD,
 } from '../services/swipeEngine'
+import {
+  captureAuthSession,
+  isAuthSessionCurrent,
+} from '../services/auth/sessionEpoch'
 import { classifySwipeTrack } from '../services/swipeClassification'
 import { SAVE_FAILED_MESSAGE } from '../services/libraryPersistence/statusStore'
 import type { GestureConfig, SwipeDirection } from '../types/gesture'
@@ -598,6 +602,7 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
             settleLikeCard()
             const token = heartTokenRef.current + 1
             heartTokenRef.current = token
+            const likeSession = captureAuthSession()
             const result = classifySwipeTrack(decision.track, 'like')
             const saved = result.kind === 'applied' ? result.saved : undefined
             window.requestAnimationFrame(() => {
@@ -609,6 +614,11 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
             }
             const finishLike = (ok: boolean) => {
               if (heartTokenRef.current !== token) {
+                return
+              }
+              // Logout / смена аккаунта: не показывать успех/ошибку чужой сессии.
+              if (!isAuthSessionCurrent(likeSession)) {
+                setHeart(null)
                 return
               }
               if (!ok) {

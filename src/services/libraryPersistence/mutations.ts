@@ -4,6 +4,7 @@ import type { GestureConfig } from '../../types/gesture'
 import type { HistoryEntry } from '../../types/history'
 import type { Track } from '../../types/track'
 import { useAuthStore } from '../../store/authStore.ts'
+import { StaleLibrarySessionError } from '../auth/sessionEpoch.ts'
 import { libraryClient, LibraryHttpError } from './client.ts'
 import {
   toTrackUpsertBody,
@@ -53,6 +54,10 @@ export async function runLibraryMutation<T>(task: () => Promise<T>): Promise<T |
     }
     return await task()
   } catch (error) {
+    // Смена аккаунта / logout mid-flight — не SAVE_FAILED для нового пользователя.
+    if (error instanceof StaleLibrarySessionError) {
+      return null
+    }
     handleLibraryFailure(error, 'save')
     return null
   } finally {
@@ -78,7 +83,9 @@ function enqueue(task: () => Promise<void>): void {
       }
       await task()
     } catch (error) {
-      handleLibraryFailure(error, 'save')
+      if (!(error instanceof StaleLibrarySessionError)) {
+        handleLibraryFailure(error, 'save')
+      }
     } finally {
       pending -= 1
       if (pending === 0) {

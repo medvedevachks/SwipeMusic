@@ -1,5 +1,10 @@
 import type { Track } from '../../types/track.ts'
 import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
+import {
+  captureAuthSession,
+  isAuthSessionCurrent,
+  StaleLibrarySessionError,
+} from '../auth/sessionEpoch.ts'
 import { ensureSysSwipesCategory } from '../catalogs/ensureSysSwipes.ts'
 import {
   itemHasUserCatalogMembership,
@@ -25,28 +30,43 @@ export async function commitSwipeLikeWithInbox(track: Track): Promise<boolean> {
     return false
   }
 
-  const likedOk = await commitSwipeLike(track)
-  if (!likedOk) {
-    return false
-  }
+  const session = captureAuthSession()
+  try {
+    const likedOk = await commitSwipeLike(track)
+    if (!likedOk || !isAuthSessionCurrent(session)) {
+      return false
+    }
 
-  const store = useCanonicalLibraryStore.getState()
-  const key = sourceTrackKeyOf(track)
-  const canonicalId = store.sourceKeyToCanonicalId[key]
-  const item = canonicalId ? store.itemsById[canonicalId] : null
-  // liked уже мог сохраниться; полный success только если inbox тоже ок.
-  // Повторный like дозапишет membership без второго history/taste like.
-  if (!item) {
-    const ensured = await ensureCanonicalForTrack(track)
-    return addToSwipeInboxIfNeeded(ensured.canonicalTrack.id)
-  }
+    const store = useCanonicalLibraryStore.getState()
+    const key = sourceTrackKeyOf(track)
+    const canonicalId = store.sourceKeyToCanonicalId[key]
+    const item = canonicalId ? store.itemsById[canonicalId] : null
+    // liked уже мог сохраниться; полный success только если inbox тоже ок.
+    // Повторный like дозапишет membership без второго history/taste like.
+    if (!item) {
+      const ensured = await ensureCanonicalForTrack(track)
+      if (!isAuthSessionCurrent(session)) {
+        return false
+      }
+      return addToSwipeInboxIfNeeded(ensured.canonicalTrack.id, session)
+    }
 
-  return addToSwipeInboxIfNeeded(item.canonicalTrack.id)
+    return addToSwipeInboxIfNeeded(item.canonicalTrack.id, session)
+  } catch (error) {
+    if (error instanceof StaleLibrarySessionError) {
+      return false
+    }
+    throw error
+  }
 }
 
 export async function addToSwipeInboxIfNeeded(
   canonicalTrackId: string,
+  session = captureAuthSession(),
 ): Promise<boolean> {
+  if (!isAuthSessionCurrent(session)) {
+    return false
+  }
   const item = useCanonicalLibraryStore.getState().itemsById[canonicalTrackId]
   if (!item) {
     return false
@@ -60,6 +80,9 @@ export async function addToSwipeInboxIfNeeded(
   // Best-effort: при recoverable ensure всё равно пробуем assign —
   // сервер может уже иметь sys_swipes (другое устройство / 409 без reload).
   await ensureSysSwipesCategory()
+  if (!isAuthSessionCurrent(session)) {
+    return false
+  }
   // assignSourceToCatalog ожидает Track — берём первую не-demo copy.
   const copy =
     item.copies.find((row) => !isDemoSourceId(row.sourceId)) ?? item.copies[0]
