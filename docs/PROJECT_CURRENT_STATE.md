@@ -5,10 +5,10 @@
 
 | Поле | Значение |
 |---|---|
-| Дата снимка | 2026-10-30 (Continuous Music Engine V1) |
+| Дата снимка | 2026-10-31 (PLAYBACK-CME-01) |
 | Канонический репозиторий | https://github.com/medvedevachks/SwipeMusic |
-| Ветка снимка | `feature/continuous-music-engine-v1` → PR в `feature/deploy-windows-01` |
-| Проверенный HEAD | CME V1 blockers: cursor past excluded pages, discovery generation isolation, Search=legacy. Baseline UX-10: `ed53b08`. S1 deploy не выполнялся. |
+| Ветка снимка | `feature/playback-session-store-v2` (поверх deploy-windows-01) |
+| Проверенный HEAD | PLAYBACK-CME-01 на ветке session-store-v2; suite 746; flag session-switch default OFF. Deploy не выполнялся. |
 | Исторический upstream | https://github.com/r-sh-galimov/SwipeMusic |
 
 **Легенда источников фактов**
@@ -52,7 +52,7 @@ UI (pages / BottomPlayer)
 
 **Ограничение:** не создавать второй GlobalPlayer и не заводить конкурирующую очередь.
 
-**Playback sessions v2 (ветка `feature/playback-session-store-v2`, DEV-01…08):** SessionStore + Coordinator; flag `swipe-music-session-switch-integration-v1` **default OFF** (PROD always false). При ON: пять слотов — CATALOG / SEARCH / ALBUM / **SWIPES** / **WAVE**; durable sync + restore без autoplay; CME live `insertNext` gated by `cmeSessionOwnership` (sessionId+switchEpoch). Cold swipe seed: `autoplay:false`. Buffer target в коде всё ещё **8** (не 10/5); mix **70/30** не реализован — отдельный follow-up. Album related CME — контракт only. Production flag не включать.
+**Playback sessions v2 + CME-01 (ветка `feature/playback-session-store-v2`):** SessionStore + Coordinator; flag **default OFF** (PROD false). Пять слотов; durable sync; CME ownership. Cold seed: `requireIdleQueue` + epoch. Buffer playable **10 / watermark 5**; SWIPES soft mix **~70% new / 30% familiar** (liked/favorite/inCatalog); hidden canonical excluded from auto streams; ALBUM related = same-artist library (не vector similarity). Production flag не включать до DEV-09.
 
 ---
 
