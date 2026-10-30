@@ -261,3 +261,56 @@ test('rejected like Promise clears pending and does not invent success', async (
     false,
   )
 })
+
+test('LEFT→UP→like fails: no skip, not liked, pending cleared, retry possible', async () => {
+  reset()
+  const a = track('24')
+  const gate = deferred<boolean>()
+  const like = classifySwipeTrack(a, 'like', {
+    commitLike: () => gate.promise,
+  })
+  // Немедленный UP на B (навигация снаружи) — skip не пишем.
+  classifySwipeTrack(a, 'skip')
+  assert.equal(
+    useCollectionStore.getState().history.some((entry) => entry.action === 'skip'),
+    false,
+  )
+  gate.resolve(false)
+  assert.equal(await like.saved, false)
+  assert.equal(hasPendingSwipeLike(a.id), false)
+  assert.equal(useCanonicalLibraryStore.getState().itemsById.can_a, undefined)
+  assert.equal(
+    useCollectionStore.getState().history.some((entry) => entry.action === 'like'),
+    false,
+  )
+  // Повторное сохранение после ошибки.
+  const retryGate = deferred<boolean>()
+  const retry = classifySwipeTrack(a, 'like', {
+    commitLike: () => retryGate.promise,
+  })
+  assert.equal(hasPendingSwipeLike(a.id), true)
+  retryGate.resolve(true)
+  assert.equal(await retry.saved, true)
+  assert.equal(hasPendingSwipeLike(a.id), false)
+})
+
+test('logout clearCanonicalIdentityFlights drops pending-like for next user', async () => {
+  reset()
+  const a = track('25')
+  const gate = deferred<boolean>()
+  classifySwipeTrack(a, 'like', { commitLike: () => gate.promise })
+  assert.equal(hasPendingSwipeLike(a.id), true)
+  const { clearCanonicalIdentityFlights } = await import(
+    '../canonical/userOrganization.ts'
+  )
+  clearCanonicalIdentityFlights()
+  assert.equal(hasPendingSwipeLike(a.id), false)
+  // Чужой/следующий UP не защищён чужим pending.
+  const up = classifySwipeTrack(a, 'skip')
+  assert.equal(up.kind, 'applied')
+  assert.equal(
+    useCollectionStore.getState().history.some((entry) => entry.action === 'skip'),
+    true,
+  )
+  gate.resolve(false)
+})

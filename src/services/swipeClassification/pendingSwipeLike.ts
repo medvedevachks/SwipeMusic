@@ -29,7 +29,11 @@ export function endPendingSwipeLike(sourceTrackKey: string): void {
   pendingCounts.set(sourceTrackKey, next)
 }
 
-/** Сброс для unit-тестов. */
-export function resetPendingSwipeLikesForTests(): void {
+/** Logout / смена сессии / тесты — intent не переносится между пользователями. */
+export function clearPendingSwipeLikes(): void {
   pendingCounts.clear()
+}
+
+export function resetPendingSwipeLikesForTests(): void {
+  clearPendingSwipeLikes()
 }

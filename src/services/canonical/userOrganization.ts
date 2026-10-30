@@ -8,6 +8,7 @@ import { libraryClient } from '../libraryPersistence/client.ts'
 import { runLibraryMutation } from '../libraryPersistence/mutations.ts'
 import { sourceTrackKeyOf, snapshotFromTrack } from './mapCanonical.ts'
 import { isSourceCopyLiked } from './selectors.ts'
+import { clearPendingSwipeLikes } from '../swipeClassification/pendingSwipeLike.ts'
 
 /**
  * Удалённые операции канонической организации.
@@ -47,6 +48,8 @@ export function setCanonicalRemote(next: CanonicalRemote | null): void {
 export function clearCanonicalIdentityFlights(): void {
   identityFlights.clear()
   likeFlights.clear()
+  // UX-10B: pending LEFT intent не переживает logout / смену аккаунта.
+  clearPendingSwipeLikes()
 }
 
 export async function ensureCanonicalForTrack(track: Track): Promise<CanonicalLibraryItem> {

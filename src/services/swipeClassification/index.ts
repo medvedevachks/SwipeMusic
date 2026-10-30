@@ -5,6 +5,7 @@ export {
 } from './classifySwipeTrack'
 export {
   beginPendingSwipeLike,
+  clearPendingSwipeLikes,
   endPendingSwipeLike,
   hasPendingSwipeLike,
   resetPendingSwipeLikesForTests,
