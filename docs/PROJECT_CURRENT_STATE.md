@@ -52,7 +52,7 @@ UI (pages / BottomPlayer)
 
 **Ограничение:** не создавать второй GlobalPlayer и не заводить конкурирующую очередь.
 
-**Playback sessions v2 (ветка `feature/playback-session-store-v2`, DEV-01…05):** in-memory `PlaybackSessionStore`, persist v2, Queue export/import, `SessionSwitchCoordinator`, порты Prepare/Commit на `getPlaybackQueue()` + `sessionPhysicalEngine` / `AudioPlayer.commitSessionPlay`. Feature flag `swipe-music-session-switch-integration-v1` **default OFF**; в `import.meta.env.PROD` всегда false. **PlaybackIntent / UI play не переведены.**
+**Playback sessions v2 (ветка `feature/playback-session-store-v2`, DEV-01…05A):** in-memory `PlaybackSessionStore`, persist v2, Queue export/import, `SessionSwitchCoordinator`, порты Prepare/Commit на `getPlaybackQueue()` + `sessionPhysicalEngine` / `AudioPlayer.commitSessionPlay`. Feature flag `swipe-music-session-switch-integration-v1` **default OFF**; в `import.meta.env.PROD` всегда false. Gate: `npm run test:session-switch-gate` + DEV harness `VITE_SESSION_SWITCH_GATE=true`. Auth handoff сбрасывает `clearPlaybackIdentity`. **PlaybackIntent / UI play не переведены.**
 
 ---
 

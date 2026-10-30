@@ -37,6 +37,7 @@ export {
 export type {
   AuthQueueHandoffInput,
   AuthQueueHandoffResult,
+  PlaybackIdentityClearPort,
 } from './bootstrapSessionPlayback.ts'
 export { createSessionSwitchRuntime } from './createSessionSwitchRuntime.ts'
 export type {

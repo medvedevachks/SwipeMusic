@@ -635,6 +635,31 @@ export class AudioPlayer {
     this.patchState({ error: null })
   }
 
+  /**
+   * Сброс identity плеера при logout / смене пользователя.
+   * Очередь очищает вызывающий код (handoff/teardown) — здесь только физический UI state.
+   */
+  clearPlaybackIdentity(): void {
+    cancelActiveFallback('stop')
+    this.playGeneration += 1
+    this.adapter.stop()
+    this.patchState({
+      currentTrack: null,
+      pendingTrack: null,
+      activeCandidate: null,
+      playing: false,
+      paused: true,
+      currentTime: 0,
+      duration: 0,
+      progress: 0,
+      buffering: false,
+      loading: false,
+      error: null,
+      queue: getPlaybackQueue().getItems(),
+      queueIndex: getPlaybackQueue().getSnapshot().currentIndex,
+    })
+  }
+
   /** Текущее playGeneration (session-switch PhysicalPlayerPort). */
   getPlayGeneration(): number {
     return this.playGeneration

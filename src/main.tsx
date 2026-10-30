@@ -43,6 +43,14 @@ if (import.meta.env.VITE_SEARCH_FLOW_HARNESS === 'true') {
     module.installSearchFlowHarnessBridge()
   })
 }
+// PLAYBACK-DEV-05A browser gate — не production UI / не PlaybackIntent.
+if (import.meta.env.DEV && import.meta.env.VITE_SESSION_SWITCH_GATE === 'true') {
+  void import('./services/sessionSwitch/integration/browserGateHarness.ts').then(
+    (module) => {
+      module.installSessionSwitchBrowserGate()
+    },
+  )
+}
 // Контролируемый DEV-каталог для UI acceptance (не production, не Yandex).
 if (import.meta.env.DEV && import.meta.env.VITE_DEV_ACCEPTANCE === 'true') {
   void import('./sources/adapters/dev-acceptance/install.ts').then((module) => {

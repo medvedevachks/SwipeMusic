@@ -10,6 +10,8 @@ interface ImportMetaEnv {
   readonly VITE_SEARCH_FLOW_HARNESS?: string
   /** DEV acceptance only: controlled catalog source (not Yandex). Exact "true". */
   readonly VITE_DEV_ACCEPTANCE?: string
+  /** DEV only: SessionSwitch integration browser gate harness. Exact "true". */
+  readonly VITE_SESSION_SWITCH_GATE?: string
 }
 
 interface ImportMeta {
