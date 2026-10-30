@@ -4,6 +4,7 @@ import { getPlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
 import {
   applyCatalogLoopRepeat,
   applyCatalogLoopRepeatIfOwned,
+  beginCatalogLoopSession,
   ensureCatalogRepeatPolicyWatcher,
   noteUserRepeatModeChange,
   resetCatalogRepeatPolicyForTests,
@@ -48,7 +49,7 @@ function withCatalog(catalogId: string, mode: 'OFF' | 'ONE' | 'ALL') {
     title: 'Cat',
   })
   ensureCatalogRepeatPolicyWatcher()
-  applyCatalogLoopRepeat(catalogId)
+  beginCatalogLoopSession(catalogId)
   assert.equal(queue.getRepeatMode(), 'ALL')
   return queue
 }
@@ -154,5 +155,46 @@ test('applyCatalogLoopRepeatIfOwned keeps ALL only for matching playlist owner',
   assert.equal(applyCatalogLoopRepeatIfOwned('cat_other'), false)
   assert.equal(queue.getRepeatMode(), 'ONE')
   assert.equal(applyCatalogLoopRepeatIfOwned('cat_own'), true)
+  assert.equal(queue.getRepeatMode(), 'ALL')
+})
+
+test('re-tapping same catalog after manual Repeat starts a fresh ALL session', () => {
+  const queue = withCatalog('cat_retap', 'OFF')
+  noteUserRepeatModeChange('ONE')
+  queue.setRepeatMode('ONE')
+  assert.equal(applyCatalogLoopRepeatIfOwned('cat_retap'), false)
+  assert.equal(queue.getRepeatMode(), 'ONE')
+
+  beginCatalogLoopSession('cat_retap')
+  assert.equal(queue.getRepeatMode(), 'ALL')
+  // Late expand той же новой сессии может поддержать ALL.
+  assert.equal(applyCatalogLoopRepeatIfOwned('cat_retap'), true)
+  assert.equal(queue.getRepeatMode(), 'ALL')
+
+  // Уход восстанавливает Repeat на момент повторного старта (ONE), не старый OFF.
+  queue.setQueue([track('hit')], 0, {
+    type: 'search-seed',
+    query: 'q',
+    seedTrackId: 'hit',
+  })
+  assert.equal(queue.getRepeatMode(), 'ONE')
+})
+
+test('stale late expand after manual override does not re-force ALL', () => {
+  const queue = withCatalog('cat_stale', 'OFF')
+  noteUserRepeatModeChange('OFF')
+  queue.setRepeatMode('OFF')
+  assert.equal(applyCatalogLoopRepeatIfOwned('cat_stale'), false)
+  assert.equal(queue.getRepeatMode(), 'OFF')
+})
+
+test('stale late expand after fresh re-tap does not undo the new session', () => {
+  const queue = withCatalog('cat_race', 'OFF')
+  noteUserRepeatModeChange('ONE')
+  queue.setRepeatMode('ONE')
+  beginCatalogLoopSession('cat_race')
+  assert.equal(queue.getRepeatMode(), 'ALL')
+  // Имитация устаревшего late apply той же id — в новой сессии enforceLoop снова true.
+  assert.equal(applyCatalogLoopRepeatIfOwned('cat_race'), true)
   assert.equal(queue.getRepeatMode(), 'ALL')
 })

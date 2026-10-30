@@ -27,7 +27,6 @@ import {
 } from './playUserCatalog.ts'
 import { CATALOG_PLAYBACK_MESSAGE } from './messages.ts'
 import {
-  applyCatalogLoopRepeat,
   applyCatalogLoopRepeatIfOwned,
   noteUserRepeatModeChange,
   resetCatalogRepeatPolicyForTests,
@@ -1134,7 +1133,6 @@ test('late catalog prepare does not force Repeat ALL after leaving to search', a
       findTrack: findTrackMap(tracks),
       playSelection: async (options) => {
         queue.setQueue(options.tracks, options.startIndex, options.context)
-        applyCatalogLoopRepeat(options.context.id)
         earlyStarted()
       },
       replaceQueue: async (options) =>
@@ -1146,6 +1144,8 @@ test('late catalog prepare does not force Repeat ALL after leaving to search', a
   )
 
   await earlyGate
+  await Promise.resolve()
+  await Promise.resolve()
   assert.equal(queue.getRepeatMode(), 'ALL')
   const searchHit = trackFor(copyOf('can_hit2', 'yandex-music', 'hit2', 'Hit2'))
   queue.setQueue([searchHit], 0, {
@@ -1210,7 +1210,6 @@ test('user Repeat change during prepare is kept after late expand', async () => 
       findTrack: findTrackMap(tracks),
       playSelection: async (options) => {
         queue.setQueue(options.tracks, options.startIndex, options.context)
-        applyCatalogLoopRepeat(options.context.id)
         earlyStarted()
       },
       replaceQueue: async (options) =>
@@ -1222,6 +1221,9 @@ test('user Repeat change during prepare is kept after late expand', async () => 
   )
 
   await earlyGate
+  // playEarlyTrack вызывает beginCatalogLoopSession после playSelection.
+  await Promise.resolve()
+  await Promise.resolve()
   assert.equal(queue.getRepeatMode(), 'ALL')
   noteUserRepeatModeChange('ONE')
   queue.setRepeatMode('ONE')
@@ -1230,6 +1232,57 @@ test('user Repeat change during prepare is kept after late expand', async () => 
   assert.equal(queue.getRepeatMode(), 'ONE')
   assert.equal(queue.getSnapshot().items.length, 3)
   assert.equal(queue.current()?.id, tracks[0]!.id)
+})
+
+test('re-play same catalog after manual Repeat forces ALL again via beginCatalogLoopSession', async () => {
+  installMemoryLocalStorage()
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  resetCatalogRepeatPolicyForTests()
+  const a = copyOf('can_rp0', 'local-folder', 'rp0.mp3', 'RP0')
+  const b = copyOf('can_rp1', 'local-folder', 'rp1.mp3', 'RP1')
+  const items = [itemOf('can_rp0', [a], 'RP0'), itemOf('can_rp1', [b], 'RP1')]
+  const tracks = [trackFor(a), trackFor(b)]
+  const queue = getPlaybackQueue()
+  queue.clear()
+  queue.setRepeatMode('OFF')
+
+  const playOnce = () =>
+    playUserCatalog(
+      { catalog: CATALOG, items, startCanonicalTrackId: 'can_rp0' },
+      {
+        now: 36_800,
+        concurrency: 2,
+        port: portFor({
+          'local-folder': probeAdapter(
+            'local-folder',
+            PLAYBACK_AVAILABILITY_STATUS.PLAYABLE,
+          ),
+        }),
+        findTrack: findTrackMap(tracks),
+        playSelection: async (options) => {
+          queue.setQueue(options.tracks, options.startIndex, options.context)
+        },
+        replaceQueue: async (options) =>
+          queue.replacePlaylistItemsPreservingPlayback(options.tracks, {
+            type: 'playlist',
+            id: options.context.id,
+          }),
+      },
+    )
+
+  const first = await playOnce()
+  assert.equal(first.status, 'played')
+  assert.equal(queue.getRepeatMode(), 'ALL')
+  noteUserRepeatModeChange('ONE')
+  queue.setRepeatMode('ONE')
+  assert.equal(queue.getRepeatMode(), 'ONE')
+
+  // Не resetCatalogPlaybackGate — он сбрасывает Repeat policy; нужен живой enforceLoop=false.
+  cancelCatalogPlaybackGate()
+  const second = await playOnce()
+  assert.equal(second.status, 'played')
+  assert.equal(queue.getRepeatMode(), 'ALL')
 })
 
 test('late catalog expand does not overwrite search-seed queue', async () => {

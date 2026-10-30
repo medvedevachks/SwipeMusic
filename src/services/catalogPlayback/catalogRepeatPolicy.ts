@@ -6,17 +6,20 @@ import {
 
 type ForcedCatalogRepeat = {
   catalogId: string
-  /** Repeat до программного ALL (OFF / ONE / ALL). */
+  /** Repeat на момент явного старта сессии (OFF / ONE / ALL). */
   previous: RepeatMode
   /**
-   * true — каталог держит принудительный цикл ALL.
-   * false — пользователь явно сменил Repeat; не восстанавливаем и не навязываем ALL снова.
+   * true — эта сессия держит принудительный цикл ALL.
+   * false — пользователь явно сменил Repeat в этой сессии.
    */
   enforceLoop: boolean
+  /** Отличает новую сессию Play от late expand старой. */
+  sessionId: number
 }
 
 let forced: ForcedCatalogRepeat | null = null
 let watching = false
+let sessionSeq = 0
 /** Игнорировать смену Repeat, вызванную apply/sync политики. */
 let suppressUserRepeatNote = false
 
@@ -29,34 +32,59 @@ function withProgrammaticRepeatWrite(write: () => void): void {
   }
 }
 
+function writeLoopAll(): void {
+  const queue = getPlaybackQueue()
+  if (queue.getRepeatMode() === 'ALL') {
+    return
+  }
+  withProgrammaticRepeatWrite(() => {
+    queue.setRepeatMode('ALL')
+  })
+}
+
 /**
- * Цикл каталога = Repeat ALL на общей PlaybackQueue.
- * Не трогает shuffle; при уходе с playlist этого каталога восстанавливает previous.
+ * Явный новый запуск каталога (ранний Play).
+ * Всегда открывает новую сессию: снова включает ALL даже после ручного
+ * ONE/OFF в предыдущей сессии того же catalogId.
+ */
+export function beginCatalogLoopSession(catalogId: string): void {
+  ensureCatalogRepeatPolicyWatcher()
+  const queue = getPlaybackQueue()
+  forced = {
+    catalogId,
+    previous: queue.getRepeatMode(),
+    enforceLoop: true,
+    sessionId: ++sessionSeq,
+  }
+  writeLoopAll()
+}
+
+/**
+ * Поддержание цикла внутри уже открытой сессии (без сброса user override).
+ * Для нового Play используйте beginCatalogLoopSession.
  */
 export function applyCatalogLoopRepeat(catalogId: string): void {
   ensureCatalogRepeatPolicyWatcher()
-  const queue = getPlaybackQueue()
   if (forced?.catalogId === catalogId && !forced.enforceLoop) {
-    // Пользователь уже переопределил Repeat в этой сессии каталога.
     return
   }
+  const queue = getPlaybackQueue()
   if (!forced || forced.catalogId !== catalogId) {
     forced = {
       catalogId,
       previous: queue.getRepeatMode(),
       enforceLoop: true,
+      sessionId: ++sessionSeq,
     }
   }
-  if (forced.enforceLoop && queue.getRepeatMode() !== 'ALL') {
-    withProgrammaticRepeatWrite(() => {
-      queue.setRepeatMode('ALL')
-    })
+  if (forced.enforceLoop) {
+    writeLoopAll()
   }
 }
 
 /**
- * Поздний apply после async-подготовки: только если очередь всё ещё
- * принадлежит этому каталогу и пользователь не переопределил Repeat.
+ * Поздний apply после async-подготовки той же сессии:
+ * только при том же playlist-владельце и если пользователь не сменил Repeat.
  */
 export function applyCatalogLoopRepeatIfOwned(catalogId: string): boolean {
   if (forced?.catalogId === catalogId && !forced.enforceLoop) {
@@ -72,7 +100,7 @@ export function applyCatalogLoopRepeatIfOwned(catalogId: string): boolean {
 
 /**
  * Явная пользовательская смена Repeat (BottomPlayer / Queue).
- * Отключает принудительный цикл без угадывания по значению.
+ * Отключает принудительный цикл текущей сессии.
  */
 export function noteUserRepeatModeChange(mode: RepeatMode): void {
   void mode
@@ -107,7 +135,6 @@ export function ensureCatalogRepeatPolicyWatcher(): void {
   }
   watching = true
   getPlaybackQueue().subscribe((snapshot) => {
-    // Пользователь (или UI) ушёл с программного ALL, пока каталог ещё играет.
     if (
       forced?.enforceLoop &&
       !suppressUserRepeatNote &&
@@ -123,4 +150,5 @@ export function ensureCatalogRepeatPolicyWatcher(): void {
 export function resetCatalogRepeatPolicyForTests(): void {
   forced = null
   suppressUserRepeatNote = false
+  sessionSeq = 0
 }

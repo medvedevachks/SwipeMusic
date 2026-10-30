@@ -9,6 +9,7 @@ export {
 export {
   applyCatalogLoopRepeat,
   applyCatalogLoopRepeatIfOwned,
+  beginCatalogLoopSession,
   ensureCatalogRepeatPolicyWatcher,
   noteUserRepeatModeChange,
   resetCatalogRepeatPolicyForTests,

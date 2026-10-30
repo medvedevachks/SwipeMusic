@@ -13,6 +13,7 @@ import {
 import { isAutoplayBlockedError } from './autoplayBlocked.ts'
 import {
   applyCatalogLoopRepeatIfOwned,
+  beginCatalogLoopSession,
   resetCatalogRepeatPolicyForTests,
 } from './catalogRepeatPolicy.ts'
 import { CATALOG_PREPARE_CONCURRENCY } from './mapPool.ts'
@@ -180,7 +181,8 @@ export async function playUserCatalog(
       }
       startedEarly = true
       earlyStartCanonicalId = entry.canonicalTrackId
-      applyCatalogLoopRepeatIfOwned(input.catalog.id)
+      // Новая явная сессия Play — не late expand.
+      beginCatalogLoopSession(input.catalog.id)
       return 'ok'
     }
 
@@ -360,12 +362,11 @@ export async function playUserCatalog(
             { type: 'playlist', id: options.context.id },
           )
         })
-      // generation + ownership внутри replace: чужой контекст не переписываем.
+      // generation + ownership: чужой/устаревший prepare не трогает очередь и Repeat.
       if (isCurrent(generation)) {
         await replaceQueue({ tracks, startIndex, context })
+        applyCatalogLoopRepeatIfOwned(input.catalog.id)
       }
-      // Не навязываем ALL, если владелец сменился или пользователь сменил Repeat.
-      applyCatalogLoopRepeatIfOwned(input.catalog.id)
       return {
         status: 'played',
         tracks,
