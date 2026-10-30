@@ -11,6 +11,10 @@ import {
   type CatalogQueueEntry,
 } from './buildCatalogPlaybackQueue.ts'
 import { isAutoplayBlockedError } from './autoplayBlocked.ts'
+import {
+  applyCatalogLoopRepeatIfOwned,
+  resetCatalogRepeatPolicyForTests,
+} from './catalogRepeatPolicy.ts'
 import { CATALOG_PREPARE_CONCURRENCY } from './mapPool.ts'
 import { CATALOG_PLAYBACK_MESSAGE } from './messages.ts'
 
@@ -84,6 +88,7 @@ let inFlight = false
 export function resetCatalogPlaybackGate(): void {
   activeGeneration = 0
   inFlight = false
+  resetCatalogRepeatPolicyForTests()
 }
 
 /**
@@ -198,6 +203,7 @@ export async function playUserCatalog(
         }
       }
       startedEarly = true
+      applyCatalogLoopRepeatIfOwned(input.catalog.id)
 
       if (!isCurrent(generation)) {
         return {
@@ -305,6 +311,8 @@ export async function playUserCatalog(
       if (isCurrent(generation)) {
         await replaceQueue({ tracks, startIndex, context })
       }
+      // Не возвращаем ALL, если пользователь уже ушёл в search/wave/другой каталог.
+      applyCatalogLoopRepeatIfOwned(input.catalog.id)
       return {
         status: 'played',
         tracks,
@@ -328,6 +336,7 @@ export async function playUserCatalog(
       })
     } catch (error) {
       if (isAutoplayBlockedError(error)) {
+        applyCatalogLoopRepeatIfOwned(input.catalog.id)
         return {
           status: 'played',
           tracks,
@@ -343,6 +352,7 @@ export async function playUserCatalog(
       return { status: 'busy', message: CATALOG_PLAYBACK_MESSAGE.BUSY }
     }
 
+    applyCatalogLoopRepeatIfOwned(input.catalog.id)
     return {
       status: 'played',
       tracks,

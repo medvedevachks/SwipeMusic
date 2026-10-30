@@ -26,7 +26,15 @@ import {
   resetCatalogPlaybackGate,
 } from './playUserCatalog.ts'
 import { CATALOG_PLAYBACK_MESSAGE } from './messages.ts'
-import { PlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
+import {
+  applyCatalogLoopRepeat,
+  applyCatalogLoopRepeatIfOwned,
+  resetCatalogRepeatPolicyForTests,
+} from './catalogRepeatPolicy.ts'
+import {
+  getPlaybackQueue,
+  PlaybackQueue,
+} from '../playbackQueue/PlaybackQueue.ts'
 
 function installMemoryLocalStorage(): void {
   const memory = new Map<string, string>()
@@ -944,6 +952,85 @@ test('background expand preserves position after Previous', async () => {
   assert.equal(after.currentIndex, 1)
   assert.equal(after.items[1]?.id, tracks[1]!.id)
   assert.deepEqual(after.history, historyBefore)
+})
+
+test('late catalog prepare does not force Repeat ALL after leaving to search', async () => {
+  installMemoryLocalStorage()
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  resetCatalogRepeatPolicyForTests()
+  const copies = [
+    copyOf('can_r0', 'local-folder', 'r0.mp3', 'R0'),
+    copyOf('can_r1', 'local-folder', 'r1.mp3', 'R1'),
+  ]
+  const items = copies.map((copy, index) =>
+    itemOf(copy.canonicalTrackId, [copy], `R${index}`),
+  )
+  const tracks = copies.map((copy) => trackFor(copy))
+  const queue = getPlaybackQueue()
+  queue.clear()
+  queue.setRepeatMode('OFF')
+  let releaseRest!: () => void
+  const holdRest = new Promise<void>((resolve) => {
+    releaseRest = resolve
+  })
+  let earlyStarted!: () => void
+  const earlyGate = new Promise<void>((resolve) => {
+    earlyStarted = resolve
+  })
+
+  const pending = playUserCatalog(
+    {
+      catalog: CATALOG,
+      items,
+      startCanonicalTrackId: 'can_r0',
+    },
+    {
+      now: 36_500,
+      concurrency: 2,
+      port: portFor({
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(track) {
+            if (track.externalId !== 'r0.mp3') {
+              await holdRest
+            }
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap(tracks),
+      playSelection: async (options) => {
+        queue.setQueue(options.tracks, options.startIndex, options.context)
+        applyCatalogLoopRepeat(options.context.id)
+        earlyStarted()
+      },
+      replaceQueue: async (options) =>
+        queue.replacePlaylistItemsPreservingPlayback(options.tracks, {
+          type: 'playlist',
+          id: options.context.id,
+        }),
+    },
+  )
+
+  await earlyGate
+  assert.equal(queue.getRepeatMode(), 'ALL')
+  const searchHit = trackFor(copyOf('can_hit2', 'yandex-music', 'hit2', 'Hit2'))
+  queue.setQueue([searchHit], 0, {
+    type: 'search-seed',
+    query: 'hit2',
+    seedTrackId: searchHit.id,
+  })
+  assert.equal(queue.getRepeatMode(), 'OFF')
+
+  releaseRest()
+  await pending
+  assert.equal(applyCatalogLoopRepeatIfOwned(CATALOG.id), false)
+  assert.equal(queue.getRepeatMode(), 'OFF')
+  assert.equal(queue.getSnapshot().context.type, 'search-seed')
 })
 
 test('late catalog expand does not overwrite search-seed queue', async () => {

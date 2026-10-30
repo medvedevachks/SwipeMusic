@@ -638,6 +638,48 @@ body {
   display: none !important;
 }
 
+/* Три вкладки главной на 375px без горизонтального overflow. */
+.home-mode-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+.home-mode-tab {
+  height: 2.75rem;
+  min-width: 0;
+  border-radius: 999px;
+  padding: 0 0.45rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (min-width: 640px) {
+  .home-mode-tab {
+    padding: 0 1rem;
+    font-size: 0.875rem;
+  }
+}
+
+.home-mode-tab-active {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.home-mode-tab-idle {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-fg);
+}
+
 .player-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto;

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AlbumModeBanner } from '../components/AlbumModeBanner'
+import { HomeCatalogsPanel } from '../components/catalog/HomeCatalogsPanel'
 import CategoryPickerSheet from '../components/CategoryPickerSheet'
 import SwipeDeck from '../components/SwipeDeck'
 import WaveStartCard from '../components/WaveStartCard'
+import { cancelCatalogPlaybackGate } from '../services/catalogPlayback'
 import { useSwipeFeed } from '../hooks/useSwipeFeed'
 import { getAudioPlayer } from '../services/audioPlayer'
 import { commitCatalogChoice } from '../services/canonical/userOrganization.ts'
@@ -41,6 +43,20 @@ import { isDemoSourceId } from '../sources/demoSource'
 import { isQueueLockedContext } from '../types/playbackContext'
 import type { Track } from '../types/track'
 
+/** Вкладки главной. Не расширяет HomeStage (sorting/wave) для карточек. */
+type HomeTab = 'sorting' | 'wave' | 'catalogs'
+
+function initialHomeTab(): HomeTab {
+  const context = usePlayerStore.getState().playbackContext
+  if (context.type === 'radio') {
+    return 'wave'
+  }
+  if (context.type === 'playlist') {
+    return 'catalogs'
+  }
+  return 'sorting'
+}
+
 export default function Home() {
   const { tracks, isLoading, error, mode, searchQuery } = useSwipeFeed()
   const resetToCatalog = useSwipeDeckSessionStore((state) => state.resetToCatalog)
@@ -70,9 +86,9 @@ export default function Home() {
     pendingPlaybackTrack?.id ??
     (playerLoading && !playing ? (currentTrack?.id ?? null) : null)
 
-  const [stage, setStage] = useState<HomeStage>(() =>
-    usePlayerStore.getState().playbackContext.type === 'radio' ? 'wave' : 'sorting',
-  )
+  const [homeTab, setHomeTab] = useState<HomeTab>(initialHomeTab)
+  /** HomeStage только для sorting/wave-карточек; вкладка catalogs их не использует. */
+  const stage: HomeStage = homeTab === 'catalogs' ? 'sorting' : homeTab
   const [wavePending, setWavePending] = useState(false)
   const [waveNotice, setWaveNotice] = useState<string | null>(null)
   const [pendingTrack, setPendingTrack] = useState<Track | null>(null)
@@ -166,6 +182,13 @@ export default function Home() {
     }
     setQueue(tracks.filter((track) => !isDemoSourceId(track.sourceId)), 0, { type: 'swipe' })
   }, [tracks, setQueue, queueLocked, mode])
+
+  // Уход со страницы: отменить фоновую подготовку каталога, не останавливая плеер.
+  useEffect(() => {
+    return () => {
+      cancelCatalogPlaybackGate()
+    }
+  }, [])
 
   // После reload: восстановить recommendation mode из persisted PlaybackContext.
   useEffect(() => {
@@ -392,23 +415,21 @@ export default function Home() {
     <div className="space-y-3 pb-2">
       <div className="space-y-2 px-1">
         <div
-          className="flex flex-wrap items-center justify-center gap-2 sm:justify-start"
+          className="home-mode-tabs"
           role="tablist"
           aria-label="Режим главной"
         >
           <button
             type="button"
             role="tab"
-            aria-selected={stage === 'sorting'}
+            aria-selected={homeTab === 'sorting'}
             className={[
-              'h-11 rounded-full px-4 text-sm font-semibold',
-              stage === 'sorting'
-                ? 'bg-[var(--color-accent)] text-white'
-                : 'border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-fg)]',
+              'home-mode-tab',
+              homeTab === 'sorting' ? 'home-mode-tab-active' : 'home-mode-tab-idle',
             ].join(' ')}
             onClick={() => {
-              setStage('sorting')
-              activateRecommendationSession('swipe')
+              // Только UI: без смены очереди, stop и без запуска рекомендаций.
+              setHomeTab('sorting')
             }}
           >
             Свайпы
@@ -416,33 +437,44 @@ export default function Home() {
           <button
             type="button"
             role="tab"
-            aria-selected={stage === 'wave'}
+            aria-selected={homeTab === 'wave'}
             className={[
-              'h-11 rounded-full px-4 text-sm font-semibold',
-              stage === 'wave'
-                ? 'bg-[var(--color-accent)] text-white'
-                : 'border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-fg)]',
+              'home-mode-tab',
+              homeTab === 'wave' ? 'home-mode-tab-active' : 'home-mode-tab-idle',
             ].join(' ')}
             onClick={() => {
-              setStage('wave')
-              if (radioActive) {
-                activateRecommendationSession('wave')
-              }
+              setHomeTab('wave')
             }}
           >
             Моя волна
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={homeTab === 'catalogs'}
+            className={[
+              'home-mode-tab',
+              homeTab === 'catalogs' ? 'home-mode-tab-active' : 'home-mode-tab-idle',
+            ].join(' ')}
+            onClick={() => {
+              setHomeTab('catalogs')
+            }}
+          >
+            Каталоги
+          </button>
         </div>
         <p className="text-center text-sm text-[var(--color-muted)] sm:text-left">
-          {stage === 'wave'
-            ? waveView === 'deck'
-              ? 'Карточка показывает очередь волны. Свайпы лайкают её, открывают каталог и переключают треки.'
-              : 'Play на карточке собирает волну из избранного.'
-            : mode === 'search' && searchQuery
-              ? `Результаты: «${searchQuery}»`
-              : 'Свайп оценивает трек. Play на карточке включает именно его.'}
+          {homeTab === 'catalogs'
+            ? 'Выберите каталог — доступные композиции играют по кругу. «Открыть» ведёт к редактированию.'
+            : homeTab === 'wave'
+              ? waveView === 'deck'
+                ? 'Карточка показывает очередь волны. Свайпы лайкают её, открывают каталог и переключают треки.'
+                : 'Play на карточке собирает волну из избранного.'
+              : mode === 'search' && searchQuery
+                ? `Результаты: «${searchQuery}»`
+                : 'Свайп оценивает трек. Play на карточке включает именно его.'}
         </p>
-        {stage === 'sorting' &&
+        {homeTab === 'sorting' &&
         playerTrackId &&
         playbackContext.type !== 'swipe' &&
         playbackContext.type !== 'none' &&
@@ -450,10 +482,12 @@ export default function Home() {
           <p className="text-center text-xs text-[var(--color-muted)] sm:text-left">
             {radioActive
               ? 'В плеере всё ещё играет «Моя волна». Play на карточке переключит очередь на свайпы.'
-              : 'В плеере другая композиция. Play на карточке включит именно её.'}
+              : playbackContext.type === 'playlist'
+                ? 'В плеере играет каталог. Play на карточке переключит очередь на свайпы.'
+                : 'В плеере другая композиция. Play на карточке включит именно её.'}
           </p>
         ) : null}
-        {stage === 'sorting' && mode === 'search' ? (
+        {homeTab === 'sorting' && mode === 'search' ? (
           <button
             type="button"
             className="rounded-xl border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-fg)]"
@@ -472,7 +506,7 @@ export default function Home() {
         />
       ) : null}
 
-      <div className="home-deck-pane" hidden={stage === 'wave'}>
+      <div className="home-deck-pane" hidden={homeTab !== 'sorting'}>
         {isLoading ? (
           <p className="py-20 text-center text-sm text-[var(--color-muted)]">
             Загрузка коллекции…
@@ -556,12 +590,12 @@ export default function Home() {
         )}
       </div>
 
-      {stage === 'wave' && favoritesNote ? (
+      {homeTab === 'wave' && favoritesNote ? (
         <p className="px-1 text-center text-xs text-[var(--color-muted)] sm:text-left">{favoritesNote}</p>
       ) : null}
 
       {waveView === 'deck' ? (
-        <div className="home-deck-pane" hidden={stage !== 'wave'}>
+        <div className="home-deck-pane" hidden={homeTab !== 'wave'}>
           {waveDeck.emptyReason === 'playback-empty' ? (
             <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-8 text-center">
               <p className="text-sm text-[var(--color-fg)]">
@@ -615,7 +649,7 @@ export default function Home() {
             />
           )}
         </div>
-      ) : stage === 'wave' ? (
+      ) : homeTab === 'wave' ? (
         <WaveStartCard
           pending={wavePending}
           canStart={waveView === 'start'}
@@ -630,6 +664,10 @@ export default function Home() {
           onStart={startWave}
         />
       ) : null}
+
+      <div hidden={homeTab !== 'catalogs'}>
+        <HomeCatalogsPanel />
+      </div>
 
       <CategoryPickerSheet
         open={pendingTrack !== null}

@@ -6,6 +6,13 @@ export {
   type PlayUserCatalogInput,
   type PlayUserCatalogResult,
 } from './playUserCatalog.ts'
+export {
+  applyCatalogLoopRepeat,
+  applyCatalogLoopRepeatIfOwned,
+  ensureCatalogRepeatPolicyWatcher,
+  resetCatalogRepeatPolicyForTests,
+  syncCatalogRepeatPolicy,
+} from './catalogRepeatPolicy.ts'
 export { isAutoplayBlockedError } from './autoplayBlocked.ts'
 export {
   buildCatalogPlaybackQueue,
