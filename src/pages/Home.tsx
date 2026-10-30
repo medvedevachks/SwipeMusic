@@ -254,6 +254,10 @@ export default function Home() {
       if (live.items.length > 0 || isQueueLockedContext(live.context)) {
         return
       }
+      const { getRecommendationAdvanceEpoch } = await import(
+        '../services/recommendation/advanceEpoch.ts'
+      )
+      const epochAtStart = getRecommendationAdvanceEpoch()
       const picked = await pickRecommendationStart({ mode: 'swipe' })
       if (cancelled || !picked.ok) {
         return
@@ -266,6 +270,8 @@ export default function Home() {
         mode: 'swipe',
         track: picked.track,
         autoplay: false,
+        requireIdleQueue: true,
+        expectedAdvanceEpoch: epochAtStart,
       })
     })()
     return () => {

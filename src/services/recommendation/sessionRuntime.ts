@@ -151,16 +151,39 @@ export async function pickRecommendationStart(input: {
  * Пишет seed в очередь swipe/wave и готовит continuation.
  * Flag ON → SessionSwitch (swipes|wave) + CME ownership; иначе legacy setQueue.
  * `autoplay: false` — только очередь/слот (холодный старт Home без звука).
+ * `requireIdleQueue` — cold seed: no-op без invalidate, если очередь/сессия заняты.
  */
 export async function commitRecommendationSeed(input: {
   mode: Exclude<ActiveRecommendationMode, 'search'>
   track: Track
   autoplay?: boolean
+  requireIdleQueue?: boolean
+  expectedAdvanceEpoch?: number
 }): Promise<{ ok: boolean }> {
   const autoplay = input.autoplay !== false
+  const { isRecommendationSeedIdle } = await import(
+    './recommendationSeedIdle.ts'
+  )
+
+  if (input.requireIdleQueue) {
+    if (!isRecommendationSeedIdle()) {
+      return { ok: false }
+    }
+    if (
+      typeof input.expectedAdvanceEpoch === 'number' &&
+      input.expectedAdvanceEpoch !== getRecommendationAdvanceEpoch()
+    ) {
+      return { ok: false }
+    }
+  }
+
   // Новый seed (wave/swipe) отменяет inflight advance предыдущей сессии.
   invalidateRecommendationAdvance()
   invalidateContinuousBuffer(`seed:${input.mode}`)
+
+  if (input.requireIdleQueue && !isRecommendationSeedIdle()) {
+    return { ok: false }
+  }
 
   const { isSessionSwitchIntegrationEnabled } = await import(
     '../sessionSwitch/featureFlag.ts'
@@ -192,6 +215,9 @@ export async function commitRecommendationSeed(input: {
         return { ok: false }
       }
     } else {
+      if (input.requireIdleQueue && !isRecommendationSeedIdle()) {
+        return { ok: false }
+      }
       const { seedSwipeOrWaveSessionWithoutPlay } = await import(
         '../sessionSwitch/integration/seedSwipeWaveWithoutPlay.ts'
       )
@@ -210,6 +236,10 @@ export async function commitRecommendationSeed(input: {
         return { ok: true }
       }
     }
+  }
+
+  if (input.requireIdleQueue && !isRecommendationSeedIdle()) {
+    return { ok: false }
   }
 
   ensureContinuousDiscoverySession(input.mode, { resetLanes: true })

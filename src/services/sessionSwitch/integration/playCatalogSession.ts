@@ -160,6 +160,14 @@ export async function playCatalogViaSessionSwitch(
 
   if (result.ok) {
     clearCmeSessionOwnership()
+    try {
+      const { invalidateRecommendationAdvance } = await import(
+        '../../recommendation/advanceEpoch.ts'
+      )
+      invalidateRecommendationAdvance()
+    } catch {
+      // optional in partial graphs
+    }
     return { ok: true }
   }
   if (result.reason === 'user_gesture_required') {

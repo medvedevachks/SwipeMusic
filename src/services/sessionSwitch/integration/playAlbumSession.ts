@@ -108,6 +108,14 @@ export async function playAlbumViaSessionSwitch(
 
   if (result.ok) {
     clearCmeSessionOwnership()
+    try {
+      const { invalidateRecommendationAdvance } = await import(
+        '../../recommendation/advanceEpoch.ts'
+      )
+      invalidateRecommendationAdvance()
+    } catch {
+      // optional
+    }
     return { ok: true }
   }
   if (result.reason === 'user_gesture_required') {
