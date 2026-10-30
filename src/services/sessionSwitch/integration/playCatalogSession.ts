@@ -69,6 +69,57 @@ function buildCatalogQueueSnapshot(
 }
 
 /**
+ * Тот же catalogId после legacy: сохранить history/shuffle/repeat из слота.
+ * Catalog A→B (другой id) — всегда свежий снимок.
+ */
+function resolveCatalogTargetQueue(
+  input: PlayCatalogSessionInput,
+  startIndex: number,
+  startTrackId: string,
+): SessionQueueSnapshot {
+  const runtime = getSessionSwitchAppRuntime()
+  const fresh = buildCatalogQueueSnapshot(
+    input.tracks,
+    startIndex,
+    input.catalogId,
+    input.catalogTitle,
+  )
+  if (!runtime) {
+    return fresh
+  }
+  const existing = runtime.store.getSlot('catalog')
+  if (
+    existing.meta.kind !== 'catalog' ||
+    existing.meta.catalogId !== input.catalogId ||
+    existing.queue.items.length === 0
+  ) {
+    return fresh
+  }
+  const savedIndex = existing.queue.items.findIndex(
+    (item) => item.id === startTrackId,
+  )
+  if (savedIndex < 0) {
+    return fresh
+  }
+  const playOrderIndex = existing.queue.playOrder.indexOf(savedIndex)
+  const now = new Date().toISOString()
+  return {
+    ...existing.queue,
+    currentIndex: savedIndex,
+    playOrderIndex: playOrderIndex >= 0 ? playOrderIndex : savedIndex,
+    context: {
+      type: 'playlist',
+      id: input.catalogId,
+      title: input.catalogTitle,
+    },
+    phase: 'playing',
+    // Позицию предыдущего sounding не тащим на новый Play — с фокуса трека.
+    positionSeconds: 0,
+    updatedAt: now,
+  }
+}
+
+/**
  * Полный switch в CATALOG-сессию (Catalog A→B тоже здесь).
  */
 export async function playCatalogViaSessionSwitch(
@@ -89,11 +140,10 @@ export async function playCatalogViaSessionSwitch(
     input.tracks.length - 1,
   )
   const startTrack = input.tracks[startIndex]!
-  const targetQueue = buildCatalogQueueSnapshot(
-    input.tracks,
+  const targetQueue = resolveCatalogTargetQueue(
+    input,
     startIndex,
-    input.catalogId,
-    input.catalogTitle,
+    startTrack.id,
   )
 
   const result = await runtime.coordinator.switchTo({

@@ -50,6 +50,11 @@ if (import.meta.env.DEV && import.meta.env.VITE_SESSION_SWITCH_GATE === 'true') 
       module.installSessionSwitchBrowserGate()
     },
   )
+  void import(
+    './services/sessionSwitch/integration/htmlAudioAcceptanceHarness.ts'
+  ).then((module) => {
+    module.installHtmlAudioAcceptanceHarness()
+  })
 }
 // Контролируемый DEV-каталог для UI acceptance (не production, не Yandex).
 if (import.meta.env.DEV && import.meta.env.VITE_DEV_ACCEPTANCE === 'true') {

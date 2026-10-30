@@ -52,7 +52,7 @@ UI (pages / BottomPlayer)
 
 **Ограничение:** не создавать второй GlobalPlayer и не заводить конкурирующую очередь.
 
-**Playback sessions v2 (ветка `feature/playback-session-store-v2`, DEV-01…06):** SessionStore + Coordinator; flag `swipe-music-session-switch-integration-v1` **default OFF** (PROD always false). При ON: auth bootstrap (`bindPlaybackSessionsForAuth`), **CATALOG** play через `playUserCatalog` → `playCatalogViaSessionSwitch`; legacy Search/Wave/Swipe/Album вызывают `releaseCatalogSessionForLegacyIntent` перед мутацией live queue. Gate: `npm run test:session-switch-gate`. **SEARCH/WAVE/SWIPES/ALBUM Intent не мигрированы.**
+**Playback sessions v2 (ветка `feature/playback-session-store-v2`, DEV-01…06 + TEST-01):** SessionStore + Coordinator; flag `swipe-music-session-switch-integration-v1` **default OFF** (PROD always false). При ON: auth bootstrap (`bindPlaybackSessionsForAuth`), **CATALOG** play через `playUserCatalog` → `playCatalogViaSessionSwitch`; legacy Search/Wave/Swipe/Album вызывают `releaseCatalogSessionForLegacyIntent` перед мутацией live queue. Gate: `npm run test:session-switch-gate`. HTMLAudio acceptance harness: `VITE_SESSION_SWITCH_GATE=true` → `window.__SWIPE_HTML_AUDIO_ACCEPTANCE__.run()` (физический `HTMLAudioElement` + `/dev-acceptance/*.wav`; слышимость человеком — отдельно). Durable next/shuffle/repeat в CATALOG-слот фиксируется на **release/switch**, не непрерывно while active. **SEARCH/WAVE/SWIPES/ALBUM Intent не мигрированы.** Production flag не включать до ручной UI-приёмки + DEV-07.
 
 ---
 

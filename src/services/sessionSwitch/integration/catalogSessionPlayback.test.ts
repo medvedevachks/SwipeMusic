@@ -363,6 +363,34 @@ describe('PLAYBACK-DEV-06 catalog session', () => {
     assert.ok(live.getItems().length >= 1)
   })
 
+  it('возврат из legacy в тот же CATALOG сохраняет history', async () => {
+    const { store, live } = setupRuntime()
+    await playCatalogViaSessionSwitch({
+      tracks: [track('a'), track('b'), track('c')],
+      startIndex: 0,
+      catalogId: 'c1',
+      catalogTitle: 'C',
+    })
+    live.next()
+    live.next()
+    assert.equal(live.current()?.id, 'c')
+    assert.ok(live.getSnapshot().history.length >= 2)
+    releaseCatalogSessionForLegacyIntent('search')
+    const historyBefore = [
+      ...store.getSlot('catalog').queue.history,
+    ]
+    assert.ok(historyBefore.length >= 2)
+    await playCatalogViaSessionSwitch({
+      tracks: [track('a'), track('b'), track('c')],
+      startIndex: 1,
+      catalogId: 'c1',
+      catalogTitle: 'C',
+    })
+    assert.equal(store.getActiveSessionId(), 'catalog')
+    assert.deepEqual(store.getSlot('catalog').queue.history, historyBefore)
+    assert.equal(live.current()?.id, 'b')
+  })
+
   it('logout/login другого пользователя: runtime сброс через clear store', () => {
     const { store } = setupRuntime()
     store.replaceSlot('catalog', {
