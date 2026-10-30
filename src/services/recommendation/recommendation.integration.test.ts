@@ -79,6 +79,8 @@ function lib(
     liked: partial.liked ?? false,
     disliked: false,
     hidden: false,
+    favorite: false,
+    inCatalog: false,
     score: partial.score ?? 0,
     lastPlayed: null,
     ...partial,

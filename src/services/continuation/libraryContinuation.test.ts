@@ -24,6 +24,8 @@ function item(
     liked: partial.liked ?? false,
     disliked: partial.disliked ?? false,
     hidden: partial.hidden ?? false,
+    favorite: partial.favorite ?? false,
+    inCatalog: partial.inCatalog ?? false,
     score: partial.score ?? 0,
     lastPlayed: partial.lastPlayed ?? null,
   }

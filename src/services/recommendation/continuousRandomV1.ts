@@ -541,7 +541,14 @@ export async function collectContinuousPlayableBatch(
   const port = request.port as ContinuousDiscoveryPort
   const timeoutMs = request.timeoutMs ?? CONTINUOUS_LIMITS.operationTimeoutMs
   const gate = mergeAbortSignals(parent, timeoutMs)
-  const extraExclude = excludeSetFromRequest(request)
+  const { buildHiddenExclusionIds, applySwipeMixBias } = await import(
+    './swipeMixBias.ts'
+  )
+  const hiddenIds = buildHiddenExclusionIds(request.library)
+  const extraExclude = new Set([
+    ...excludeSetFromRequest(request),
+    ...hiddenIds,
+  ])
   const excluded = buildExclusionSets([
     ...request.excluded,
     ...(request.current
@@ -625,13 +632,21 @@ export async function collectContinuousPlayableBatch(
     if (!isContinuousDiscoveryOperationCurrent(op)) {
       return []
     }
-    for (const track of selected) {
+    const ordered =
+      request.mode === 'swipe'
+        ? applySwipeMixBias({
+            selected,
+            library: request.library,
+            limit,
+          })
+        : selected.slice(0, limit)
+    for (const track of ordered) {
       noteContinuousRecent(track)
     }
-    if (selected[0]) {
-      noteContinuousSeed(selected[0])
+    if (ordered[0]) {
+      noteContinuousSeed(ordered[0])
     }
-    return selected
+    return ordered
   } finally {
     gate.dispose()
   }
