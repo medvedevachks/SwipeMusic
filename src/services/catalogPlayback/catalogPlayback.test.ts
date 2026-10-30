@@ -26,6 +26,23 @@ import {
   resetCatalogPlaybackGate,
 } from './playUserCatalog.ts'
 import { CATALOG_PLAYBACK_MESSAGE } from './messages.ts'
+import { PlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
+
+function installMemoryLocalStorage(): void {
+  const memory = new Map<string, string>()
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => memory.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        memory.set(key, value)
+      },
+      removeItem: (key: string) => {
+        memory.delete(key)
+      },
+    },
+  })
+}
 
 const CATALOG = { id: 'cat_party', name: 'Вечеринка' }
 
@@ -760,4 +777,552 @@ test('rapid repeated play rejects the second start while the first is in flight'
   const firstResult = await first
   assert.equal(firstResult.status, 'played')
   assert.deepEqual(started, ['first'])
+})
+
+test('background expand preserves currentIndex and history after Next', async () => {
+  installMemoryLocalStorage()
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const copies = [
+    copyOf('can_n0', 'local-folder', 'n0.mp3', 'N0'),
+    copyOf('can_n1', 'local-folder', 'n1.mp3', 'N1'),
+    copyOf('can_n2', 'local-folder', 'n2.mp3', 'N2'),
+    copyOf('can_n3', 'local-folder', 'n3.mp3', 'N3'),
+  ]
+  const items = copies.map((copy, index) =>
+    itemOf(copy.canonicalTrackId, [copy], `N${index}`),
+  )
+  const tracks = copies.map((copy) => trackFor(copy))
+  const queue = new PlaybackQueue()
+  const context = {
+    type: 'playlist' as const,
+    id: CATALOG.id,
+    title: CATALOG.name,
+  }
+  let releaseRest!: () => void
+  const holdRest = new Promise<void>((resolve) => {
+    releaseRest = resolve
+  })
+  let earlyStarted!: () => void
+  const earlyGate = new Promise<void>((resolve) => {
+    earlyStarted = resolve
+  })
+
+  const pending = playUserCatalog(
+    {
+      catalog: CATALOG,
+      items,
+      startCanonicalTrackId: 'can_n0',
+    },
+    {
+      now: 34_000,
+      concurrency: 4,
+      port: portFor({
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(track) {
+            if (track.externalId !== 'n0.mp3') {
+              await holdRest
+            }
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap(tracks),
+      playSelection: async (options) => {
+        queue.setQueue(options.tracks, options.startIndex, options.context)
+        earlyStarted()
+      },
+      replaceQueue: async (options) =>
+        queue.replacePlaylistItemsPreservingPlayback(options.tracks, {
+          type: 'playlist',
+          id: options.context.id,
+        }),
+    },
+  )
+
+  await earlyGate
+  // Пока готовится хвост — пользователь уже Next внутри того же каталога.
+  queue.append([tracks[1]!, tracks[2]!])
+  assert.equal(queue.next()?.id, tracks[1]!.id)
+  const before = queue.getSnapshot()
+  assert.equal(before.currentIndex, 1)
+  assert.deepEqual(before.history, [tracks[0]!.id, tracks[1]!.id])
+  assert.equal(before.context.type, 'playlist')
+
+  releaseRest()
+  const result = await pending
+  assert.equal(result.status, 'played')
+  const after = queue.getSnapshot()
+  assert.equal(after.context.type, 'playlist')
+  assert.equal(
+    after.context.type === 'playlist' ? after.context.id : null,
+    context.id,
+  )
+  assert.equal(after.items.length, 4)
+  assert.equal(after.currentIndex, 1)
+  assert.equal(after.items[after.currentIndex]?.id, tracks[1]!.id)
+  assert.deepEqual(after.history, [tracks[0]!.id, tracks[1]!.id])
+  assert.equal(after.historyIndex, 1)
+  assert.equal(after.repeatMode, before.repeatMode)
+  assert.equal(after.shuffleMode, before.shuffleMode)
+})
+
+test('background expand preserves position after Previous', async () => {
+  installMemoryLocalStorage()
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const copies = [
+    copyOf('can_v0', 'local-folder', 'v0.mp3', 'V0'),
+    copyOf('can_v1', 'local-folder', 'v1.mp3', 'V1'),
+    copyOf('can_v2', 'local-folder', 'v2.mp3', 'V2'),
+  ]
+  const items = copies.map((copy, index) =>
+    itemOf(copy.canonicalTrackId, [copy], `V${index}`),
+  )
+  const tracks = copies.map((copy) => trackFor(copy))
+  const queue = new PlaybackQueue()
+  let releaseRest!: () => void
+  const holdRest = new Promise<void>((resolve) => {
+    releaseRest = resolve
+  })
+  let earlyStarted!: () => void
+  const earlyGate = new Promise<void>((resolve) => {
+    earlyStarted = resolve
+  })
+
+  const pending = playUserCatalog(
+    {
+      catalog: CATALOG,
+      items,
+      startCanonicalTrackId: 'can_v0',
+    },
+    {
+      now: 35_000,
+      concurrency: 2,
+      port: portFor({
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(track) {
+            if (track.externalId !== 'v0.mp3') {
+              await holdRest
+            }
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap(tracks),
+      playSelection: async (options) => {
+        queue.setQueue(options.tracks, options.startIndex, options.context)
+        earlyStarted()
+      },
+      replaceQueue: async (options) =>
+        queue.replacePlaylistItemsPreservingPlayback(options.tracks, {
+          type: 'playlist',
+          id: options.context.id,
+        }),
+    },
+  )
+
+  await earlyGate
+  queue.append([tracks[1]!, tracks[2]!])
+  queue.next()
+  queue.next()
+  assert.equal(queue.previous()?.id, tracks[1]!.id)
+  const historyBefore = queue.getSnapshot().history
+
+  releaseRest()
+  const result = await pending
+  assert.equal(result.status, 'played')
+  const after = queue.getSnapshot()
+  assert.equal(after.currentIndex, 1)
+  assert.equal(after.items[1]?.id, tracks[1]!.id)
+  assert.deepEqual(after.history, historyBefore)
+})
+
+test('late catalog expand does not overwrite search-seed queue', async () => {
+  installMemoryLocalStorage()
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const copies = [
+    copyOf('can_s0', 'local-folder', 's0.mp3', 'S0'),
+    copyOf('can_s1', 'local-folder', 's1.mp3', 'S1'),
+    copyOf('can_s2', 'local-folder', 's2.mp3', 'S2'),
+  ]
+  const items = copies.map((copy, index) =>
+    itemOf(copy.canonicalTrackId, [copy], `S${index}`),
+  )
+  const tracks = copies.map((copy) => trackFor(copy))
+  const searchHit = trackFor(copyOf('can_hit', 'yandex-music', 'hit1', 'Hit'))
+  const queue = new PlaybackQueue()
+  let releaseRest!: () => void
+  const holdRest = new Promise<void>((resolve) => {
+    releaseRest = resolve
+  })
+  let earlyStarted!: () => void
+  const earlyGate = new Promise<void>((resolve) => {
+    earlyStarted = resolve
+  })
+  let expandApplied = true
+
+  const pending = playUserCatalog(
+    {
+      catalog: CATALOG,
+      items,
+      startCanonicalTrackId: 'can_s0',
+    },
+    {
+      now: 36_000,
+      concurrency: 2,
+      port: portFor({
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(track) {
+            if (track.externalId !== 's0.mp3') {
+              await holdRest
+            }
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap(tracks),
+      playSelection: async (options) => {
+        queue.setQueue(options.tracks, options.startIndex, options.context)
+        earlyStarted()
+      },
+      replaceQueue: async (options) => {
+        expandApplied = queue.replacePlaylistItemsPreservingPlayback(
+          options.tracks,
+          { type: 'playlist', id: options.context.id },
+        )
+        return expandApplied
+      },
+    },
+  )
+
+  await earlyGate
+  queue.setQueue([searchHit], 0, {
+    type: 'search-seed',
+    query: 'hit',
+    seedTrackId: searchHit.id,
+  })
+
+  releaseRest()
+  const result = await pending
+  assert.equal(result.status, 'played')
+  assert.equal(expandApplied, false)
+  const snap = queue.getSnapshot()
+  assert.equal(snap.context.type, 'search-seed')
+  assert.deepEqual(
+    snap.items.map((track) => track.id),
+    [searchHit.id],
+  )
+})
+
+test('late catalog expand does not overwrite my-wave radio queue', async () => {
+  installMemoryLocalStorage()
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const copies = [
+    copyOf('can_w0', 'local-folder', 'w0.mp3', 'W0'),
+    copyOf('can_w1', 'local-folder', 'w1.mp3', 'W1'),
+  ]
+  const items = copies.map((copy, index) =>
+    itemOf(copy.canonicalTrackId, [copy], `W${index}`),
+  )
+  const tracks = copies.map((copy) => trackFor(copy))
+  const wave = trackFor(copyOf('can_wave', 'yandex-music', 'wave1', 'Wave'))
+  const queue = new PlaybackQueue()
+  let releaseRest!: () => void
+  const holdRest = new Promise<void>((resolve) => {
+    releaseRest = resolve
+  })
+  let earlyStarted!: () => void
+  const earlyGate = new Promise<void>((resolve) => {
+    earlyStarted = resolve
+  })
+  let expandApplied = true
+
+  const pending = playUserCatalog(
+    {
+      catalog: CATALOG,
+      items,
+      startCanonicalTrackId: 'can_w0',
+    },
+    {
+      now: 37_000,
+      concurrency: 2,
+      port: portFor({
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(track) {
+            if (track.externalId !== 'w0.mp3') {
+              await holdRest
+            }
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap(tracks),
+      playSelection: async (options) => {
+        queue.setQueue(options.tracks, options.startIndex, options.context)
+        earlyStarted()
+      },
+      replaceQueue: async (options) => {
+        expandApplied = queue.replacePlaylistItemsPreservingPlayback(
+          options.tracks,
+          { type: 'playlist', id: options.context.id },
+        )
+        return expandApplied
+      },
+    },
+  )
+
+  await earlyGate
+  queue.setQueue([wave], 0, {
+    type: 'radio',
+    id: 'my-wave',
+    title: 'Моя волна',
+    origin: 'recommendations',
+  })
+
+  releaseRest()
+  await pending
+  assert.equal(expandApplied, false)
+  assert.equal(queue.getSnapshot().context.type, 'radio')
+  assert.equal(queue.current()?.id, wave.id)
+})
+
+test('late expand for another catalog id is ignored', async () => {
+  installMemoryLocalStorage()
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const copies = [
+    copyOf('can_o0', 'local-folder', 'o0.mp3', 'O0'),
+    copyOf('can_o1', 'local-folder', 'o1.mp3', 'O1'),
+  ]
+  const items = copies.map((copy, index) =>
+    itemOf(copy.canonicalTrackId, [copy], `O${index}`),
+  )
+  const tracks = copies.map((copy) => trackFor(copy))
+  const other = trackFor(copyOf('can_other', 'local-folder', 'other.mp3', 'Other'))
+  const queue = new PlaybackQueue()
+  let releaseRest!: () => void
+  const holdRest = new Promise<void>((resolve) => {
+    releaseRest = resolve
+  })
+  let earlyStarted!: () => void
+  const earlyGate = new Promise<void>((resolve) => {
+    earlyStarted = resolve
+  })
+  let expandApplied = true
+
+  const pending = playUserCatalog(
+    {
+      catalog: CATALOG,
+      items,
+      startCanonicalTrackId: 'can_o0',
+    },
+    {
+      now: 38_000,
+      concurrency: 2,
+      port: portFor({
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(track) {
+            if (track.externalId !== 'o0.mp3') {
+              await holdRest
+            }
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap(tracks),
+      playSelection: async (options) => {
+        queue.setQueue(options.tracks, options.startIndex, options.context)
+        earlyStarted()
+      },
+      replaceQueue: async (options) => {
+        expandApplied = queue.replacePlaylistItemsPreservingPlayback(
+          options.tracks,
+          { type: 'playlist', id: options.context.id },
+        )
+        return expandApplied
+      },
+    },
+  )
+
+  await earlyGate
+  queue.setQueue([other], 0, {
+    type: 'playlist',
+    id: 'cat_other',
+    title: 'Другой',
+  })
+
+  releaseRest()
+  await pending
+  assert.equal(expandApplied, false)
+  const snap = queue.getSnapshot()
+  assert.equal(snap.context.type, 'playlist')
+  assert.equal(snap.context.type === 'playlist' ? snap.context.id : null, 'cat_other')
+  assert.equal(snap.items[0]?.id, other.id)
+})
+
+test('cancel after early start skips expand and keeps playing track', async () => {
+  installMemoryLocalStorage()
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const copies = [
+    copyOf('can_c0', 'local-folder', 'c0.mp3', 'C0'),
+    copyOf('can_c1', 'local-folder', 'c1.mp3', 'C1'),
+  ]
+  const items = copies.map((copy, index) =>
+    itemOf(copy.canonicalTrackId, [copy], `C${index}`),
+  )
+  const tracks = copies.map((copy) => trackFor(copy))
+  const queue = new PlaybackQueue()
+  let releaseRest!: () => void
+  const holdRest = new Promise<void>((resolve) => {
+    releaseRest = resolve
+  })
+  let earlyStarted!: () => void
+  const earlyGate = new Promise<void>((resolve) => {
+    earlyStarted = resolve
+  })
+  let expandCalls = 0
+
+  const pending = playUserCatalog(
+    {
+      catalog: CATALOG,
+      items,
+      startCanonicalTrackId: 'can_c0',
+    },
+    {
+      now: 39_000,
+      concurrency: 2,
+      port: portFor({
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(track) {
+            if (track.externalId !== 'c0.mp3') {
+              await holdRest
+            }
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap(tracks),
+      playSelection: async (options) => {
+        queue.setQueue(options.tracks, options.startIndex, options.context)
+        earlyStarted()
+      },
+      replaceQueue: async () => {
+        expandCalls += 1
+      },
+    },
+  )
+
+  await earlyGate
+  assert.equal(queue.current()?.id, tracks[0]!.id)
+  cancelCatalogPlaybackGate()
+  releaseRest()
+  const result = await pending
+  assert.equal(result.status, 'played')
+  assert.equal(expandCalls, 0)
+  assert.equal(queue.current()?.id, tracks[0]!.id)
+  assert.equal(queue.getSnapshot().items.length, 1)
+})
+
+test('demo-only and unavailable rows stay out of the playback queue', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const demo = copyOf('can_demo2', 'mock', 'demo2', 'DemoOnly')
+  const bad = copyOf('can_bad', 'yandex-music', 'bad', 'Bad')
+  const ok = copyOf('can_ok2', 'local-folder', 'ok2.mp3', 'Ok')
+  const items = [
+    itemOf('can_demo2', [demo], 'DemoOnly'),
+    itemOf('can_bad', [bad], 'Bad'),
+    itemOf('can_ok2', [ok], 'Ok'),
+  ]
+  const result = await playUserCatalog(
+    { catalog: CATALOG, items },
+    {
+      now: 40_000,
+      allowDemo: false,
+      port: portFor({
+        mock: probeAdapter('mock', PLAYBACK_AVAILABILITY_STATUS.PLAYABLE),
+        'yandex-music': probeAdapter(
+          'yandex-music',
+          PLAYBACK_AVAILABILITY_STATUS.UNAVAILABLE,
+        ),
+        'local-folder': probeAdapter(
+          'local-folder',
+          PLAYBACK_AVAILABILITY_STATUS.PLAYABLE,
+        ),
+      }),
+      findTrack: findTrackMap([trackFor(demo), trackFor(bad), trackFor(ok)]),
+      playSelection: async () => undefined,
+    },
+  )
+  assert.equal(result.status, 'played')
+  if (result.status !== 'played') return
+  assert.deepEqual(
+    result.tracks.map((track) => track.id),
+    [ok.sourceTrackKey],
+  )
+})
+
+test('replacePlaylistItemsPreservingPlayback rejects foreign owner without setQueue reset', () => {
+  installMemoryLocalStorage()
+  const queue = new PlaybackQueue()
+  const a = trackFor(copyOf('can_a', 'local-folder', 'a.mp3', 'A'))
+  const b = trackFor(copyOf('can_b', 'local-folder', 'b.mp3', 'B'))
+  const c = trackFor(copyOf('can_c', 'local-folder', 'c.mp3', 'C'))
+  queue.setQueue([a], 0, {
+    type: 'playlist',
+    id: CATALOG.id,
+    title: CATALOG.name,
+  })
+  queue.setRepeatMode('ALL')
+  queue.setShuffleMode('OFF')
+  queue.append([b])
+  queue.next()
+  const before = queue.getSnapshot()
+
+  const rejected = queue.replacePlaylistItemsPreservingPlayback([a, b, c], {
+    type: 'playlist',
+    id: 'cat_foreign',
+  })
+  assert.equal(rejected, false)
+  assert.deepEqual(queue.getSnapshot(), before)
+
+  const accepted = queue.replacePlaylistItemsPreservingPlayback([a, b, c], {
+    type: 'playlist',
+    id: CATALOG.id,
+  })
+  assert.equal(accepted, true)
+  const after = queue.getSnapshot()
+  assert.equal(after.items.length, 3)
+  assert.equal(after.currentIndex, 1)
+  assert.equal(after.items[1]?.id, b.id)
+  assert.deepEqual(after.history, before.history)
+  assert.equal(after.repeatMode, 'ALL')
 })

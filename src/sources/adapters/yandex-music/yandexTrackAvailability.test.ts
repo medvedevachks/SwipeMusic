@@ -90,6 +90,20 @@ test('probeYandexTrackAvailability: deleted track', async () => {
   assert.equal(probe.reason, PLAYBACK_AVAILABILITY_REASON.TRACK_MISSING)
 })
 
+test('probeYandexTrackAvailability: foreign rows[0] does not confirm requested id', async () => {
+  const probe = await probeYandexTrackAvailability({
+    isAvailable: true,
+    hasPlus: true,
+    externalId: 'wanted',
+    getTracksByIds: async () => [
+      { id: 'other', title: 'Wrong', available: true },
+    ],
+  })
+  assert.equal(probe.status, PLAYBACK_AVAILABILITY_STATUS.UNAVAILABLE)
+  assert.equal(probe.reason, PLAYBACK_AVAILABILITY_REASON.TRACK_MISSING)
+  assert.notEqual(probe.status, PLAYBACK_AVAILABILITY_STATUS.PLAYABLE)
+})
+
 test('probeYandexTrackAvailability: network stays UNKNOWN', async () => {
   const probe = await probeYandexTrackAvailability({
     isAvailable: true,

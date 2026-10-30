@@ -195,7 +195,7 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
       : trackId
     try {
       const rows = await this.api.getTracksByIds(externalId)
-      const row = rows[0]
+      const row = rows.find((item) => String(item.id) === String(externalId))
       return row ? mapYandexTrackToTrack(row) : null
     } catch {
       return null

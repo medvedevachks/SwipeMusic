@@ -39,12 +39,15 @@ export type PlayUserCatalogDeps = {
     startIndex: number
     context: PlaylistPlayContext
   }) => Promise<void>
-  /** Расширить очередь после раннего старта без повторного playTrack. */
+  /**
+   * Дополнить очередь после раннего старта без повторного playTrack.
+   * Не должен сбрасывать позицию/историю; false = владелец сменился, no-op.
+   */
   replaceQueue?: (options: {
     tracks: Track[]
     startIndex: number
     context: PlaylistPlayContext
-  }) => void | Promise<void>
+  }) => boolean | void | Promise<boolean | void>
   onInFlight?: (count: number) => void
 }
 
@@ -293,12 +296,12 @@ export async function playUserCatalog(
         deps.replaceQueue ??
         (async (options) => {
           const { getPlaybackQueue } = await import('../playbackQueue/index.ts')
-          getPlaybackQueue().setQueue(
+          return getPlaybackQueue().replacePlaylistItemsPreservingPlayback(
             options.tracks,
-            options.startIndex,
-            options.context,
+            { type: 'playlist', id: options.context.id },
           )
         })
+      // generation + ownership внутри replace: чужой контекст не переписываем.
       if (isCurrent(generation)) {
         await replaceQueue({ tracks, startIndex, context })
       }

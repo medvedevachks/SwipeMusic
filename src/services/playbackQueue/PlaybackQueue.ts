@@ -210,6 +210,54 @@ export class PlaybackQueue {
     this.emit()
   }
 
+  /**
+   * Дополняет/заменяет items уже запущенного playlist-контекста без setQueue().
+   * Сохраняет текущий трек, currentIndex (по id), history, repeat/shuffle, context.
+   * Возвращает false, если очередь больше не принадлежит ожидаемому каталогу
+   * (поиск, «Моя волна», другой playlist) или текущий трек пропал из списка.
+   */
+  replacePlaylistItemsPreservingPlayback(
+    tracks: Track[],
+    expected: { type: 'playlist'; id: string },
+  ): boolean {
+    if (
+      this.context.type !== 'playlist' ||
+      this.context.id !== expected.id
+    ) {
+      return false
+    }
+
+    const cleaned = tracks
+      .filter((track) => Boolean(track.sourceId) || Boolean(track.id))
+      .map(stripPreview)
+    if (cleaned.length === 0) {
+      return false
+    }
+
+    const playingId =
+      this.currentIndex >= 0 && this.currentIndex < this.items.length
+        ? this.items[this.currentIndex]?.id
+        : null
+    if (!playingId) {
+      return false
+    }
+
+    const nextIndex = cleaned.findIndex((track) => track.id === playingId)
+    if (nextIndex < 0) {
+      return false
+    }
+
+    const knownIds = new Set(cleaned.map((track) => track.id))
+    this.items = cleaned
+    this.sessionTailIds = new Set(
+      [...this.sessionTailIds].filter((id) => knownIds.has(id)),
+    )
+    this.rebuildPlayOrder(nextIndex)
+    // history / historyIndex / repeat / shuffle / context не сбрасываем.
+    this.emit()
+    return true
+  }
+
   append(tracks: Track[]): void {
     if (tracks.length === 0) {
       return

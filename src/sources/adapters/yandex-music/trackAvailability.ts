@@ -83,8 +83,10 @@ export async function probeYandexTrackAvailability(
 
   try {
     const rows = await deps.getTracksByIds(deps.externalId)
-    const row =
-      rows.find((item) => String(item.id) === String(deps.externalId)) ?? rows[0]
+    // Только точное совпадение id: чужой rows[0] не подтверждает доступность.
+    const row = rows.find(
+      (item) => String(item.id) === String(deps.externalId),
+    )
     return assessYandexTrackRow(row, { hasPlus: deps.hasPlus })
   } catch (error) {
     return mapAvailabilityError(error)
