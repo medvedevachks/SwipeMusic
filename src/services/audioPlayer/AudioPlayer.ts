@@ -35,6 +35,7 @@ import { routeLivePlayback } from '../runtimeFallback/livePlayback.ts'
 import { attachMediaSession } from './mediaSession.ts'
 import type { PlayerAdapter } from './PlayerAdapter'
 import { getPlayerManager } from './PlayerManager'
+import { settlePlayGeneration } from './stalePlaySettlement.ts'
 
 type StateListener = (state: PlayerState) => void
 
@@ -57,6 +58,14 @@ function isAutoplayBlockedError(error: unknown): boolean {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
+}
+
+/** Resolver miss / network — await playTrack должен отклоняться. */
+class PlaybackResolveError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PlaybackResolveError'
+  }
 }
 
 /**
@@ -251,19 +260,35 @@ export class AudioPlayer {
     try {
       this.patchState({ loading: true, buffering: true, error: null })
       await this.adapter.load(url)
-      if (generation !== this.playGeneration) {
-        this.adapter.pause()
+      if (
+        settlePlayGeneration({
+          attemptGeneration: generation,
+          currentPlayGeneration: this.playGeneration,
+          phase: 'after-await',
+        }) === 'abandon-silent'
+      ) {
         return
       }
       await this.adapter.play()
-      if (generation !== this.playGeneration) {
-        this.adapter.pause()
+      if (
+        settlePlayGeneration({
+          attemptGeneration: generation,
+          currentPlayGeneration: this.playGeneration,
+          phase: 'after-await',
+        }) === 'abandon-silent'
+      ) {
         return
       }
       this.patchState({ error: null, loading: false, buffering: false })
     } catch (error) {
-      if (isAbortError(error) || generation !== this.playGeneration) {
-        this.adapter.pause()
+      if (
+        settlePlayGeneration({
+          attemptGeneration: generation,
+          currentPlayGeneration: this.playGeneration,
+          phase: 'on-error',
+          isAbortError: isAbortError(error),
+        }) === 'abandon-silent'
+      ) {
         return
       }
 
@@ -377,6 +402,7 @@ export class AudioPlayer {
       }
       if (!resolution) {
         this.adapter.pause()
+        const message = resolver.buildUnavailableMessage()
         this.patchState({
           pendingTrack: null,
           activeCandidate: null,
@@ -384,7 +410,7 @@ export class AudioPlayer {
           paused: true,
           loading: false,
           buffering: false,
-          error: resolver.buildUnavailableMessage(),
+          error: message,
         })
         reportPlayback({
           type: 'failed',
@@ -393,7 +419,7 @@ export class AudioPlayer {
           canonicalTrackId: null,
           reason: 'load-failed',
         })
-        return
+        throw new PlaybackResolveError(message)
       }
       playbackUrl = resolution.url
       candidate = resolution.candidate
@@ -401,7 +427,12 @@ export class AudioPlayer {
       if (generation !== this.playGeneration) {
         return
       }
+      if (error instanceof PlaybackResolveError) {
+        throw error
+      }
       this.adapter.pause()
+      const message =
+        error instanceof Error ? error.message : 'Failed to resolve playback'
       this.patchState({
         pendingTrack: null,
         activeCandidate: null,
@@ -409,10 +440,7 @@ export class AudioPlayer {
         paused: true,
         loading: false,
         buffering: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : 'Failed to resolve playback',
+        error: message,
       })
       reportPlayback({
         type: 'failed',
@@ -421,7 +449,7 @@ export class AudioPlayer {
         canonicalTrackId: null,
         reason: 'load-failed',
       })
-      return
+      throw error instanceof Error ? error : new Error(message)
     }
 
     await pausePromise.catch(() => undefined)
@@ -433,8 +461,13 @@ export class AudioPlayer {
 
     try {
       await this.adapter.load(playbackUrl)
-      if (generation !== this.playGeneration) {
-        this.adapter.pause()
+      if (
+        settlePlayGeneration({
+          attemptGeneration: generation,
+          currentPlayGeneration: this.playGeneration,
+          phase: 'after-await',
+        }) === 'abandon-silent'
+      ) {
         return
       }
 
@@ -454,8 +487,13 @@ export class AudioPlayer {
       })
 
       await this.adapter.play()
-      if (generation !== this.playGeneration) {
-        this.adapter.pause()
+      if (
+        settlePlayGeneration({
+          attemptGeneration: generation,
+          currentPlayGeneration: this.playGeneration,
+          phase: 'after-await',
+        }) === 'abandon-silent'
+      ) {
         return
       }
 
@@ -488,8 +526,14 @@ export class AudioPlayer {
         durationMs: track.durationMs ?? null,
       })
     } catch (error) {
-      if (isAbortError(error) || generation !== this.playGeneration) {
-        this.adapter.pause()
+      if (
+        settlePlayGeneration({
+          attemptGeneration: generation,
+          currentPlayGeneration: this.playGeneration,
+          phase: 'on-error',
+          isAbortError: isAbortError(error),
+        }) === 'abandon-silent'
+      ) {
         return
       }
 
@@ -868,6 +912,11 @@ export class AudioPlayer {
       return
     }
 
+    // Inbox/Catalog/другой seed уже сменил контекст — не stop и не playTrack поверх.
+    if (!isRecommendationAdvanceContext(getPlaybackQueue().getPlaybackContext())) {
+      return
+    }
+
     if (!advanced) {
       // Сохраняем последнюю рекомендацию для карточки; не сбрасываем queueIndex на -1
       // (иначе focus падает на queue[0] и Home выглядит как search hits).
@@ -889,6 +938,9 @@ export class AudioPlayer {
 
     await this.playTrack(advanced.track)
     if (epoch !== getRecommendationAdvanceEpoch()) {
+      return
+    }
+    if (!isRecommendationAdvanceContext(getPlaybackQueue().getPlaybackContext())) {
       return
     }
     // Prefetch только после новой рекомендации на конце истории — не при Previous/Next по хвосту.

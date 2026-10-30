@@ -5,6 +5,7 @@
 import { isDemoSourceId } from '../../sources/demoSource.ts'
 import type { PlaybackContext } from '../../types/playbackContext.ts'
 import type { Track } from '../../types/track.ts'
+import { SYS_SWIPES_ID } from '../catalogs/systemFolders.ts'
 import { isSearchFlowHarnessEnabled } from '../continuation/searchFlowHarnessFlag.ts'
 
 export type HomeDeckStage = 'sorting' | 'wave'
@@ -32,6 +33,21 @@ export function isRecommendationHomeDeckContext(input: {
   context: PlaybackContext
 }): boolean {
   const { stage, sessionMode, context } = input
+  // Inbox / волна: явный playback context важнее leftover search mode.
+  if (
+    stage === 'sorting' &&
+    context.type === 'playlist' &&
+    context.id === SYS_SWIPES_ID
+  ) {
+    return true
+  }
+  if (
+    stage === 'wave' &&
+    context.type === 'radio' &&
+    context.id === 'my-wave'
+  ) {
+    return true
+  }
   // Поиск без seed: пользователь выбирает hit — лента выдачи.
   if (sessionMode === 'search' && context.type !== 'search-seed') {
     return false
@@ -40,13 +56,6 @@ export function isRecommendationHomeDeckContext(input: {
     return true
   }
   if (stage === 'sorting' && context.type === 'swipe' && sessionMode === 'catalog') {
-    return true
-  }
-  if (
-    stage === 'wave' &&
-    context.type === 'radio' &&
-    context.id === 'my-wave'
-  ) {
     return true
   }
   return false

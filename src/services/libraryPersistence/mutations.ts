@@ -4,6 +4,12 @@ import type { GestureConfig } from '../../types/gesture'
 import type { HistoryEntry } from '../../types/history'
 import type { Track } from '../../types/track'
 import { useAuthStore } from '../../store/authStore.ts'
+import {
+  captureAuthSession,
+  isAuthSessionCurrent,
+  StaleLibrarySessionError,
+  type AuthSessionSnapshot,
+} from '../auth/sessionEpoch.ts'
 import { libraryClient, LibraryHttpError } from './client.ts'
 import {
   toTrackUpsertBody,
@@ -16,14 +22,48 @@ import {
   useLibraryPersistenceStore,
 } from './statusStore.ts'
 
-let chain: Promise<void> = Promise.resolve()
-let pending = 0
+/**
+ * Счётчик и цепочка мутаций — на поколение auth-сессии.
+ * Иначе finally A оставляет pending>0 и B зависает в saving.
+ */
+type SessionMutationBucket = {
+  pending: number
+  chain: Promise<void>
+}
+
+const buckets = new Map<number, SessionMutationBucket>()
+
+function bucketFor(generation: number): SessionMutationBucket {
+  let bucket = buckets.get(generation)
+  if (!bucket) {
+    bucket = { pending: 0, chain: Promise.resolve() }
+    buckets.set(generation, bucket)
+  }
+  return bucket
+}
+
+function releaseBucketIfIdle(generation: number, bucket: SessionMutationBucket): void {
+  if (bucket.pending <= 0) {
+    buckets.delete(generation)
+  }
+}
 
 function noteIdleAfterSave(): void {
   const { status } = useLibraryPersistenceStore.getState()
   if (status === 'saving') {
     useLibraryPersistenceStore.getState().setStatus('ready', null)
   }
+}
+
+function applyFailureIfCurrent(
+  session: AuthSessionSnapshot,
+  error: unknown,
+  kind: 'load' | 'save',
+): void {
+  if (!isAuthSessionCurrent(session)) {
+    return
+  }
+  handleLibraryFailure(error, kind)
 }
 
 export function handleLibraryFailure(error: unknown, kind: 'load' | 'save'): void {
@@ -39,54 +79,89 @@ export function handleLibraryFailure(error: unknown, kind: 'load' | 'save'): voi
   )
 }
 
+/** Сброс для unit-тестов. */
+export function resetLibraryMutationQueuesForTests(): void {
+  buckets.clear()
+}
+
 export async function runLibraryMutation<T>(task: () => Promise<T>): Promise<T | null> {
   if (!isLibraryPersistenceArmed()) {
     return null
   }
-  pending += 1
+  const session = captureAuthSession()
+  const bucket = bucketFor(session.generation)
+  bucket.pending += 1
   if (useLibraryPersistenceStore.getState().status !== 'loading') {
     useLibraryPersistenceStore.getState().setStatus('saving', null)
   }
   try {
-    if (!isLibraryPersistenceArmed()) {
+    if (!isLibraryPersistenceArmed() || !isAuthSessionCurrent(session)) {
       return null
     }
-    return await task()
+    const result = await task()
+    if (!isAuthSessionCurrent(session)) {
+      return null
+    }
+    return result
   } catch (error) {
-    handleLibraryFailure(error, 'save')
+    // Смена аккаунта / logout mid-flight — не SAVE_FAILED / не logout для B.
+    if (error instanceof StaleLibrarySessionError) {
+      return null
+    }
+    applyFailureIfCurrent(session, error, 'save')
     return null
   } finally {
-    pending -= 1
-    if (pending === 0) {
+    bucket.pending -= 1
+    const idle = bucket.pending <= 0
+    if (idle) {
+      releaseBucketIfIdle(session.generation, bucket)
+    }
+    // Только текущая сессия и её нулевой счётчик → ready.
+    if (idle && isAuthSessionCurrent(session)) {
       noteIdleAfterSave()
     }
   }
 }
 
-function enqueue(task: () => Promise<void>): void {
+function assertEnqueueSession(session: AuthSessionSnapshot): void {
+  if (!isLibraryPersistenceArmed() || !isAuthSessionCurrent(session)) {
+    throw new StaleLibrarySessionError()
+  }
+}
+
+function enqueue(task: (session: AuthSessionSnapshot) => Promise<void>): void {
   if (!isLibraryPersistenceArmed()) {
     return
   }
-  pending += 1
+  const session = captureAuthSession()
+  const bucket = bucketFor(session.generation)
+  bucket.pending += 1
   if (useLibraryPersistenceStore.getState().status !== 'loading') {
     useLibraryPersistenceStore.getState().setStatus('saving', null)
   }
   const run = async () => {
     try {
-      if (!isLibraryPersistenceArmed()) {
+      if (!isLibraryPersistenceArmed() || !isAuthSessionCurrent(session)) {
         return
       }
-      await task()
+      await task(session)
     } catch (error) {
-      handleLibraryFailure(error, 'save')
+      if (!(error instanceof StaleLibrarySessionError)) {
+        applyFailureIfCurrent(session, error, 'save')
+      }
     } finally {
-      pending -= 1
-      if (pending === 0) {
+      bucket.pending -= 1
+      const idle = bucket.pending <= 0
+      if (idle) {
+        releaseBucketIfIdle(session.generation, bucket)
+      }
+      if (idle && isAuthSessionCurrent(session)) {
         noteIdleAfterSave()
       }
     }
   }
-  chain = chain.then(run, run)
+  // Сериализация только внутри поколения; цепочка A не блокирует B.
+  bucket.chain = bucket.chain.then(run, run)
 }
 
 export function persistCategory(category: Category, mode: 'create' | 'update'): void {
@@ -115,11 +190,13 @@ export function persistTrackDelete(trackId: string): void {
 }
 
 export function persistAssignment(track: Track, assignment: TrackAssignment): void {
-  enqueue(async () => {
+  enqueue(async (session) => {
     await libraryClient.upsertTrack(
       track.id,
       toTrackUpsertBody(trackFromDomain(track), null, { includeUserFields: false }),
     )
+    // Mid-flight logout/login: cookie уже B — не писать assign в чужую библиотеку.
+    assertEnqueueSession(session)
     await libraryClient.assign(track.id, assignment)
   })
 }
@@ -129,11 +206,12 @@ export function persistUnassign(trackId: string, categoryId: string): void {
 }
 
 export function persistHistory(entry: HistoryEntry): void {
-  enqueue(async () => {
+  enqueue(async (session) => {
     await libraryClient.upsertTrack(
       entry.track.id,
       toTrackUpsertBody(trackFromDomain(entry.track), null, { includeUserFields: false }),
     )
+    assertEnqueueSession(session)
     await libraryClient.appendHistory(entry)
   })
 }

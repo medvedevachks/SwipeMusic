@@ -3,11 +3,17 @@ import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
 import type { Category } from '../../types/category.ts'
 import type { CanonicalLibraryItem, CanonicalMembership, SourceCopySnapshot, TrackIdentity } from '../../types/canonical.ts'
 import type { Track } from '../../types/track.ts'
+import {
+  captureAuthSession,
+  isAuthSessionCurrent,
+  StaleLibrarySessionError,
+} from '../auth/sessionEpoch.ts'
 import { SYS_SWIPES_ID } from '../catalogs/systemFolders.ts'
 import { libraryClient } from '../libraryPersistence/client.ts'
 import { runLibraryMutation } from '../libraryPersistence/mutations.ts'
 import { sourceTrackKeyOf, snapshotFromTrack } from './mapCanonical.ts'
 import { isSourceCopyLiked } from './selectors.ts'
+import { clearPendingSwipeLikes } from '../swipeClassification/pendingSwipeLike.ts'
 
 /**
  * Удалённые операции канонической организации.
@@ -47,6 +53,8 @@ export function setCanonicalRemote(next: CanonicalRemote | null): void {
 export function clearCanonicalIdentityFlights(): void {
   identityFlights.clear()
   likeFlights.clear()
+  // UX-10B: pending LEFT intent не переживает logout / смену аккаунта.
+  clearPendingSwipeLikes()
 }
 
 export async function ensureCanonicalForTrack(track: Track): Promise<CanonicalLibraryItem> {
@@ -63,11 +71,20 @@ export async function ensureCanonicalForTrack(track: Track): Promise<CanonicalLi
     return flight
   }
 
+  const session = captureAuthSession()
   const pending = remote
     .ensureIdentity(snapshotFromTrack(track))
-    .then((identity) => useCanonicalLibraryStore.getState().absorbIdentity(identity))
+    .then((identity) => {
+      if (!isAuthSessionCurrent(session)) {
+        throw new StaleLibrarySessionError()
+      }
+      return useCanonicalLibraryStore.getState().absorbIdentity(identity)
+    })
     .finally(() => {
-      identityFlights.delete(key)
+      // Не сносить flight B после clear + ensure того же sourceTrackKey.
+      if (identityFlights.get(key) === pending) {
+        identityFlights.delete(key)
+      }
     })
   identityFlights.set(key, pending)
   return pending
@@ -77,9 +94,16 @@ export async function likeSourceTrack(
   track: Track,
   liked: boolean,
 ): Promise<CanonicalLibraryItem | null> {
+  const session = captureAuthSession()
   return runLibraryMutation(async () => {
     const current = await ensureCanonicalForTrack(track)
+    if (!isAuthSessionCurrent(session)) {
+      throw new StaleLibrarySessionError()
+    }
     const response = await remote.patchCanonicalLiked(current.canonicalTrack.id, liked)
+    if (!isAuthSessionCurrent(session)) {
+      throw new StaleLibrarySessionError()
+    }
     useCanonicalLibraryStore.getState().upsertItem(response.item)
     return response.item
   })
@@ -94,9 +118,16 @@ export async function assignSourceToCatalog(
   track: Track,
   catalogId: string,
 ): Promise<boolean> {
+  const session = captureAuthSession()
   const saved = await runLibraryMutation(async () => {
     const current = await ensureCanonicalForTrack(track)
+    if (!isAuthSessionCurrent(session)) {
+      throw new StaleLibrarySessionError()
+    }
     const response = await remote.assignCanonical(catalogId, current.canonicalTrack.id)
+    if (!isAuthSessionCurrent(session)) {
+      throw new StaleLibrarySessionError()
+    }
     useCanonicalLibraryStore
       .getState()
       .addCatalog(current.canonicalTrack.id, response.membership.catalogId)
@@ -109,8 +140,12 @@ export async function removeCanonicalFromCatalog(
   canonicalTrackId: string,
   catalogId: string,
 ): Promise<boolean> {
+  const session = captureAuthSession()
   const saved = await runLibraryMutation(async () => {
     await remote.unassignCanonical(catalogId, canonicalTrackId)
+    if (!isAuthSessionCurrent(session)) {
+      throw new StaleLibrarySessionError()
+    }
     useCanonicalLibraryStore.getState().removeCatalog(canonicalTrackId, catalogId)
     return true
   })
@@ -118,8 +153,12 @@ export async function removeCanonicalFromCatalog(
 }
 
 async function persistSwipeLike(track: Track): Promise<boolean> {
+  const session = captureAuthSession()
   const item = await likeSourceTrack(track, true)
   if (!item) {
+    return false
+  }
+  if (!isAuthSessionCurrent(session)) {
     return false
   }
   useCollectionStore.getState().recordHistory({ track, action: 'like' })
@@ -168,6 +207,7 @@ export async function commitCatalogChoice(
     return { status: 'failed' }
   }
 
+  const session = captureAuthSession()
   const key = sourceTrackKeyOf(track)
   const before = useCanonicalLibraryStore.getState()
   const priorId = before.sourceKeyToCanonicalId[key]
@@ -176,9 +216,13 @@ export async function commitCatalogChoice(
 
   if (!alreadyInTarget) {
     const saved = await assignSourceToCatalog(track, catalogId)
-    if (!saved) {
+    if (!saved || !isAuthSessionCurrent(session)) {
       return { status: 'failed' }
     }
+  }
+
+  if (!isAuthSessionCurrent(session)) {
+    return { status: 'failed' }
   }
 
   const after = useCanonicalLibraryStore.getState()
@@ -191,6 +235,9 @@ export async function commitCatalogChoice(
   if (stillInInbox && canonicalId) {
     // liked не трогаем. Не откатываем assign при ошибке unassign.
     const removed = await removeCanonicalFromCatalog(canonicalId, SYS_SWIPES_ID)
+    if (!isAuthSessionCurrent(session)) {
+      return { status: 'failed' }
+    }
     if (!removed) {
       if (!alreadyInTarget) {
         useCollectionStore.getState().recordHistory({
@@ -205,6 +252,10 @@ export async function commitCatalogChoice(
         canonicalTrackId: canonicalId,
       }
     }
+  }
+
+  if (!isAuthSessionCurrent(session)) {
+    return { status: 'failed' }
   }
 
   if (!alreadyInTarget) {

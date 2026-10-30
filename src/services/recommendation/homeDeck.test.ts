@@ -68,6 +68,63 @@ test('A/B: swipe playback deck follows queue, not catalog feed', () => {
   assert.equal(deck.tracks.some((item) => item.id === hit.id), false)
 })
 
+test('sys_swipes playlist deck syncs for inbox sorting on Home', () => {
+  const deck = resolveHomeDeckTracks({
+    stage: 'sorting',
+    sessionMode: 'catalog',
+    browseFeed: [hit],
+    queue: [atl, rec1],
+    queueIndex: 0,
+    currentTrack: atl,
+    pendingTrack: null,
+    context: { type: 'playlist', id: 'sys_swipes', title: 'Свайпы' },
+  })
+  assert.equal(deck.source, 'playback')
+  assert.equal(deck.syncWithPlayer, true)
+  assert.deepEqual(
+    deck.tracks.map((item) => item.id),
+    [atl.id, rec1.id],
+  )
+  assert.equal(deck.tracks.some((item) => item.id === hit.id), false)
+})
+
+test('sys_swipes inbox Play wins over leftover search sessionMode', () => {
+  const deck = resolveHomeDeckTracks({
+    stage: 'sorting',
+    sessionMode: 'search',
+    browseFeed: [hit],
+    queue: [atl, rec1],
+    queueIndex: 0,
+    currentTrack: atl,
+    pendingTrack: null,
+    context: { type: 'playlist', id: 'sys_swipes', title: 'Свайпы' },
+  })
+  assert.equal(deck.source, 'playback')
+  assert.deepEqual(
+    deck.tracks.map((item) => item.id),
+    [atl.id, rec1.id],
+  )
+  assert.equal(deck.tracks.some((item) => item.id === hit.id), false)
+})
+
+test('user playlist (non-sys_swipes) keeps browse feed, not inbox playback deck', () => {
+  const deck = resolveHomeDeckTracks({
+    stage: 'sorting',
+    sessionMode: 'catalog',
+    browseFeed: [hit],
+    queue: [atl, rec1],
+    queueIndex: 0,
+    currentTrack: atl,
+    pendingTrack: null,
+    context: { type: 'playlist', id: 'cat_party', title: 'Вечеринка' },
+  })
+  assert.equal(deck.source, 'browse')
+  assert.deepEqual(
+    deck.tracks.map((item) => item.id),
+    [hit.id],
+  )
+})
+
 test('C: wave deck uses radio queue', () => {
   const deck = resolveHomeDeckTracks({
     stage: 'wave',

@@ -27,6 +27,8 @@ export class PlayerManager implements PlayerAdapter {
   private active: SourceBoundAdapter
   private readonly listeners = new Set<(event: PlayerAdapterEvent) => void>()
   private unsubscribeActive: (() => void) | null = null
+  /** Инкремент при pause/новом load — отменяет in-flight load до смены src. */
+  private loadGeneration = 0
 
   constructor() {
     this.local = new LocalPlayerAdapter()
@@ -101,11 +103,27 @@ export class PlayerManager implements PlayerAdapter {
   }
 
   async load(url: string): Promise<void> {
-    // Сначала дожидаемся pause обоих backends — иначе Spotify SDK
-    // может ещё играть, пока Local уже load/play.
-    await this.pause()
+    const generation = ++this.loadGeneration
+    // Сначала pause backends — иначе Spotify SDK может ещё играть, пока Local уже load/play.
+    // Без bump loadGeneration: иначе этот же load сразу стал бы stale.
+    await this.pauseBackends()
+    if (generation !== this.loadGeneration) {
+      const error = new Error('PlayerManager load aborted')
+      error.name = 'AbortError'
+      throw error
+    }
     await this.activateForUrl(url)
+    if (generation !== this.loadGeneration) {
+      const error = new Error('PlayerManager load aborted')
+      error.name = 'AbortError'
+      throw error
+    }
     await this.active.load(url)
+    if (generation !== this.loadGeneration) {
+      const error = new Error('PlayerManager load aborted')
+      error.name = 'AbortError'
+      throw error
+    }
   }
 
   async play(): Promise<void> {
@@ -113,6 +131,11 @@ export class PlayerManager implements PlayerAdapter {
   }
 
   async pause(): Promise<void> {
+    this.loadGeneration += 1
+    await this.pauseBackends()
+  }
+
+  private async pauseBackends(): Promise<void> {
     await Promise.all([
       Promise.resolve(this.local.pause()),
       Promise.resolve(this.spotify.pause()),
@@ -120,6 +143,7 @@ export class PlayerManager implements PlayerAdapter {
   }
 
   stop(): void {
+    this.loadGeneration += 1
     this.local.stop()
     this.spotify.stop()
   }

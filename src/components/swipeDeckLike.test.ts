@@ -809,6 +809,34 @@ test('SKIP по-прежнему переключает воспроизведе
   assert.equal(playerState().paused, false)
 })
 
+test('Play A → LEFT → A играет → UP → B; A остаётся лайкнутой', { timeout: 20_000 }, async () => {
+  resetLibrary()
+  installRemote()
+  await seedPlayback(0, 37.5, true)
+  await renderDeck({ tracks }, { remount: true })
+
+  await swipe('left')
+  assert.equal(frontTitle(), 'Город')
+  assert.equal(likePatches, 1)
+  assert.equal(playerState().currentTrack?.id, 'yandex-music:101')
+  assert.equal(playerState().currentTime, 37.5)
+  assert.equal(playerState().playing, true)
+  assert.deepEqual(navigated, [])
+
+  await swipe('up')
+  assert.equal(frontTitle(), 'Река')
+  assert.deepEqual(navigated, ['yandex-music:102'])
+  assert.equal(playerState().currentTrack?.id, 'yandex-music:102')
+  assert.equal(
+    collectionStore.getState().history.filter((entry) => entry.action === 'skip').length,
+    0,
+  )
+  const liked = Object.values(canonicalStore.getState().itemsById).find((item) =>
+    item.copies.some((copy) => copy.sourceTrackKey === 'yandex-music:101'),
+  )
+  assert.equal(liked?.state.liked, true)
+})
+
 test('PREVIOUS и CATEGORIZE сохраняют прежнюю навигацию', { timeout: 20_000 }, async () => {
   resetLibrary()
   installRemote()

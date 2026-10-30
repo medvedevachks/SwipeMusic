@@ -18,7 +18,13 @@ export function isRecommendationAdvanceContext(context: PlaybackContext): boolea
   if (context.type === 'radio' && context.id === 'my-wave' && mode === 'wave') {
     return true
   }
-  if (context.type === 'swipe' && mode === 'swipe') {
+  /*
+   * Swipe + mode swipe|search: continuation через Recommendation Engine.
+   * Mode 'search' бывает после ensureSearchRecommendation при живой swipe-очереди —
+   * иначе UP падает в queue.next() по одному seed и чистит карточку.
+   * mode === null: обычный queue.next (многотрековая колода / тесты).
+   */
+  if (context.type === 'swipe' && (mode === 'swipe' || mode === 'search')) {
     return true
   }
   return false

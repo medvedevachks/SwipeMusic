@@ -38,3 +38,20 @@ test('home-mode-tabs CSS keeps three equal columns for mobile width', () => {
   assert.match(css, /\.home-mode-tab\s*\{[^}]*min-width:\s*0/s)
   assert.match(css, /\.home-mode-tab\s*\{[^}]*overflow:\s*hidden/s)
 })
+
+test('Home opens sorting for sys_swipes inbox and removes sorted from queue', () => {
+  const home = readFileSync(new URL('./Home.tsx', import.meta.url), 'utf8')
+  assert.match(home, /SYS_SWIPES_ID/)
+  assert.match(home, /focusHomeTab/)
+  assert.match(home, /removeSortedCanonicalFromSwipesQueue/)
+  assert.match(home, /forceProvider: active === 'wave'/)
+})
+
+test('LibraryFolder swipes Play navigates to Home sorting session', () => {
+  const folder = readFileSync(new URL('./LibraryFolder.tsx', import.meta.url), 'utf8')
+  assert.match(folder, /startSwipeInboxSorting/)
+  assert.match(folder, /focusHomeTab: 'sorting'/)
+  assert.match(folder, /folderId === 'swipes'/)
+  // Favorites / my-music остаются на playUserCatalog.
+  assert.match(folder, /playUserCatalog/)
+})

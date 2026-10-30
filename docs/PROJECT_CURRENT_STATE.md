@@ -5,10 +5,10 @@
 
 | Поле | Значение |
 |---|---|
-| Дата снимка | 2026-10-30 (LIBRARY-UX-09B library root compact) |
+| Дата снимка | 2026-10-30 (UX-10 pre-production release gate) |
 | Канонический репозиторий | https://github.com/medvedevachks/SwipeMusic |
-| Ветка снимка | `feature/deploy-windows-01` |
-| Проверенный HEAD | ветка `feature/deploy-windows-01` (UX-09B); production baseline на S1 по-прежнему `26e056f` до deploy |
+| Ветка снимка | `fix/ux-10a-left-up-race` → PR #2 в `feature/deploy-windows-01` |
+| Проверенный HEAD | Pre-prod gate + follow-up: advance epoch invalidate на inbox/seed, session mid-flight guards, identityFlights finally. S1 deploy не выполнялся. |
 | Исторический upstream | https://github.com/r-sh-galimov/SwipeMusic |
 
 **Легенда источников фактов**
@@ -233,10 +233,11 @@ Last.fm и MusicBrainz для рекомендаций **не** подключа
 
 | Приоритет | Задача | Суть |
 |---|---|---|
-| **1** | LIBRARY-UX review → S1 deploy | Inbox `sys_swipes` на `feature/deploy-windows-01` (UX-03…09B: session guard, compact `/library`, provider lists → `/library/browse`). Deploy только после PASS review. **S1 не трогать** без отдельной задачи. |
-| **2** | RELEASE / S1 sync | Production baseline `26e056f`; frontend deploy на S1 только с Server. **Без** restart backend/Caddy/AD без задачи. |
-| **3** | RADIO-08 | Убрать нерелевантные и повторяющиеся треки волны/свайпов на уровне ранжирования ядра. |
-| **4** | MEDIA-REMOTE-02 | Проверить физические кнопки руля на Android-магнитоле. |
+| **1** | UX-10 / PR #2 → device acceptance | Code ready на PR #2. Нужны: merge approval, затем REAL DEVICE ACCEPTANCE (телефон + реальное аудио), затем frontend-only S1 deploy по плану. |
+| **2** | LIBRARY-UX / S1 deploy | Inbox + compact `/library` на ветке; production deploy только после PASS review. **S1 не трогать** без задачи. |
+| **3** | RELEASE / S1 sync | Frontend deploy на S1 только с Server. **Без** restart backend/Caddy/AD без задачи. |
+| **4** | RADIO-08 | Убрать нерелевантные и повторяющиеся треки волны/свайпов на уровне ранжирования ядра. |
+| **5** | MEDIA-REMOTE-02 | Проверить физические кнопки руля на Android-магнитоле. |
 
 Не начинать RADIO-08 до закрытия пользовательской проверки RELEASE-13. Car Mode / VK / Zaycev — только по отдельному решению.
 

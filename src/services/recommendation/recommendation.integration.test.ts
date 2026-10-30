@@ -21,8 +21,14 @@ import type { Track } from '../../types/track.ts'
 import type { UserTasteProfile } from '../taste/types.ts'
 import {
   consumeRecommendationAdvance,
+  isRecommendationAdvanceContext,
   resolveRecommendationAdvance,
 } from './advance.ts'
+import { setActiveRecommendationMode } from './sessionState.ts'
+import { classifySwipeTrack } from '../swipeClassification/classifySwipeTrack.ts'
+import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
+import { useCollectionStore } from '../../store/collectionStore.ts'
+import { SYS_SWIPES_ID } from '../catalogs/systemFolders.ts'
 import {
   activateRecommendationSession,
   commitRecommendationSeed,
@@ -193,6 +199,112 @@ test('A: Swipe start → Rec1 → Next → Rec2', async () => {
   assert.equal(second?.id, rec2.id)
   assert.equal(queue.getPlaybackContext().type, 'swipe')
   assert.equal(getRecommendationSessionMode(), 'swipe')
+})
+
+test('A2: swipe context advances even when mode briefly is search', async () => {
+  const { queue, session } = await seededAdvanceSession('swipe')
+  setActiveRecommendationMode('search')
+  assert.equal(isRecommendationAdvanceContext(queue.getPlaybackContext()), true)
+  const next = await resolveRecommendationAdvance(queue, session, { fromEnded: false })
+  assert.equal(next?.id, rec1.id)
+  assert.equal(queue.current()?.id, rec1.id)
+})
+
+test('UX-10: Play A → LIKE → A stays → UP → B; A remains liked in sys_swipes', async () => {
+  resetAll()
+  useCanonicalLibraryStore.getState().clear()
+  useCollectionStore.getState().clearUserLibrary()
+  const { getPlaybackQueue } = await import('../playbackQueue/PlaybackQueue.ts')
+  const queue = getPlaybackQueue()
+  queue.clear()
+  commitRecommendationSeed({ mode: 'swipe', track: seed })
+  assert.equal(queue.getItems().length, 1)
+  assert.equal(queue.current()?.id, seed.id)
+
+  // Simulate LEFT like already applied (canonical liked + inbox).
+  useCanonicalLibraryStore.getState().replaceForUser('u1', [
+    {
+      canonicalTrack: {
+        id: 'can_seed',
+        title: seed.title,
+        artist: seed.artist,
+        album: null,
+        durationMs: null,
+        artworkUrl: null,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      copies: [
+        {
+          sourceTrackKey: seed.id,
+          canonicalTrackId: 'can_seed',
+          sourceId: seed.sourceId,
+          externalId: seed.externalId,
+          title: seed.title,
+          artist: seed.artist,
+          album: null,
+          durationMs: null,
+          artworkUrl: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+      state: {
+        addedAt: '2026-01-01T00:00:00.000Z',
+        lastPlayed: null,
+        playCount: 0,
+        liked: true,
+        likedAt: '2026-01-01T00:00:00.000Z',
+        disliked: false,
+        skipped: 0,
+        notes: '',
+        favorite: false,
+        hidden: false,
+        customMetadata: {},
+      },
+      catalogIds: [SYS_SWIPES_ID],
+    },
+  ])
+
+  const likeUp = classifySwipeTrack(seed, 'skip')
+  assert.equal(likeUp.kind, 'applied')
+  assert.equal(
+    useCollectionStore.getState().history.some((entry) => entry.action === 'skip'),
+    false,
+  )
+  assert.equal(queue.current()?.id, seed.id)
+
+  const d = catalogDeps(queue)
+  const session = new ContinuationSession(
+    createSearchRecommendationProvider({ mode: 'swipe', ...d }),
+  )
+  session.prepare(seed, {
+    type: 'search-seed',
+    query: 'swipe',
+    seedTrackId: seed.id,
+  })
+  await session.flush()
+  const next = await resolveRecommendationAdvance(queue, session, { fromEnded: false })
+  assert.equal(next?.id, rec1.id)
+  assert.equal(queue.current()?.id, rec1.id)
+  const liked = useCanonicalLibraryStore.getState().itemsById.can_seed
+  assert.equal(liked?.state.liked, true)
+  assert.ok(liked?.catalogIds.includes(SYS_SWIPES_ID))
+})
+
+test('UX-10: UP without prior like keeps skip semantics then advances', async () => {
+  resetAll()
+  useCanonicalLibraryStore.getState().clear()
+  useCollectionStore.getState().clearUserLibrary()
+  const { queue, session } = await seededAdvanceSession('swipe')
+  const result = classifySwipeTrack(seed, 'skip')
+  assert.equal(result.kind, 'applied')
+  assert.equal(
+    useCollectionStore.getState().history.some((entry) => entry.action === 'skip'),
+    true,
+  )
+  const next = await resolveRecommendationAdvance(queue, session, { fromEnded: false })
+  assert.equal(next?.id, rec1.id)
 })
 
 test('B: Wave start → Rec1 → Next → Rec2', async () => {

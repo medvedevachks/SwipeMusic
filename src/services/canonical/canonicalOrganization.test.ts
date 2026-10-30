@@ -5,6 +5,10 @@ import { classifySwipeTrack } from '../swipeClassification/classifySwipeTrack.ts
 import { useAuthStore } from '../../store/authStore.ts'
 import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
 import { useCollectionStore } from '../../store/collectionStore.ts'
+import {
+  bindAuthSessionEpoch,
+  resetAuthSessionEpochForTests,
+} from '../auth/sessionEpoch.ts'
 import { LibraryHttpError } from '../libraryPersistence/client.ts'
 import {
   applyCanonicalSnapshot,
@@ -887,4 +891,105 @@ test('unauthorized canonical save uses the existing auth failure path', async ()
   assert.equal(useAuthStore.getState().user, null)
   assert.equal(useLibraryPersistenceStore.getState().armed, false)
   resetRuntime()
+})
+
+test('commitCatalogChoice after session switch does not record history for B', async () => {
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+  arm()
+  bindAuthSessionEpoch('user-a')
+  const track = sourceTrack('yandex-music', '101', 'Город')
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [
+    canonicalItem(
+      'can_x',
+      'Город',
+      [sourceCopy('yandex-music', '101', 'can_x', 'Город')],
+      true,
+      ['sys_swipes'],
+    ),
+  ])
+  let releaseAssign!: () => void
+  const assignGate = new Promise<void>((resolve) => {
+    releaseAssign = resolve
+  })
+  setCanonicalRemote({
+    ensureIdentity: async () => identityFrom('can_x', [track]),
+    patchCanonicalLiked: async () => {
+      throw new Error('unused')
+    },
+    assignCanonical: async (catalogId, canonicalTrackId) => {
+      await assignGate
+      useCanonicalLibraryStore.getState().addCatalog(canonicalTrackId, catalogId)
+      return {
+        membership: { catalogId, canonicalTrackId, createdAt: NOW },
+      }
+    },
+    unassignCanonical: async () => undefined,
+  })
+
+  const pending = commitCatalogChoice(track, 'cat_car')
+  await Promise.resolve()
+  await Promise.resolve()
+
+  bindAuthSessionEpoch('user-b')
+  useCanonicalLibraryStore.getState().clear()
+  useCollectionStore.getState().clearUserLibrary()
+  releaseAssign()
+  const result = await pending
+  assert.equal(result.status, 'failed')
+  assert.equal(useCollectionStore.getState().history.length, 0)
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+})
+
+test('stale identity finally does not drop B flight for same source key', async () => {
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+  arm()
+  bindAuthSessionEpoch('user-a')
+  const track = sourceTrack('yandex-music', '101', 'Город')
+  let releaseA!: () => void
+  const gateA = new Promise<void>((resolve) => {
+    releaseA = resolve
+  })
+  let identityCalls = 0
+  setCanonicalRemote({
+    ensureIdentity: async () => {
+      identityCalls += 1
+      if (identityCalls === 1) {
+        await gateA
+      }
+      return identityFrom('can_x', [track])
+    },
+    patchCanonicalLiked: async () => {
+      throw new Error('unused')
+    },
+    assignCanonical: async () => {
+      throw new Error('unused')
+    },
+    unassignCanonical: async () => undefined,
+  })
+
+  const pendingA = ensureCanonicalForTrack(track)
+  await Promise.resolve()
+  await Promise.resolve()
+
+  clearCanonicalIdentityFlights()
+  bindAuthSessionEpoch('user-b')
+  useCanonicalLibraryStore.getState().clear()
+
+  const pendingB = ensureCanonicalForTrack(track)
+  releaseA()
+  await assert.rejects(async () => pendingA, (error: unknown) => {
+    return error instanceof Error && error.name === 'StaleLibrarySessionError'
+  })
+
+  const itemB = await pendingB
+  assert.equal(itemB.canonicalTrack.id, 'can_x')
+  assert.equal(identityCalls, 2)
+
+  await ensureCanonicalForTrack(track)
+  assert.equal(identityCalls, 2)
+  resetRuntime()
+  resetAuthSessionEpochForTests()
 })
