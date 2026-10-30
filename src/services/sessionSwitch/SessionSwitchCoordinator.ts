@@ -1,6 +1,7 @@
 /**
- * Координатор Prepare → Validate → Commit → Finalize/Rollback (PLAYBACK-DEV-04/04A).
- * Не подключён к PlaybackIntent / production AudioPlayer (DEV-05).
+ * Координатор Prepare → Validate → Commit → Finalize/Rollback (PLAYBACK-DEV-04/04A/05).
+ * Реальные порты — через createSessionSwitchRuntime (feature flag, default OFF).
+ * PlaybackIntent / production UI play paths не переведены.
  */
 import type { PlaybackSessionStore } from '../playbackSession/PlaybackSessionStore.ts'
 import {

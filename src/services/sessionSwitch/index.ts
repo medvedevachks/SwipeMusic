@@ -34,3 +34,26 @@ export type {
   LiveRuntimeCapture,
   RuntimePlaybackAnchor,
 } from './ports.ts'
+export {
+  isSessionSwitchIntegrationEnabled,
+  setSessionSwitchIntegrationEnabledForTests,
+  resetSessionSwitchIntegrationFlagForTests,
+  SESSION_SWITCH_INTEGRATION_STORAGE_KEY,
+  createSessionSwitchRuntime,
+  handoffLiveQueueAfterAuth,
+  teardownLiveQueueOnLogout,
+  createResolverTrackPreparePort,
+  createAdapterPhysicalPort,
+  createAudioPlayerPhysicalPort,
+  PreparedTrackCache,
+  createControllablePlayerAdapter,
+} from './integration/index.ts'
+export type {
+  SessionSwitchRuntime,
+  CreateSessionSwitchRuntimeOptions,
+  AuthQueueHandoffInput,
+  AuthQueueHandoffResult,
+  ResolvePlaybackFn,
+  AdapterPhysicalPort,
+  AudioPlayerSessionApi,
+} from './integration/index.ts'

@@ -1,15 +1,13 @@
 /**
- * Будущее подключение (DEV-05): одна live-очередь = getPlaybackQueue() singleton.
+ * DEV-05: одна live-очередь = getPlaybackQueue() singleton.
  *
  * createSessionPlaybackQueue() создаёт ОТДЕЛЬНЫЙ экземпляр — его нельзя
  * подставлять параллельно с singleton, которым пользуется AudioPlayer.
  *
- * Безопасный путь после авторизации (вызывать на том же singleton):
- *   prepareExistingLiveQueueForSessionMode(getPlaybackQueue(), {
- *     discardUntrustedLegacyQueue: true,
- *   })
+ * После авторизации используйте handoffLiveQueueAfterAuth()
+ * (обёртка над prepareExistingLiveQueueForSessionMode).
  *
- * Не вызывается из production bootstrap в DEV-04/04A.
+ * Production bootstrap не вызывает handoff, пока feature flag выключен.
  */
 import type { PlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
 

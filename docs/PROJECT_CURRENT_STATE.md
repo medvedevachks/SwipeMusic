@@ -52,6 +52,8 @@ UI (pages / BottomPlayer)
 
 **Ограничение:** не создавать второй GlobalPlayer и не заводить конкурирующую очередь.
 
+**Playback sessions v2 (ветка `feature/playback-session-store-v2`, DEV-01…05):** in-memory `PlaybackSessionStore`, persist v2, Queue export/import, `SessionSwitchCoordinator`, порты Prepare/Commit на `getPlaybackQueue()` + `sessionPhysicalEngine` / `AudioPlayer.commitSessionPlay`. Feature flag `swipe-music-session-switch-integration-v1` **default OFF**; в `import.meta.env.PROD` всегда false. **PlaybackIntent / UI play не переведены.**
+
 ---
 
 ## 3. Canonical Track → SourceCopies → Playback

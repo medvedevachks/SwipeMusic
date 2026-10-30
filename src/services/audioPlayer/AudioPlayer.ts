@@ -37,6 +37,14 @@ import { attachMediaSession } from './mediaSession.ts'
 import type { PlayerAdapter } from './PlayerAdapter'
 import { getPlayerManager } from './PlayerManager'
 import { settlePlayGeneration } from './stalePlaySettlement.ts'
+import {
+  commitPreparedPlayback,
+  rollbackPreparedPlayback,
+} from '../sessionSwitch/integration/sessionPhysicalEngine.ts'
+import type {
+  CommitPlayResult,
+  RollbackPlayResult,
+} from '../sessionSwitch/ports.ts'
 
 type StateListener = (state: PlayerState) => void
 
@@ -625,6 +633,219 @@ export class AudioPlayer {
       return
     }
     this.patchState({ error: null })
+  }
+
+  /** Текущее playGeneration (session-switch PhysicalPlayerPort). */
+  getPlayGeneration(): number {
+    return this.playGeneration
+  }
+
+  /**
+   * DEV-05 Prepare: только resolve URL.
+   * Не вызывает pause/stop/load и не мутирует очередь / currentTrack.
+   */
+  async resolveForSessionPrepare(
+    track: Track,
+    signal?: AbortSignal,
+  ): Promise<{ url: string; candidate: PlaybackCandidate } | null> {
+    if (signal?.aborted) {
+      return null
+    }
+    const resolver = getPlaybackResolver()
+    const resolution = await resolver.resolve(track)
+    if (signal?.aborted) {
+      return null
+    }
+    if (!resolution?.url) {
+      return null
+    }
+    return { url: resolution.url, candidate: resolution.candidate }
+  }
+
+  /**
+   * DEV-05 Commit: claim generation → pause → load → play.
+   * currentTrack обновляется только после успешного load.
+   * Не вызывает playResolved (там pause параллельно с resolve).
+   */
+  async commitSessionPlay(input: {
+    track: Track
+    url: string
+    candidate: PlaybackCandidate | null
+  }): Promise<CommitPlayResult> {
+    return commitPreparedPlayback({
+      track: input.track,
+      url: input.url,
+      candidate: input.candidate,
+      adapter: this.adapter,
+      generation: {
+        getGeneration: () => this.playGeneration,
+        claimGeneration: () => {
+          this.playGeneration += 1
+          return this.playGeneration
+        },
+      },
+      callbacks: {
+        onPending: (track) => {
+          const queue = getPlaybackQueue()
+          this.patchState({
+            pendingTrack: track,
+            loading: true,
+            buffering: true,
+            playing: false,
+            paused: true,
+            error: null,
+            queue: queue.getItems(),
+            queueIndex: queue.getSnapshot().currentIndex,
+          })
+        },
+        onCommitted: (track, candidate) => {
+          const queue = getPlaybackQueue()
+          this.patchState({
+            currentTrack: track,
+            pendingTrack: null,
+            activeCandidate: candidate,
+            currentTime: 0,
+            duration: track.durationMs ? track.durationMs / 1000 : 0,
+            progress: 0,
+            error: null,
+            loading: true,
+            buffering: true,
+            queue: queue.getItems(),
+            queueIndex: queue.getSnapshot().currentIndex,
+          })
+        },
+        onPlaying: () => {
+          this.patchState({
+            playing: true,
+            paused: false,
+            loading: false,
+            buffering: false,
+            pendingTrack: null,
+            error: null,
+          })
+        },
+        onUserGestureRequired: () => {
+          this.patchState({
+            pendingTrack: null,
+            playing: false,
+            paused: true,
+            loading: false,
+            buffering: false,
+            error: null,
+          })
+        },
+        onFailed: (message) => {
+          this.patchState({
+            pendingTrack: null,
+            playing: false,
+            paused: true,
+            loading: false,
+            buffering: false,
+            error: message,
+          })
+        },
+        onRollbackUnavailable: () => {
+          this.patchState({
+            pendingTrack: null,
+            playing: false,
+            paused: true,
+            loading: false,
+            buffering: false,
+          })
+        },
+        onRollbackRestored: (track) => {
+          const queue = getPlaybackQueue()
+          this.patchState({
+            currentTrack: track,
+            pendingTrack: null,
+            error: null,
+            queue: queue.getItems(),
+            queueIndex: queue.getSnapshot().currentIndex,
+          })
+        },
+      },
+    })
+  }
+
+  /** DEV-05 Rollback к runtime-якорю предыдущего sounding трека. */
+  async rollbackSessionPlay(input: {
+    track: Track | null
+    url: string | null
+    positionSeconds: number
+    commitClaimGeneration?: number
+  }): Promise<RollbackPlayResult> {
+    return rollbackPreparedPlayback({
+      track: input.track,
+      url: input.url,
+      positionSeconds: input.positionSeconds,
+      adapter: this.adapter,
+      generation: {
+        getGeneration: () => this.playGeneration,
+        claimGeneration: () => {
+          this.playGeneration += 1
+          return this.playGeneration
+        },
+      },
+      commitClaimGeneration: input.commitClaimGeneration,
+      callbacks: {
+        onPending: () => {
+          /* rollback не ставит pending целевого трека */
+        },
+        onCommitted: () => {
+          /* unused in rollback */
+        },
+        onPlaying: () => {
+          this.patchState({
+            playing: true,
+            paused: false,
+            loading: false,
+            buffering: false,
+            pendingTrack: null,
+            error: null,
+          })
+        },
+        onUserGestureRequired: () => {
+          this.patchState({
+            pendingTrack: null,
+            playing: false,
+            paused: true,
+            loading: false,
+            buffering: false,
+            error: null,
+          })
+        },
+        onFailed: (message) => {
+          this.patchState({
+            pendingTrack: null,
+            playing: false,
+            paused: true,
+            loading: false,
+            buffering: false,
+            error: message,
+          })
+        },
+        onRollbackUnavailable: () => {
+          this.patchState({
+            pendingTrack: null,
+            playing: false,
+            paused: true,
+            loading: false,
+            buffering: false,
+          })
+        },
+        onRollbackRestored: (track) => {
+          const queue = getPlaybackQueue()
+          this.patchState({
+            currentTrack: track,
+            pendingTrack: null,
+            currentTime: this.adapter.getCurrentTime(),
+            error: null,
+            queue: queue.getItems(),
+            queueIndex: queue.getSnapshot().currentIndex,
+          })
+        },
+      },
+    })
   }
 
   stop(): void {
