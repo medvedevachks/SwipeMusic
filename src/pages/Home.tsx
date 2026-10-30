@@ -8,6 +8,8 @@ import { cancelCatalogPlaybackGate } from '../services/catalogPlayback'
 import { useSwipeFeed } from '../hooks/useSwipeFeed'
 import { getAudioPlayer } from '../services/audioPlayer'
 import { commitCatalogChoice } from '../services/canonical/userOrganization.ts'
+import { createCategoryConfirmed } from '../services/catalogs/createCategoryConfirmed.ts'
+import { SAVE_FAILED_MESSAGE } from '../services/libraryPersistence/statusStore.ts'
 import {
   beginSearchFlowCommand,
   isSearchSeedPlaybackEnabled,
@@ -66,7 +68,6 @@ export default function Home() {
     () => allCategories.filter((category) => category.id !== 'sys_swipes'),
     [allCategories],
   )
-  const createCategory = useCollectionStore((state) => state.createCategory)
 
   const setQueue = usePlayerStore((state) => state.setQueue)
   const currentTime = usePlayerStore((state) => state.currentTime)
@@ -96,6 +97,8 @@ export default function Home() {
   const [wavePending, setWavePending] = useState(false)
   const [waveNotice, setWaveNotice] = useState<string | null>(null)
   const [pendingTrack, setPendingTrack] = useState<Track | null>(null)
+  const [categorizeNotice, setCategorizeNotice] = useState<string | null>(null)
+  const [categorizeBusy, setCategorizeBusy] = useState(false)
   const likedCount = useCanonicalLibraryStore((state) =>
     Object.values(state.itemsById).filter(
       (item) =>
@@ -673,26 +676,56 @@ export default function Home() {
         <HomeCatalogsPanel />
       </div>
 
+      {categorizeNotice ? (
+        <p
+          className="fixed bottom-24 left-1/2 z-40 max-w-sm -translate-x-1/2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-center text-sm text-[var(--color-fg)] shadow-lg"
+          role="status"
+        >
+          {categorizeNotice}
+        </p>
+      ) : null}
+
       <CategoryPickerSheet
         open={pendingTrack !== null}
         trackTitle={pendingTrack?.title}
         categories={categories}
         onClose={() => {
+          if (categorizeBusy) {
+            return
+          }
           setPendingTrack(null)
+          setCategorizeNotice(null)
           setCategoryCancelKey((value) => value + 1)
         }}
-        onCreateCategory={createCategory}
+        onCreateCategory={createCategoryConfirmed}
         onSelect={(categoryId) => {
-          if (!pendingTrack) {
+          if (!pendingTrack || categorizeBusy) {
             return
           }
           const track = pendingTrack
           const category = useCollectionStore
             .getState()
             .categories.find((item) => item.id === categoryId)
-          setPendingTrack(null)
-          setCategoryResolveKey((value) => value + 1)
-          void commitCatalogChoice(track, categoryId, category)
+          setCategorizeBusy(true)
+          void commitCatalogChoice(track, categoryId, category).then((result) => {
+            setCategorizeBusy(false)
+            if (result.status === 'failed') {
+              setCategorizeNotice(SAVE_FAILED_MESSAGE)
+              // sheet остаётся открытым (pendingTrack) — можно повторить.
+              return
+            }
+            if (result.status === 'partial') {
+              setCategorizeNotice(
+                'Сохранено в каталог, но не удалось убрать из «Свайпов». Можно повторить позже.',
+              )
+              setPendingTrack(null)
+              setCategoryResolveKey((value) => value + 1)
+              return
+            }
+            setCategorizeNotice(null)
+            setPendingTrack(null)
+            setCategoryResolveKey((value) => value + 1)
+          })
         }}
       />
     </div>

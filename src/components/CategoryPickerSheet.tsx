@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { getCategoryGlyph } from '../config/categoryPresets'
+import { SAVE_FAILED_MESSAGE } from '../services/libraryPersistence/statusStore'
 import type { Category } from '../types/category'
 import BottomSheet from './BottomSheet'
 import CreateCategoryForm from './CreateCategoryForm'
@@ -10,11 +11,15 @@ type CategoryPickerSheetProps = {
   categories: Category[]
   onClose: () => void
   onSelect: (categoryId: string) => void
+  /**
+   * Может быть async: await серверного create до onSelect/assign.
+   * Sync createCategory (CatalogList) тоже допустим.
+   */
   onCreateCategory: (input: {
     name: string
     color: string
     icon: Category['icon']
-  }) => Category
+  }) => Category | Promise<Category>
 }
 
 export default function CategoryPickerSheet({
@@ -27,6 +32,8 @@ export default function CategoryPickerSheet({
 }: CategoryPickerSheetProps) {
   const [query, setQuery] = useState('')
   const [mode, setMode] = useState<'list' | 'create'>('list')
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase()
@@ -40,8 +47,12 @@ export default function CategoryPickerSheet({
   }, [categories, query])
 
   const handleClose = () => {
+    if (creating) {
+      return
+    }
     setMode('list')
     setQuery('')
+    setCreateError(null)
     onClose()
   }
 
@@ -52,16 +63,47 @@ export default function CategoryPickerSheet({
       onClose={handleClose}
     >
       {mode === 'create' ? (
-        <CreateCategoryForm
-          onCancel={() => setMode('list')}
-          onSubmit={(input) => {
-            const category = onCreateCategory(input)
-            // Сначала выбираем (assign + закрытие sheet), режим сбрасываем на всякий случай.
-            onSelect(category.id)
-            setMode('list')
-            setQuery('')
-          }}
-        />
+        <div className="space-y-3">
+          {createError ? (
+            <p className="text-sm text-rose-700 dark:text-rose-300" role="alert">
+              {createError}
+            </p>
+          ) : null}
+          <fieldset disabled={creating} className="min-w-0 border-0 p-0">
+            <CreateCategoryForm
+              onCancel={() => {
+                if (creating) {
+                  return
+                }
+                setMode('list')
+                setCreateError(null)
+              }}
+              onSubmit={(input) => {
+                void (async () => {
+                  setCreating(true)
+                  setCreateError(null)
+                  try {
+                    const category = await Promise.resolve(onCreateCategory(input))
+                    onSelect(category.id)
+                    setMode('list')
+                    setQuery('')
+                  } catch {
+                    setCreateError(
+                      `${SAVE_FAILED_MESSAGE} Каталог не создан — сохранение отменено.`,
+                    )
+                  } finally {
+                    setCreating(false)
+                  }
+                })()
+              }}
+            />
+          </fieldset>
+          {creating ? (
+            <p className="text-xs text-[var(--color-muted)]" role="status">
+              Создание каталога…
+            </p>
+          ) : null}
+        </div>
       ) : (
         <div className="space-y-3">
           {trackTitle && (
@@ -106,7 +148,10 @@ export default function CategoryPickerSheet({
 
           <button
             type="button"
-            onClick={() => setMode('create')}
+            onClick={() => {
+              setCreateError(null)
+              setMode('create')
+            }}
             className="w-full rounded-xl border border-dashed border-[var(--color-border)] px-3 py-3 text-sm font-medium text-[var(--color-accent)]"
           >
             Создать каталог

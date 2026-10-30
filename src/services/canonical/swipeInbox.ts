@@ -1,5 +1,6 @@
 import type { Track } from '../../types/track.ts'
 import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
+import { ensureSysSwipesCategory } from '../catalogs/ensureSysSwipes.ts'
 import {
   itemHasUserCatalogMembership,
   itemInSwipeInbox,
@@ -56,6 +57,9 @@ export async function addToSwipeInboxIfNeeded(
   if (itemInSwipeInbox(item)) {
     return true
   }
+  // Best-effort: при recoverable ensure всё равно пробуем assign —
+  // сервер может уже иметь sys_swipes (другое устройство / 409 без reload).
+  await ensureSysSwipesCategory()
   // assignSourceToCatalog ожидает Track — берём первую не-demo copy.
   const copy =
     item.copies.find((row) => !isDemoSourceId(row.sourceId)) ?? item.copies[0]

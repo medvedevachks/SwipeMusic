@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { useCollectionStore } from '../../store/collectionStore.ts'
 import { LibraryHttpError } from '../libraryPersistence/client.ts'
-import { ensureSysSwipesCategory } from './ensureSysSwipes.ts'
+import {
+  ensureSysSwipesCategory,
+  getSysSwipesEnsureRecovery,
+} from './ensureSysSwipes.ts'
 import { SYS_SWIPES_ID } from './systemFolders.ts'
 
 test('409 on create merges server category without throwing', async () => {
@@ -47,15 +50,11 @@ test('409 on create merges server category without throwing', async () => {
   }) as typeof fetch
 
   try {
-    await ensureSysSwipesCategory(() => true)
+    const result = await ensureSysSwipesCategory(() => true)
+    assert.equal(result.status, 'ready')
     assert.equal(loads, 1)
     assert.equal(
       useCollectionStore.getState().categories.some((row) => row.id === SYS_SWIPES_ID),
-      true,
-    )
-    assert.equal(
-      useCollectionStore.getState().categories.find((row) => row.id === SYS_SWIPES_ID)
-        ?.system,
       true,
     )
   } finally {
@@ -64,16 +63,66 @@ test('409 on create merges server category without throwing', async () => {
   }
 })
 
-test('non-409 ensure error does not throw (soft-fail)', async () => {
+test('409 with failed GET does not synthesize local sys_swipes', async () => {
   useCollectionStore.getState().clearUserLibrary()
   const originalFetch = globalThis.fetch
-  globalThis.fetch = (async () =>
-    new Response(null, { status: 500 })) as typeof fetch
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/api/me/categories') && !url.includes('library-state')) {
+      return new Response(null, { status: 409 })
+    }
+    if (url.includes('/api/me/library-state')) {
+      return new Response(null, { status: 500 })
+    }
+    throw new LibraryHttpError(404)
+  }) as typeof fetch
+
   try {
-    await ensureSysSwipesCategory(() => true)
+    const result = await ensureSysSwipesCategory(() => true)
+    assert.equal(result.status, 'recoverable')
+    if (result.status === 'recoverable') {
+      assert.equal(result.reason, 'conflict_reload_failed')
+    }
     assert.equal(
       useCollectionStore.getState().categories.some((row) => row.id === SYS_SWIPES_ID),
       false,
+    )
+    const recovery = getSysSwipesEnsureRecovery()
+    assert.equal(recovery?.status, 'recoverable')
+  } finally {
+    globalThis.fetch = originalFetch
+    useCollectionStore.getState().clearUserLibrary()
+  }
+})
+
+test('create failure is recoverable and retry can succeed', async () => {
+  useCollectionStore.getState().clearUserLibrary()
+  const originalFetch = globalThis.fetch
+  let failCreate = true
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/api/me/categories') && init?.method === 'POST') {
+      if (failCreate) {
+        return new Response(null, { status: 500 })
+      }
+      return new Response(null, { status: 204 })
+    }
+    throw new LibraryHttpError(404)
+  }) as typeof fetch
+
+  try {
+    const first = await ensureSysSwipesCategory(() => true)
+    assert.equal(first.status, 'recoverable')
+    assert.equal(
+      useCollectionStore.getState().categories.some((row) => row.id === SYS_SWIPES_ID),
+      false,
+    )
+    failCreate = false
+    const second = await ensureSysSwipesCategory(() => true)
+    assert.equal(second.status, 'created')
+    assert.equal(
+      useCollectionStore.getState().categories.some((row) => row.id === SYS_SWIPES_ID),
+      true,
     )
   } finally {
     globalThis.fetch = originalFetch

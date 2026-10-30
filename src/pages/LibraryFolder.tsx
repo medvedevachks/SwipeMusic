@@ -13,6 +13,7 @@ import {
 import { removeSortedCanonicalFromSwipesQueue } from '../services/canonical/swipeInboxQueue'
 import { commitCatalogChoice } from '../services/canonical/userOrganization'
 import { sourceTrackKeyOf } from '../services/canonical/mapCanonical'
+import { createCategoryConfirmed } from '../services/catalogs/createCategoryConfirmed'
 import {
   CATALOG_PLAYBACK_MESSAGE,
   cancelCatalogPlaybackGate,
@@ -39,7 +40,6 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
   const folder = LIBRARY_SYSTEM_FOLDERS.find((row) => row.id === folderId)!
   const itemsById = useCanonicalLibraryStore((state) => state.itemsById)
   const allCategories = useCollectionStore((state) => state.categories)
-  const createCategory = useCollectionStore((state) => state.createCategory)
   const categories = useMemo(
     () => listUserOrganizationCatalogs(allCategories),
     [allCategories],
@@ -382,21 +382,24 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
           setSortTrack(null)
           setSortCanonicalId(null)
         }}
-        onCreateCategory={createCategory}
+        onCreateCategory={createCategoryConfirmed}
         onSelect={(categoryId) => {
           if (!sortTrack) {
             return
           }
           const track = sortTrack
           const canonicalId = sortCanonicalId
-          const category = allCategories.find((item) => item.id === categoryId)
-          setSortTrack(null)
-          setSortCanonicalId(null)
+          const category =
+            useCollectionStore.getState().categories.find((item) => item.id === categoryId) ??
+            allCategories.find((item) => item.id === categoryId)
           void commitCatalogChoice(track, categoryId, category).then((result) => {
             if (result.status === 'failed') {
               setSortNotice(SAVE_FAILED_MESSAGE)
+              // sheet остаётся открытым для повтора.
               return
             }
+            setSortTrack(null)
+            setSortCanonicalId(null)
             if (result.status === 'partial') {
               setSortNotice(
                 'Сохранено в каталог, но не удалось убрать из «Свайпов». Нажмите «В каталог» ещё раз.',
