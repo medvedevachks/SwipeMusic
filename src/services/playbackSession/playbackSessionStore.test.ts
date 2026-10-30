@@ -177,7 +177,7 @@ describe('PlaybackSessionStore S1', () => {
       tags: ['rock'],
     })
     const clean = sanitizeSessionTrack(dirty)
-    assert.equal(clean.previewUrl, null)
+    assert.ok(!('previewUrl' in clean))
     assert.equal(clean.coverUrl, 'https://cdn.example/cover.jpg')
     assert.deepEqual(clean.tags, ['rock'])
 
@@ -187,8 +187,7 @@ describe('PlaybackSessionStore S1', () => {
       queue: queueWith({ items: [dirty], currentIndex: 0 }),
     })
     const stored = store.getSlot('swipes').queue.items[0]!
-    assert.equal(stored.previewUrl, null)
-    assert.notEqual(stored.previewUrl, dirty.previewUrl)
+    assert.ok(!('previewUrl' in stored))
   })
 
   it('getSlot / getSnapshot возвращают глубокие копии', () => {
@@ -332,5 +331,96 @@ describe('PlaybackSessionStore S1', () => {
     assert.equal(slot.meta.kind === 'catalog' ? slot.meta.catalogId : null, 'sys_swipes')
     assert.equal(slot.queue.items[0]!.id, 'sw1')
     assert.equal(slot.slotGeneration, 2)
+  })
+
+  it('R10: rebindDevice очищает слоты (изоляция устройств)', () => {
+    const store = createPlaybackSessionStore({
+      userId: 'alice',
+      deviceId: 'phone-1',
+    })
+    store.replaceSlot('wave', {
+      meta: { kind: 'wave' },
+      queue: queueWith({ items: [track({ id: 'w' })], currentIndex: 0 }),
+    })
+    store.setActiveSessionId('wave')
+    store.rebindDevice('tablet-2')
+    assert.equal(store.getDeviceId(), 'tablet-2')
+    assert.equal(store.getUserId(), 'alice')
+    assert.equal(store.getActiveSessionId(), null)
+    assert.equal(store.getSlot('wave').queue.items.length, 0)
+  })
+
+  it('R10: clearForLogout очищает слоты отдельно от rebindUser', () => {
+    const store = createPlaybackSessionStore({
+      userId: 'alice',
+      deviceId: 'phone-1',
+    })
+    store.replaceSlot('search', {
+      meta: { kind: 'search', query: 'q', seedTrackId: null },
+      queue: queueWith({ items: [track({ id: 's' })], currentIndex: 0 }),
+    })
+    store.clearForLogout()
+    assert.equal(store.getUserId(), null)
+    assert.equal(store.getSlot('search').queue.items.length, 0)
+  })
+
+  it('R10: изоляция входных аргументов replaceSlot', () => {
+    const store = createPlaybackSessionStore({ deviceId: 'd1' })
+    const items = [track({ id: 'in1', tags: ['a'] })]
+    const history = ['in1']
+    const playOrder = [0]
+    store.replaceSlot('swipes', {
+      meta: { kind: 'swipes' },
+      queue: queueWith({
+        items,
+        currentIndex: 0,
+        history,
+        playOrder,
+        playOrderIndex: 0,
+      }),
+    })
+    items[0]!.title = 'mutated-input'
+    items[0]!.tags!.push('b')
+    history.push('hack')
+    playOrder.push(99)
+    const slot = store.getSlot('swipes')
+    assert.equal(slot.queue.items[0]!.title, 'Title in1')
+    assert.deepEqual(slot.queue.items[0]!.tags, ['a'])
+    assert.deepEqual(slot.queue.history, ['in1'])
+    assert.deepEqual(slot.queue.playOrder, [0])
+  })
+
+  it('R10: мутация hardExcludeHits и sessionTailIds на копии не портит store', () => {
+    const store = createPlaybackSessionStore({ deviceId: 'd1' })
+    store.replaceSlot('search', {
+      meta: { kind: 'search', query: 'q', seedTrackId: 's1' },
+      queue: queueWith({
+        items: [track({ id: 's1' })],
+        currentIndex: 0,
+        playOrder: [0],
+        sessionTailIds: ['s1'],
+        context: {
+          type: 'search-seed',
+          query: 'q',
+          seedTrackId: 's1',
+          hardExcludeHits: [
+            { id: 's1', title: 'A', artist: 'B', sourceId: 'yandex' },
+          ],
+        },
+      }),
+    })
+    const copy = store.getSlot('search')
+    copy.queue.sessionTailIds.push('hack')
+    if (copy.queue.context.type === 'search-seed' && copy.queue.context.hardExcludeHits) {
+      copy.queue.context.hardExcludeHits[0]!.title = 'mutated'
+      ;(copy.queue.context.hardExcludeHits as { id: string }[]).push({ id: 'x' })
+    }
+    const again = store.getSlot('search')
+    assert.deepEqual(again.queue.sessionTailIds, ['s1'])
+    assert.ok(again.queue.context.type === 'search-seed')
+    if (again.queue.context.type === 'search-seed') {
+      assert.equal(again.queue.context.hardExcludeHits?.[0]?.title, 'A')
+      assert.equal(again.queue.context.hardExcludeHits?.length, 1)
+    }
   })
 })

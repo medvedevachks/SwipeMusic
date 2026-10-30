@@ -1,9 +1,8 @@
 /**
- * Логические музыкальные сессии (ARCH-PLAYBACK-01 / PLAYBACK-S1).
+ * Логические музыкальные сессии (ARCH-PLAYBACK-01 / PLAYBACK-DEV-01+02).
  * Не путать с серверным auth session.
  */
 import type { PlaybackContext } from '../../types/playbackContext.ts'
-import type { Track } from '../../types/track.ts'
 import type { RepeatMode, ShuffleMode } from '../playbackQueue/PlaybackQueue.ts'
 
 export const PLAYBACK_SESSION_SCHEMA_VERSION = 2 as const
@@ -28,12 +27,32 @@ export type SessionPlaybackPhase =
   | 'unavailable'
 
 /**
+ * Безопасный сериализуемый трек для снимков сессий.
+ * Без previewUrl / stream URL / auth-токенов.
+ */
+export type SessionTrack = {
+  id: string
+  sourceId: string
+  externalId: string
+  title: string
+  artist: string
+  album?: string
+  genre?: string
+  year?: number
+  durationMs?: number
+  /** Обложка после cover-URL policy (без credential query). */
+  coverUrl?: string | null
+  coverColor?: string
+  tags?: string[]
+}
+
+/**
  * Сериализуемый снимок очереди слота.
- * Достаточен для полного restore в PlaybackQueue (S2+), без setQueue-only.
+ * Достаточен для полного restore в PlaybackQueue (DEV-03+), без setQueue-only.
  * pendingRemovalIds намеренно отсутствуют — runtime-only в текущей Queue.
  */
 export type SessionQueueSnapshot = {
-  items: Track[]
+  items: SessionTrack[]
   currentIndex: number
   playOrder: number[]
   playOrderIndex: number
@@ -97,18 +116,38 @@ export type PlaybackSessionStoreSnapshot = {
    */
   switchEpoch: number
   /**
-   * Идентитор последнего Play/Prepare-запроса.
+   * Идентификатор последнего Play/Prepare-запроса.
    * Устаревший Prepare не должен Commit после более нового Play.
    */
   playRequestId: number
   slots: Record<PlaybackSessionId, PlaybackSessionSlot>
 }
 
-/** Токен Prepare (контракт для S4; в S1 только поля store). */
+/** Токен Prepare (контракт для DEV-04; в store только поля). */
 export type SessionSwitchToken = {
   switchEpoch: number
   playRequestId: number
   target: PlaybackSessionId
   targetSlotGeneration: number
   prepareId: string
+}
+
+/** Meta-документ persist v2 (отдельный ключ от слотов). */
+export type PersistedSessionsMetaV2 = {
+  schemaVersion: typeof PLAYBACK_SESSION_SCHEMA_VERSION
+  userId: string
+  deviceId: string
+  activeSessionId: PlaybackSessionId | null
+  switchEpoch: number
+  playRequestId: number
+  updatedAt: string
+}
+
+/** Один слот на диске. */
+export type PersistedSessionSlotV2 = {
+  schemaVersion: typeof PLAYBACK_SESSION_SCHEMA_VERSION
+  userId: string
+  deviceId: string
+  slot: PlaybackSessionSlot
+  updatedAt: string
 }
