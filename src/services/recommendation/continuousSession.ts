@@ -38,6 +38,8 @@ type PoolEntry = {
 
 let mode: RecommendationMode | null = null
 let auth: AuthSessionSnapshot = captureAuthSession()
+/** Владение discovery-операцией: bump при logout/mode/reset. */
+let discoveryGeneration = 0
 let lanes: DiscoveryLane[] = []
 let queryOrder: string[] = []
 let queryIndex = 0
@@ -51,6 +53,49 @@ let rateLimitedUntil = 0
 let pagesFetchedSession = 0
 let lastSeed: Track | null = null
 let sourceSemaphores = new Map<string, number>()
+
+export function getContinuousDiscoveryGeneration(): number {
+  return discoveryGeneration
+}
+
+export function beginContinuousDiscoveryOperation(): {
+  generation: number
+  mode: RecommendationMode | null
+  auth: AuthSessionSnapshot
+} {
+  return {
+    generation: discoveryGeneration,
+    mode,
+    auth: { ...auth },
+  }
+}
+
+export function isContinuousDiscoveryOperationCurrent(token: {
+  generation: number
+  mode: RecommendationMode | null
+  auth: AuthSessionSnapshot
+}): boolean {
+  if (token.generation !== discoveryGeneration) {
+    return false
+  }
+  if (token.mode !== mode) {
+    return false
+  }
+  const live = captureAuthSession()
+  if (
+    live.generation !== token.auth.generation ||
+    live.userId !== token.auth.userId ||
+    live.generation !== auth.generation ||
+    live.userId !== auth.userId
+  ) {
+    return false
+  }
+  return true
+}
+
+function bumpDiscoveryGeneration(): void {
+  discoveryGeneration += 1
+}
 
 function trackKeys(track: Track): string[] {
   return [track.id, copyIdentity(track), titleIdentity(track.artist, track.title)]
@@ -81,14 +126,15 @@ export function ensureContinuousDiscoverySession(
   const authChanged =
     live.generation !== auth.generation || live.userId !== auth.userId
   const modeChanged = mode !== null && mode !== nextMode
-  mode = nextMode
   if (authChanged) {
-    auth = live
     clearContinuousDiscoveryRuntime('auth-changed')
     mode = nextMode
+    auth = live
     return
   }
+  mode = nextMode
   if (modeChanged || options?.resetLanes) {
+    bumpDiscoveryGeneration()
     lanes = []
     queryOrder = []
     queryIndex = 0
@@ -102,6 +148,7 @@ export function ensureContinuousDiscoverySession(
 }
 
 export function clearContinuousDiscoveryRuntime(reason = 'clear'): void {
+  bumpDiscoveryGeneration()
   lanes = []
   queryOrder = []
   queryIndex = 0
@@ -278,26 +325,48 @@ export function pickNextDiscoveryLane(): DiscoveryLane | null {
   return active ?? null
 }
 
+/**
+ * Продвижение lane после страницы провайдера.
+ * - Пустая страница провайдера (0 tracks) увеличивает emptyStreak.
+ * - Страница только из excluded/recent при наличии nextCursor — cursor двигается, lane НЕ exhausted.
+ * - acceptedTracks не влияет на cursor.
+ */
 export function markLanePageResult(
   lane: DiscoveryLane,
-  input: { tracks: number; nextCursor: string | null },
+  input: {
+    providerTracks: number
+    acceptedTracks: number
+    nextCursor: string | null
+  },
 ): void {
   pagesFetchedSession += 1
-  if (input.tracks === 0) {
+
+  if (input.nextCursor) {
+    lane.cursor = input.nextCursor
+    if (input.providerTracks === 0) {
+      lane.emptyStreak += 1
+      if (lane.emptyStreak >= CONTINUOUS_LIMITS.maxEmptyLaneStreak) {
+        lane.exhausted = true
+        lane.cursor = null
+      }
+    } else {
+      // Провайдер отдал треки (даже все excluded) — это не empty miss.
+      lane.emptyStreak = 0
+    }
+    return
+  }
+
+  // Конец пагинации этой lane.
+  lane.cursor = null
+  if (input.providerTracks === 0) {
     lane.emptyStreak += 1
     if (lane.emptyStreak >= CONTINUOUS_LIMITS.maxEmptyLaneStreak) {
       lane.exhausted = true
-      lane.cursor = null
     }
     return
   }
   lane.emptyStreak = 0
-  if (input.nextCursor) {
-    lane.cursor = input.nextCursor
-  } else {
-    lane.exhausted = true
-    lane.cursor = null
-  }
+  lane.exhausted = true
 }
 
 export function markLaneError(lane: DiscoveryLane, isRateLimit: boolean): void {

@@ -8,7 +8,7 @@
 | Дата снимка | 2026-10-30 (Continuous Music Engine V1) |
 | Канонический репозиторий | https://github.com/medvedevachks/SwipeMusic |
 | Ветка снимка | `feature/continuous-music-engine-v1` → PR в `feature/deploy-windows-01` |
-| Проверенный HEAD | continuous-random-v1 unlimited stream: paginated discovery + session pool + buffer 8. Baseline UX-10: `ed53b08`. S1 deploy не выполнялся. |
+| Проверенный HEAD | CME V1 blockers: cursor past excluded pages, discovery generation isolation, Search=legacy. Baseline UX-10: `ed53b08`. S1 deploy не выполнялся. |
 | Исторический upstream | https://github.com/r-sh-galimov/SwipeMusic |
 
 **Легенда источников фактов**

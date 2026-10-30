@@ -20,11 +20,15 @@ export {
 } from './continuousBuffer.ts'
 export {
   clearContinuousDiscoveryRuntime,
+  beginContinuousDiscoveryOperation,
+  getContinuousDiscoveryGeneration,
   getContinuousDiscoverySnapshot,
   getContinuousPoolSize,
   getContinuousPagesFetched,
+  isContinuousDiscoveryOperationCurrent,
   resetContinuousDiscoveryForTests,
 } from './continuousSession.ts'
+export type { RecommendationStrategy } from './types.ts'
 export { createRecommendationContinuationProvider } from './continuationBridge.ts'
 export type { RecommendationContinuationDeps } from './continuationBridge.ts'
 export {

@@ -8,6 +8,12 @@ import type { ContinuationLibraryTrack } from '../continuation/libraryContinuati
  */
 export type RecommendationMode = 'swipe' | 'wave'
 
+/**
+ * continuous-random — обычные Swipe / Wave.
+ * legacy — Search continuation (taste/artist + жёсткие исключения выдачи).
+ */
+export type RecommendationStrategy = 'continuous-random' | 'legacy'
+
 export type RecommendationReason =
   | 'catalog-artist-search'
   | 'library-like'
@@ -79,6 +85,8 @@ export type RecommendationRequest = {
   port: RecommendationCatalogPort
   signal?: AbortSignal
   timeoutMs?: number
+  /** Явная стратегия; иначе выбирается по контракту режима. */
+  strategy?: RecommendationStrategy
 }
 
 export type RecommendationHit = {

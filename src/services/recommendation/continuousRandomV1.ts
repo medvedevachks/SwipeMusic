@@ -10,9 +10,11 @@ import { noteContinuousDiag } from './continuousDiag.ts'
 import { CONTINUOUS_LIMITS } from './continuousLimits.ts'
 import {
   allDiscoveryLanesExhausted,
+  beginContinuousDiscoveryOperation,
   ensureContinuousDiscoverySession,
   ensureDiscoveryLanes,
   getContinuousPoolSize,
+  isContinuousDiscoveryOperationCurrent,
   isDiscoveryRateLimited,
   markLaneError,
   markLanePageResult,
@@ -278,6 +280,7 @@ async function refillCandidatePool(input: {
   let searchFailed = false
   let pages = 0
   const sourceIds = input.port.sources.map((item) => item.id)
+  const op = beginContinuousDiscoveryOperation()
 
   // Исчерпанные lanes прошлой попытки не должны блокировать Retry / новый fill.
   if (allDiscoveryLanesExhausted() && getContinuousPoolSize() === 0) {
@@ -287,6 +290,9 @@ async function refillCandidatePool(input: {
     })
   } else {
     setDiscoveryQueryOrder(buildDiscoveryQueries(input.request.current))
+  }
+  if (!isContinuousDiscoveryOperationCurrent(op)) {
+    return { searchFailed: false, pages: 0, hadPlayableInPool: false }
   }
   ensureDiscoveryLanes(sourceIds)
 
@@ -301,13 +307,16 @@ async function refillCandidatePool(input: {
           !isDemoSourceId(item.sourceId),
       )
       .map(libraryToTrack)
-    pushCandidatesToPool(shuffleInPlace(libraryPool).slice(0, CONTINUOUS_LIMITS.apiPageSize))
+    if (isContinuousDiscoveryOperationCurrent(op)) {
+      pushCandidatesToPool(shuffleInPlace(libraryPool).slice(0, CONTINUOUS_LIMITS.apiPageSize))
+    }
   }
 
   while (
     pages < CONTINUOUS_LIMITS.maxPagesPerFill &&
     getContinuousPoolSize() < CONTINUOUS_LIMITS.maxPoolSize / 2 &&
-    !input.signal.aborted
+    !input.signal.aborted &&
+    isContinuousDiscoveryOperationCurrent(op)
   ) {
     if (isDiscoveryRateLimited()) {
       break
@@ -325,27 +334,44 @@ async function refillCandidatePool(input: {
     })
     try {
       const page = await fetchLanePage(lane, input.port, input.signal)
+      if (!isContinuousDiscoveryOperationCurrent(op)) {
+        return {
+          searchFailed,
+          pages,
+          hadPlayableInPool: getContinuousPoolSize() > 0,
+        }
+      }
       pages += 1
       const filtered = page.tracks.filter(
         (track) => !isExcludedTrack(track, input.excluded),
       )
       const added = pushCandidatesToPool(filtered)
+      // Cursor двигаем по факту страницы провайдера, не по filtered/accepted.
       markLanePageResult(lane, {
-        tracks: filtered.length,
+        providerTracks: page.tracks.length,
+        acceptedTracks: added,
         nextCursor: page.nextCursor,
       })
       noteContinuousDiag({
         mode: input.request.mode,
         phase: 'candidates',
         source: lane.sourceId,
-        found: filtered.length,
+        found: page.tracks.length,
         bufferSize: getContinuousPoolSize(),
-        reason: added > 0 ? 'pool-grow' : 'pool-skip-dupes',
+        reason:
+          added > 0
+            ? 'pool-grow'
+            : page.tracks.length === 0
+              ? 'provider-empty'
+              : page.nextCursor
+                ? 'page-all-excluded-advance'
+                : 'pool-skip-dupes',
       })
       // Уже есть кандидаты — не гоняем лишние query в этом refill.
       if (getContinuousPoolSize() >= CONTINUOUS_LIMITS.batchPlayableTarget) {
         break
       }
+      // Пока pool пуст — продолжаем страницы (не останавливаемся на excluded-only).
       if (
         pages >= CONTINUOUS_LIMITS.maxQueriesPerFill &&
         getContinuousPoolSize() > 0
@@ -353,6 +379,13 @@ async function refillCandidatePool(input: {
         break
       }
     } catch (error) {
+      if (!isContinuousDiscoveryOperationCurrent(op)) {
+        return {
+          searchFailed,
+          pages,
+          hadPlayableInPool: getContinuousPoolSize() > 0,
+        }
+      }
       if (error instanceof DOMException && error.name === 'AbortError') {
         // page/operation timeout — сохраняем уже найденный pool.
         break
@@ -489,6 +522,7 @@ export async function collectContinuousPlayableBatch(
   }
 
   ensureContinuousDiscoverySession(request.mode)
+  const op = beginContinuousDiscoveryOperation()
   const port = request.port as ContinuousDiscoveryPort
   const timeoutMs = request.timeoutMs ?? CONTINUOUS_LIMITS.operationTimeoutMs
   const gate = mergeAbortSignals(parent, timeoutMs)
@@ -521,7 +555,11 @@ export async function collectContinuousPlayableBatch(
       )),
     )
 
-    while (selected.length < limit && !gate.signal.aborted) {
+    while (
+      selected.length < limit &&
+      !gate.signal.aborted &&
+      isContinuousDiscoveryOperationCurrent(op)
+    ) {
       if (allDiscoveryLanesExhausted() && getContinuousPoolSize() === 0) {
         break
       }
@@ -532,6 +570,9 @@ export async function collectContinuousPlayableBatch(
         signal: gate.signal,
         excluded,
       })
+      if (!isContinuousDiscoveryOperationCurrent(op)) {
+        break
+      }
       // Уже есть playable — не ждём timeout дополнительных страниц.
       const more = await selectPlayableFromPool(
         port,
@@ -561,6 +602,9 @@ export async function collectContinuousPlayableBatch(
       }
     }
 
+    if (!isContinuousDiscoveryOperationCurrent(op)) {
+      return []
+    }
     for (const track of selected) {
       noteContinuousRecent(track)
     }

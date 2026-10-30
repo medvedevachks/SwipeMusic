@@ -11,8 +11,8 @@ export const CONTINUOUS_LIMITS = {
   bufferTarget: 8,
   /** Скользящее окно недавних (не вечный blacklist). */
   recentWindow: 80,
-  /** Макс. поисковых/feed страниц за одну refill-операцию. */
-  maxPagesPerFill: 6,
+  /** Макс. поисковых/feed страниц за одну refill-операцию (вкл. excluded-only pages). */
+  maxPagesPerFill: 8,
   /** Макс. разных query за refill (не 10+ подряд). */
   maxQueriesPerFill: 4,
   /** Макс. probe playability за refill. */

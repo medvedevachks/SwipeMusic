@@ -30,6 +30,8 @@ import {
   pickContinuousRandom,
 } from './continuousRandomV1.ts'
 import {
+  clearContinuousDiscoveryRuntime,
+  ensureContinuousDiscoverySession,
   getContinuousDiscoverySnapshot,
   getContinuousPagesFetched,
   getContinuousPoolSize,
@@ -585,4 +587,167 @@ test('sliding recent window stays bounded after long session', async () => {
   const { played } = await advanceChain('swipe', 99, 180)
   assert.equal(played.length, 100)
   assert.ok(getContinuousRecentSize() <= CONTINUOUS_LIMITS.recentWindow)
+})
+
+test('pagination advances past fully excluded pages to playable B', async () => {
+  resetAll()
+  const recentOnly = catalog(30, 'old')
+  const freshB = track({
+    sourceId: 'yandex-music',
+    externalId: 'fresh-b',
+    title: 'Fresh B',
+    artist: 'New',
+  })
+  // 3 pages × 10 = only recent; page 4 starts with B.
+  const pages: Track[] = [...recentOnly, freshB, ...catalog(5, 'tail')]
+  for (const item of recentOnly) {
+    const { noteContinuousRecent } = await import('./continuousSession.ts')
+    noteContinuousRecent(item)
+  }
+  const port = paginatedPort(pages, { pageSize: 10 })
+  // Без feed — только search pagination.
+  port.fetchFeed = async () => []
+  port.fetchFeedPage = async () => ({ tracks: [], nextCursor: null })
+
+  const result = await pickContinuousRandom({
+    mode: 'swipe',
+    current: recentOnly[0]!,
+    taste: emptyTaste(),
+    excluded: recentOnly.map((item) => ({
+      id: item.id,
+      title: item.title,
+      artist: item.artist,
+      sourceId: item.sourceId,
+      externalId: item.externalId,
+    })),
+    library: [],
+    port,
+  })
+  assert.equal(result.ok, true)
+  if (result.ok) {
+    assert.equal(result.track.id, freshB.id)
+  }
+  const cursors = port.searches.map((item) => item.cursor)
+  assert.ok(cursors.some((item) => item === '1' || item === '2' || item === '3'))
+})
+
+test('stale auth session does not commit discovery into new user pool', async () => {
+  resetAll()
+  const { bindAuthSessionEpoch } = await import('../auth/sessionEpoch.ts')
+  bindAuthSessionEpoch('user-a')
+  ensureContinuousDiscoverySession('swipe')
+
+  let release!: (page: { tracks: Track[]; nextCursor: string | null }) => void
+  const deferred = new Promise<{ tracks: Track[]; nextCursor: string | null }>((resolve) => {
+    release = resolve
+  })
+  const lateTrack = track({
+    sourceId: 'yandex-music',
+    externalId: 'late-a',
+    title: 'Late A',
+    artist: 'A',
+  })
+  const port: RecommendationCatalogPort = {
+    sources: [{ id: 'yandex-music' }],
+    search: async () => [],
+    fetchFeed: async () => [],
+    searchPage: async () => deferred,
+    fetchFeedPage: async () => ({ tracks: [], nextCursor: null }),
+    isPlayable: async () => true,
+  }
+
+  const pending = collectContinuousPlayableBatch(
+    {
+      mode: 'swipe',
+      current: null,
+      taste: emptyTaste(),
+      excluded: [],
+      library: [],
+      port,
+    },
+    1,
+  )
+  await new Promise((r) => setTimeout(r, 10))
+  bindAuthSessionEpoch('user-b')
+  clearContinuousDiscoveryRuntime('auth-change')
+  ensureContinuousDiscoverySession('swipe')
+  release({ tracks: [lateTrack], nextCursor: null })
+  const batch = await pending
+  assert.equal(batch.length, 0)
+  assert.equal(getContinuousPoolSize(), 0)
+})
+
+test('Wave→Swipe invalidates in-flight wave discovery writes', async () => {
+  resetAll()
+  ensureContinuousDiscoverySession('wave')
+  let release!: (page: { tracks: Track[]; nextCursor: string | null }) => void
+  const deferred = new Promise<{ tracks: Track[]; nextCursor: string | null }>((resolve) => {
+    release = resolve
+  })
+  const waveTrack = track({
+    sourceId: 'yandex-music',
+    externalId: 'wave-late',
+    title: 'Wave Late',
+    artist: 'W',
+  })
+  const port: RecommendationCatalogPort = {
+    sources: [{ id: 'yandex-music' }],
+    search: async () => [],
+    fetchFeed: async () => [],
+    searchPage: async () => deferred,
+    fetchFeedPage: async () => ({ tracks: [], nextCursor: null }),
+    isPlayable: async () => true,
+  }
+  const pending = collectContinuousPlayableBatch(
+    {
+      mode: 'wave',
+      current: null,
+      taste: emptyTaste(),
+      excluded: [],
+      library: [],
+      port,
+    },
+    1,
+  )
+  await new Promise((r) => setTimeout(r, 10))
+  ensureContinuousDiscoverySession('swipe', { resetLanes: true })
+  release({ tracks: [waveTrack], nextCursor: null })
+  const batch = await pending
+  assert.equal(batch.length, 0)
+  assert.equal(
+    getContinuousDiscoverySnapshot().mode,
+    'swipe',
+  )
+  assert.equal(getContinuousPoolSize(), 0)
+})
+
+test('ready buffer wins over slow refill without waiting', async () => {
+  resetAll()
+  setActiveRecommendationMode('swipe')
+  const a = track({
+    sourceId: 'yandex-music',
+    externalId: 'ra',
+    title: 'Ready A',
+    artist: 'X',
+  })
+  const b = track({
+    sourceId: 'yandex-music',
+    externalId: 'rb',
+    title: 'Ready B',
+    artist: 'Y',
+  })
+  const queue = new PlaybackQueue()
+  queue.setQueue([a], 0, { type: 'swipe' })
+  pushContinuousBufferedTracks([b], { generation: getContinuousBufferGeneration() })
+  const session = new ContinuationSession()
+  // Hang forever if flush waited for prepare.
+  session.prepare(
+    a,
+    { type: 'search-seed', query: 'swipe', seedTrackId: a.id },
+  )
+  const started = Date.now()
+  const next = await resolveRecommendationAdvance(queue, session, { fromEnded: false })
+  assert.equal(next?.id, b.id)
+  assert.ok(Date.now() - started < 100)
+  assert.equal(queue.current()?.id, b.id)
 })

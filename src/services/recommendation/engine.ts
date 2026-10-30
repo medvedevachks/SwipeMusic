@@ -15,8 +15,10 @@ import {
   type RecommendationReason,
   type RecommendationRequest,
   type RecommendationResult,
+  type RecommendationStrategy,
 } from './types.ts'
 import { pickContinuousRandom } from './continuousRandomV1.ts'
+import { getActiveRecommendationMode } from './sessionState.ts'
 
 type RankedCandidate = {
   track: Track
@@ -369,18 +371,35 @@ async function firstPlayable(
   return null
 }
 
+function resolveRecommendationStrategy(
+  request: RecommendationRequest,
+): RecommendationStrategy {
+  if (request.strategy) {
+    return request.strategy
+  }
+  // Search continuation: legacy taste/artist + hard exclusions выдачи.
+  if (getActiveRecommendationMode() === 'search') {
+    return 'legacy'
+  }
+  return 'continuous-random'
+}
+
 /**
  * Единый Recommendation Engine.
- * Production swipe/wave: continuous-random-v1 (непрерывный поток без вкуса как критерия).
- * Search UI results сюда не передаются и не читаются.
+ * Swipe/Wave: continuous-random-v1.
+ * Search continuation: legacy (не случайный каталог).
+ * Search UI dump сюда не передаётся и не читается.
  */
 export async function recommendNext(
   request: RecommendationRequest,
 ): Promise<RecommendationResult> {
+  if (resolveRecommendationStrategy(request) === 'legacy') {
+    return recommendNextLegacy(request)
+  }
   return pickContinuousRandom(request)
 }
 
-/** Legacy taste/liked path — только для сравнительных/регрессионных тестов. */
+/** Legacy taste/liked path — Search continuation и регрессионные тесты. */
 export async function recommendNextLegacy(
   request: RecommendationRequest,
 ): Promise<RecommendationResult> {

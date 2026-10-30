@@ -111,6 +111,7 @@ async function seedSession(input: {
   const queue = new PlaybackQueue()
   const session = new ContinuationSession(
     createSearchRecommendationProvider({
+      strategy: 'legacy',
       loadProfile: async () => input.taste ?? emptyTaste(),
       loadLibrary: async () => input.library,
       createPort: async () => mockPort(input.catalog, input.playable),

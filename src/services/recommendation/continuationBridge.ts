@@ -1,6 +1,6 @@
 /**
  * Мост Recommendation Engine → ContinuationProvider.
- * continuous-random-v1 + session pool + prefetch buffer.
+ * continuous-random-v1 для swipe/wave; legacy для search.
  */
 import type { Track } from '../../types/track.ts'
 import type {
@@ -22,15 +22,24 @@ import {
 import { noteContinuousDiag } from './continuousDiag.ts'
 import { collectContinuousPlayableBatch, pickContinuousRandom } from './continuousRandomV1.ts'
 import {
+  beginContinuousDiscoveryOperation,
   ensureContinuousDiscoverySession,
   getContinuousSeed,
+  isContinuousDiscoveryOperationCurrent,
   noteContinuousSeed,
 } from './continuousSession.ts'
+import { recommendNextLegacy } from './engine.ts'
 import { noteRecommendationMiss } from './sessionState.ts'
-import type { RecommendationCatalogPort, RecommendationMode } from './types.ts'
+import type {
+  RecommendationCatalogPort,
+  RecommendationMode,
+  RecommendationStrategy,
+} from './types.ts'
 
 export type RecommendationContinuationDeps = {
   mode?: RecommendationMode
+  /** По умолчанию continuous-random; search обязан передать legacy. */
+  strategy?: RecommendationStrategy
   loadProfile: () => Promise<UserTasteProfile | null>
   loadLibrary: (profile: UserTasteProfile | null) => Promise<readonly ContinuationLibraryTrack[]>
   createPort: () => Promise<RecommendationCatalogPort>
@@ -72,8 +81,15 @@ function scheduleBufferRefill(
     externalId?: string
   }[],
 ): void {
+  if ((deps.strategy ?? 'continuous-random') === 'legacy') {
+    return
+  }
+  const discoveryOp = beginContinuousDiscoveryOperation()
   beginContinuousBufferFill(async (generation) => {
     if (generation !== getContinuousBufferGeneration()) {
+      return
+    }
+    if (!isContinuousDiscoveryOperationCurrent(discoveryOp)) {
       return
     }
     const need = CONTINUOUS_BUFFER_TARGET - getContinuousBufferSize()
@@ -81,14 +97,19 @@ function scheduleBufferRefill(
       return
     }
     const [profile, port] = await Promise.all([deps.loadProfile(), deps.createPort()])
-    if (generation !== getContinuousBufferGeneration()) {
+    if (
+      generation !== getContinuousBufferGeneration() ||
+      !isContinuousDiscoveryOperationCurrent(discoveryOp)
+    ) {
       return
     }
     const library = await deps.loadLibrary(profile)
-    if (generation !== getContinuousBufferGeneration()) {
+    if (
+      generation !== getContinuousBufferGeneration() ||
+      !isContinuousDiscoveryOperationCurrent(discoveryOp)
+    ) {
       return
     }
-    // Один discovery batch на весь buffer — не N× полный поиск.
     const batch = await collectContinuousPlayableBatch(
       {
         mode: deps.mode ?? 'swipe',
@@ -97,10 +118,14 @@ function scheduleBufferRefill(
         excluded: baseExcluded,
         library,
         port,
+        strategy: 'continuous-random',
       },
       need,
     )
-    if (generation !== getContinuousBufferGeneration()) {
+    if (
+      generation !== getContinuousBufferGeneration() ||
+      !isContinuousDiscoveryOperationCurrent(discoveryOp)
+    ) {
       return
     }
     pushContinuousBufferedTracks(batch, {
@@ -110,21 +135,74 @@ function scheduleBufferRefill(
   })
 }
 
-export function createRecommendationContinuationProvider(
+async function prepareLegacyContinuation(
   deps: RecommendationContinuationDeps,
-): ContinuationProvider {
-  ensureContinuousDiscoverySession(deps.mode ?? 'swipe')
-
-  setContinuousBufferRefillHandler((seed) => {
-    const current = seed ?? getContinuousSeed()
-    if (!current) {
-      return
+  current: Track,
+  signal: ContinuationSignal,
+): Promise<ContinuationCandidate | null> {
+  const gate = abortFrom(signal)
+  try {
+    const [profile, port] = await Promise.all([deps.loadProfile(), deps.createPort()])
+    if (signal.aborted) {
+      return null
+    }
+    const library = await deps.loadLibrary(profile)
+    if (signal.aborted) {
+      return null
     }
     const excludedBase = deps.excludedTracks?.() ?? [
       { id: current.id, title: current.title, artist: current.artist },
     ]
-    scheduleBufferRefill(deps, current, excludedBase)
-  })
+    const result = await recommendNextLegacy({
+      mode: deps.mode ?? 'swipe',
+      current,
+      taste: profile,
+      excluded: excludedBase,
+      library,
+      port,
+      signal: gate.signal,
+      strategy: 'legacy',
+    })
+    if (!result.ok) {
+      noteRecommendationMiss(result.emptyReason, result.message)
+      noteContinuousDiag({
+        mode: deps.mode ?? 'swipe',
+        phase:
+          result.emptyReason === 'timeout' || result.emptyReason === 'error'
+            ? 'soft-miss'
+            : 'hard-miss',
+        reason: `legacy:${result.emptyReason}`,
+      })
+      return null
+    }
+    return { track: result.track }
+  } catch {
+    noteRecommendationMiss('error', 'Ошибка подбора. Можно повторить.')
+    return null
+  } finally {
+    gate.dispose()
+  }
+}
+
+export function createRecommendationContinuationProvider(
+  deps: RecommendationContinuationDeps,
+): ContinuationProvider {
+  const strategy = deps.strategy ?? 'continuous-random'
+  if (strategy === 'continuous-random') {
+    ensureContinuousDiscoverySession(deps.mode ?? 'swipe')
+    setContinuousBufferRefillHandler((seed) => {
+      const current = seed ?? getContinuousSeed()
+      if (!current) {
+        return
+      }
+      const excludedBase = deps.excludedTracks?.() ?? [
+        { id: current.id, title: current.title, artist: current.artist },
+      ]
+      scheduleBufferRefill(deps, current, excludedBase)
+    })
+  } else {
+    setContinuousBufferRefillHandler(null)
+  }
 
   return {
     async prepareContinuation(
@@ -136,7 +214,12 @@ export function createRecommendationContinuationProvider(
         return null
       }
 
+      if (strategy === 'legacy') {
+        return prepareLegacyContinuation(deps, current, signal)
+      }
+
       ensureContinuousDiscoverySession(deps.mode ?? 'swipe')
+      const discoveryOp = beginContinuousDiscoveryOperation()
       noteContinuousSeed(current)
 
       const excludedBase = deps.excludedTracks?.() ?? [
@@ -148,6 +231,9 @@ export function createRecommendationContinuationProvider(
 
       const buffered = takeContinuousBufferedTrack(excludeIds)
       if (buffered) {
+        if (!isContinuousDiscoveryOperationCurrent(discoveryOp)) {
+          return null
+        }
         noteContinuousSeed(buffered)
         scheduleBufferRefill(deps, buffered, [
           ...excludedBase,
@@ -165,14 +251,13 @@ export function createRecommendationContinuationProvider(
       const gate = abortFrom(signal)
       try {
         const [profile, port] = await Promise.all([deps.loadProfile(), deps.createPort()])
-        if (signal.aborted) {
+        if (signal.aborted || !isContinuousDiscoveryOperationCurrent(discoveryOp)) {
           return null
         }
         const library = await deps.loadLibrary(profile)
-        if (signal.aborted) {
+        if (signal.aborted || !isContinuousDiscoveryOperationCurrent(discoveryOp)) {
           return null
         }
-        // Берём сразу несколько playable; первый — сейчас, остальные в buffer.
         const batch = await collectContinuousPlayableBatch(
           {
             mode: deps.mode ?? 'swipe',
@@ -182,9 +267,13 @@ export function createRecommendationContinuationProvider(
             library,
             port,
             signal: gate.signal,
+            strategy: 'continuous-random',
           },
           CONTINUOUS_BUFFER_TARGET,
         )
+        if (!isContinuousDiscoveryOperationCurrent(discoveryOp)) {
+          return null
+        }
         if (batch.length === 0) {
           const result = await pickContinuousRandom({
             mode: deps.mode ?? 'swipe',
@@ -194,7 +283,11 @@ export function createRecommendationContinuationProvider(
             library,
             port,
             signal: gate.signal,
+            strategy: 'continuous-random',
           })
+          if (!isContinuousDiscoveryOperationCurrent(discoveryOp)) {
+            return null
+          }
           if (!result.ok) {
             noteRecommendationMiss(result.emptyReason, result.message)
             noteContinuousDiag({

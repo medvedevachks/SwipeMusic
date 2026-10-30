@@ -89,6 +89,7 @@ export function activateRecommendationSession(
   getContinuationSession().setProvider(
     createSearchRecommendationProvider({
       mode: toEngineMode(mode),
+      strategy: mode === 'search' ? 'legacy' : 'continuous-random',
       ...options?.deps,
     }),
   )
