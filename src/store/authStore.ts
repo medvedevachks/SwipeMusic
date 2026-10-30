@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { authClient } from '../services/auth/authClient.ts'
+import { bindAuthSessionEpoch } from '../services/auth/sessionEpoch.ts'
 import type { AuthUser } from '../services/auth/types'
 import { getContinuationSession } from '../services/continuation/ContinuationSession.ts'
 import { bindSessionTasteUser } from '../services/taste/loadSessionTasteProfile.ts'
@@ -37,6 +38,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         .then((user) => {
           tasteProfileCache.invalidate()
           bindSessionTasteUser(user?.id ?? null)
+          bindAuthSessionEpoch(user?.id ?? null)
           set({
             user,
             status: user ? 'authenticated' : 'anonymous',
@@ -45,6 +47,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         .catch(() => {
           tasteProfileCache.invalidate()
           bindSessionTasteUser(null)
+          bindAuthSessionEpoch(null)
           getContinuationSession().cancel()
           set({ user: null, status: 'anonymous' })
         })
@@ -59,6 +62,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const user = await authClient.register(input)
     tasteProfileCache.invalidate()
     bindSessionTasteUser(user.id)
+    bindAuthSessionEpoch(user.id)
     getContinuationSession().cancel()
     set({ user, status: 'authenticated' })
   },
@@ -67,6 +71,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const user = await authClient.login(input)
     tasteProfileCache.invalidate()
     bindSessionTasteUser(user.id)
+    bindAuthSessionEpoch(user.id)
     getContinuationSession().cancel()
     set({ user, status: 'authenticated' })
   },
@@ -75,6 +80,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await authClient.logout()
     tasteProfileCache.invalidate()
     bindSessionTasteUser(null)
+    bindAuthSessionEpoch(null)
     getContinuationSession().cancel()
     set({ user: null, status: 'anonymous' })
   },

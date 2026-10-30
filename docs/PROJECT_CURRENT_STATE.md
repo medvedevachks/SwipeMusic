@@ -5,10 +5,10 @@
 
 | Поле | Значение |
 |---|---|
-| Дата снимка | 2026-10-30 (LIBRARY-UX-03A локально, без commit) |
+| Дата снимка | 2026-10-30 (LIBRARY-UX-08 session guard) |
 | Канонический репозиторий | https://github.com/medvedevachks/SwipeMusic |
 | Ветка снимка | `feature/deploy-windows-01` |
-| Проверенный HEAD | production baseline `26e056f`; локально незакоммичен LIBRARY-UX-03A (like→sys_swipes) |
+| Проверенный HEAD | ветка `feature/deploy-windows-01` (после UX-08); production baseline на S1 по-прежнему `26e056f` до deploy |
 | Исторический upstream | https://github.com/r-sh-galimov/SwipeMusic |
 
 **Легенда источников фактов**
@@ -233,7 +233,7 @@ Last.fm и MusicBrainz для рекомендаций **не** подключа
 
 | Приоритет | Задача | Суть |
 |---|---|---|
-| **1** | LIBRARY-UX review → S1 deploy | Inbox `sys_swipes` на `feature/deploy-windows-01` (UX-03…06: deferred removal, late expand anchor, canonical queue id, partial assign/unassign, persist purge). Deploy только после PASS review. |
+| **1** | LIBRARY-UX review → S1 deploy | Inbox `sys_swipes` на `feature/deploy-windows-01` (UX-03…08: deferred removal, late expand, partial assign/unassign, create-before-assign, session/account guard). Deploy только после PASS review. **S1 не трогать** в этой задаче. |
 | **2** | RELEASE / S1 sync | Production baseline `26e056f`; frontend deploy на S1 только с Server. **Без** restart backend/Caddy/AD без задачи. |
 | **3** | RADIO-08 | Убрать нерелевантные и повторяющиеся треки волны/свайпов на уровне ранжирования ядра. |
 | **4** | MEDIA-REMOTE-02 | Проверить физические кнопки руля на Android-магнитоле. |

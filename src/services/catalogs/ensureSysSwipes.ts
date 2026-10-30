@@ -1,5 +1,10 @@
 import { useCollectionStore } from '../../store/collectionStore.ts'
 import type { Category } from '../../types/category.ts'
+import {
+  captureAuthSession,
+  isAuthSessionCurrent,
+  type AuthSessionSnapshot,
+} from '../auth/sessionEpoch.ts'
 import { LibraryHttpError, libraryClient } from '../libraryPersistence/client.ts'
 import { createSysSwipesCatalog, SYS_SWIPES_ID } from './systemFolders.ts'
 
@@ -17,10 +22,25 @@ export type EnsureSysSwipesResult =
 
 let lastRecoverable: Extract<EnsureSysSwipesResult, { status: 'recoverable' }> | null =
   null
+/** Владелец диагностического статуса — не отдаём B статус от A. */
+let lastRecoverableSession: AuthSessionSnapshot | null = null
+
+export function clearSysSwipesEnsureRecovery(): void {
+  lastRecoverable = null
+  lastRecoverableSession = null
+}
 
 export function getSysSwipesEnsureRecovery(): EnsureSysSwipesResult | null {
   if (hasSysSwipesLocally()) {
     return { status: 'ready' }
+  }
+  if (
+    lastRecoverable &&
+    lastRecoverableSession &&
+    !isAuthSessionCurrent(lastRecoverableSession)
+  ) {
+    clearSysSwipesEnsureRecovery()
+    return null
   }
   return lastRecoverable
 }
@@ -33,11 +53,12 @@ export function getSysSwipesEnsureRecovery(): EnsureSysSwipesResult | null {
 export async function ensureSysSwipesCategory(
   isCurrent: () => boolean = () => true,
 ): Promise<EnsureSysSwipesResult> {
-  if (!isCurrent()) {
+  const session = captureAuthSession()
+  if (!isCurrent() || !session.userId) {
     return { status: 'recoverable', reason: 'stale' }
   }
   if (hasSysSwipesLocally()) {
-    lastRecoverable = null
+    clearSysSwipesEnsureRecovery()
     return { status: 'ready' }
   }
 
@@ -46,22 +67,37 @@ export async function ensureSysSwipesCategory(
     await libraryClient.createCategory(catalog)
   } catch (error) {
     if (error instanceof LibraryHttpError && error.status === 409) {
-      return mergeSysSwipesFromServer(isCurrent)
+      return mergeSysSwipesFromServer(isCurrent, session)
     }
-    const result: EnsureSysSwipesResult = {
-      status: 'recoverable',
-      reason: 'create_failed',
-    }
-    lastRecoverable = result
-    return result
+    return rememberRecoverable('create_failed', session)
   }
 
-  if (!isCurrent()) {
+  if (!isCurrent() || !isAuthSessionCurrent(session)) {
     return { status: 'recoverable', reason: 'stale' }
   }
   mergeCategoryLocally(catalog)
-  lastRecoverable = null
+  clearSysSwipesEnsureRecovery()
   return { status: 'created' }
+}
+
+function rememberRecoverable(
+  reason:
+    | 'create_failed'
+    | 'conflict_reload_failed'
+    | 'conflict_missing_on_reload',
+  session: AuthSessionSnapshot,
+): EnsureSysSwipesResult {
+  if (!isAuthSessionCurrent(session)) {
+    clearSysSwipesEnsureRecovery()
+    return { status: 'recoverable', reason: 'stale' }
+  }
+  const result: Extract<EnsureSysSwipesResult, { status: 'recoverable' }> = {
+    status: 'recoverable',
+    reason,
+  }
+  lastRecoverable = result
+  lastRecoverableSession = session
+  return result
 }
 
 function hasSysSwipesLocally(): boolean {
@@ -82,10 +118,11 @@ function mergeCategoryLocally(catalog: Category): void {
 
 async function mergeSysSwipesFromServer(
   isCurrent: () => boolean,
+  session: AuthSessionSnapshot,
 ): Promise<EnsureSysSwipesResult> {
   try {
     const state = await libraryClient.loadState()
-    if (!isCurrent()) {
+    if (!isCurrent() || !isAuthSessionCurrent(session)) {
       return { status: 'recoverable', reason: 'stale' }
     }
     const fromServer = state.categories.find(
@@ -93,21 +130,11 @@ async function mergeSysSwipesFromServer(
     )
     if (fromServer) {
       mergeCategoryLocally(fromServer)
-      lastRecoverable = null
+      clearSysSwipesEnsureRecovery()
       return { status: 'ready' }
     }
-    const missing: EnsureSysSwipesResult = {
-      status: 'recoverable',
-      reason: 'conflict_missing_on_reload',
-    }
-    lastRecoverable = missing
-    return missing
+    return rememberRecoverable('conflict_missing_on_reload', session)
   } catch {
-    const failed: EnsureSysSwipesResult = {
-      status: 'recoverable',
-      reason: 'conflict_reload_failed',
-    }
-    lastRecoverable = failed
-    return failed
+    return rememberRecoverable('conflict_reload_failed', session)
   }
 }

@@ -1,5 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { getCategoryGlyph } from '../config/categoryPresets'
+import {
+  canApplyCategoryPickerCreate,
+  isRetryableCategoryCreateError,
+} from '../services/catalogs/categoryPickerCreateGuard.ts'
+import { captureAuthSession } from '../services/auth/sessionEpoch.ts'
 import { SAVE_FAILED_MESSAGE } from '../services/libraryPersistence/statusStore'
 import type { Category } from '../types/category'
 import BottomSheet from './BottomSheet'
@@ -34,6 +39,14 @@ export default function CategoryPickerSheet({
   const [mode, setMode] = useState<'list' | 'create'>('list')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase()
@@ -80,19 +93,36 @@ export default function CategoryPickerSheet({
               }}
               onSubmit={(input) => {
                 void (async () => {
+                  const sessionAtStart = captureAuthSession()
                   setCreating(true)
                   setCreateError(null)
                   try {
                     const category = await Promise.resolve(onCreateCategory(input))
+                    if (
+                      !canApplyCategoryPickerCreate(
+                        mountedRef.current,
+                        sessionAtStart,
+                      )
+                    ) {
+                      return
+                    }
                     onSelect(category.id)
                     setMode('list')
                     setQuery('')
-                  } catch {
+                  } catch (error) {
+                    if (
+                      !mountedRef.current ||
+                      !isRetryableCategoryCreateError(error)
+                    ) {
+                      return
+                    }
                     setCreateError(
                       `${SAVE_FAILED_MESSAGE} Каталог не создан — сохранение отменено.`,
                     )
                   } finally {
-                    setCreating(false)
+                    if (mountedRef.current) {
+                      setCreating(false)
+                    }
                   }
                 })()
               }}

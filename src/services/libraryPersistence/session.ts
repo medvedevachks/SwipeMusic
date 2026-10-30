@@ -3,7 +3,7 @@ import { resetPlaybackAvailability } from '../playbackAvailability/resetPlayback
 import { cancelActiveFallback } from '../runtimeFallback/fallbackControl.ts'
 import { clearPlaybackFallbackUx } from '../../store/playbackFallbackUxStore.ts'
 import { mapCanonicalLibrary } from '../canonical/mapCanonical.ts'
-import { ensureSysSwipesCategory } from '../catalogs/ensureSysSwipes.ts'
+import { clearSysSwipesEnsureRecovery, ensureSysSwipesCategory } from '../catalogs/ensureSysSwipes.ts'
 import { createDefaultCategories } from '../defaultCategories.ts'
 import { getCollectionEngine } from '../collectionEngine/index.ts'
 import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
@@ -53,6 +53,7 @@ export function applyLibrarySnapshot(dto: LibraryStateDto): void {
 
 export function resetLibrarySession(): void {
   gate.invalidate()
+  clearSysSwipesEnsureRecovery()
   clearLocalLibrary()
   useLibraryPersistenceStore.getState().setStatus('idle', null)
 }

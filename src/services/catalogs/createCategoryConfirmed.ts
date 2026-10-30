@@ -1,6 +1,11 @@
 import { useCollectionStore } from '../../store/collectionStore.ts'
 import type { Category, CategoryIconId } from '../../types/category.ts'
 import { createId } from '../../utils/id.ts'
+import {
+  captureAuthSession,
+  isAuthSessionCurrent,
+  StaleLibrarySessionError,
+} from '../auth/sessionEpoch.ts'
 import { libraryClient } from '../libraryPersistence/client.ts'
 
 export type CreateCategoryConfirmedInput = {
@@ -13,11 +18,16 @@ export type CreateCategoryConfirmedInput = {
 
 /**
  * Создаёт каталог только после подтверждения сервером (POST /api/me/categories).
- * Не использует fire-and-forget enqueue: локальный Zustand не считается успехом.
+ * После await сверяет поколение сессии: чужой аккаунт не получает Zustand merge.
  */
 export async function createCategoryConfirmed(
   input: CreateCategoryConfirmedInput,
 ): Promise<Category> {
+  const session = captureAuthSession()
+  if (!session.userId) {
+    throw new StaleLibrarySessionError('LIBRARY_SESSION_ANONYMOUS')
+  }
+
   const now = new Date().toISOString()
   const category: Category = {
     id: createId('cat'),
@@ -33,6 +43,10 @@ export async function createCategoryConfirmed(
   }
 
   await libraryClient.createCategory(category)
+
+  if (!isAuthSessionCurrent(session)) {
+    throw new StaleLibrarySessionError()
+  }
 
   const categories = useCollectionStore.getState().categories
   if (!categories.some((row) => row.id === category.id)) {
