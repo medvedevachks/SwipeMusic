@@ -51,7 +51,11 @@ export {
   teardownPlaybackSessionsForAuth,
   playCatalogViaSessionSwitch,
   expandCatalogSessionQueue,
+  playSearchViaSessionSwitch,
+  playAlbumViaSessionSwitch,
   releaseCatalogSessionForLegacyIntent,
+  releaseActiveSessionForLegacyIntent,
+  flushActiveSessionToStore,
   getSessionSwitchAppRuntime,
   getSessionSwitchCoordinator,
 } from './integration/index.ts'

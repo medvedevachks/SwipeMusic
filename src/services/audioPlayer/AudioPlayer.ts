@@ -660,6 +660,40 @@ export class AudioPlayer {
     })
   }
 
+  /**
+   * DEV-07: показать трек в мини-плеере после restore сессии без autoplay.
+   * Не вызывает adapter.play / load URL (нет stream в SessionTrack).
+   */
+  restorePausedIdentity(
+    track: Track | null,
+    positionSeconds: number,
+  ): void {
+    cancelActiveFallback('stop')
+    this.playGeneration += 1
+    this.adapter.stop()
+    const queue = getPlaybackQueue()
+    const currentTime =
+      Number.isFinite(positionSeconds) && positionSeconds > 0
+        ? positionSeconds
+        : 0
+    const duration = track?.durationMs ? track.durationMs / 1000 : 0
+    this.patchState({
+      currentTrack: track,
+      pendingTrack: null,
+      activeCandidate: null,
+      playing: false,
+      paused: true,
+      currentTime,
+      duration,
+      progress: computeProgress(currentTime, duration),
+      buffering: false,
+      loading: false,
+      error: null,
+      queue: queue.getItems(),
+      queueIndex: queue.getSnapshot().currentIndex,
+    })
+  }
+
   /** Текущее playGeneration (session-switch PhysicalPlayerPort). */
   getPlayGeneration(): number {
     return this.playGeneration
@@ -1062,6 +1096,28 @@ export class AudioPlayer {
     }
     const track = getPlaybackQueue().next({ fromEnded: true })
     if (!track) {
+      // DEV-07: album end → continuation contract (no-op/stop until DEV-08 CME).
+      const endedContext = before.context
+      if (endedContext.type === 'album') {
+        try {
+          const { resolveAlbumExhaustedContinuation } = await import(
+            '../sessionSwitch/integration/albumContinuationContract.ts'
+          )
+          const { getSessionSwitchAppRuntime } = await import(
+            '../sessionSwitch/integration/sessionSwitchAppRuntime.ts'
+          )
+          const runtime = getSessionSwitchAppRuntime()
+          const meta = runtime?.store.getSlot('album').meta
+          if (meta?.kind === 'album') {
+            await resolveAlbumExhaustedContinuation({
+              meta,
+              lastTrack: this.state.currentTrack,
+            })
+          }
+        } catch {
+          // contract optional when flag OFF / no runtime
+        }
+      }
       this.stop()
       this.patchState({
         currentTrack: null,

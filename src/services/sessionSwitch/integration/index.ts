@@ -55,7 +55,37 @@ export {
   expandCatalogSessionQueue,
   isCatalogSessionPlaybackActive,
 } from './playCatalogSession.ts'
-export { releaseCatalogSessionForLegacyIntent } from './legacyQueueClaim.ts'
+export {
+  playSearchViaSessionSwitch,
+  isSearchSessionPlaybackActive,
+} from './playSearchSession.ts'
+export {
+  playAlbumViaSessionSwitch,
+  isAlbumSessionPlaybackActive,
+} from './playAlbumSession.ts'
+export {
+  resolveAlbumExhaustedContinuation,
+  getAlbumContinuationPort,
+  setAlbumContinuationPortForTests,
+} from './albumContinuationContract.ts'
+export type {
+  AlbumContinuationDecision,
+  AlbumContinuationPort,
+} from './albumContinuationContract.ts'
+export {
+  flushActiveSessionToStore,
+  bumpFlushRevision,
+  resetFlushRevisionForTests,
+} from './flushActiveSession.ts'
+export {
+  startActiveSessionDurableSync,
+  stopActiveSessionDurableSync,
+} from './activeSessionDurableSync.ts'
+export { restoreActiveSessionWithoutAutoplay } from './restoreActiveSession.ts'
+export {
+  releaseCatalogSessionForLegacyIntent,
+  releaseActiveSessionForLegacyIntent,
+} from './legacyQueueClaim.ts'
 export {
   getSessionSwitchAppRuntime,
   getSessionSwitchCoordinator,

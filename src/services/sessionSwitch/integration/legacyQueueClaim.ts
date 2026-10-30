@@ -1,12 +1,15 @@
 /**
- * Совместимость CATALOG (session-switch) ↔ legacy PlaybackIntent (DEV-06).
+ * Совместимость session-switch ↔ legacy PlaybackIntent (SWIPES/WAVE).
  *
- * Пока SEARCH/WAVE/SWIPES/ALBUM на legacy: перед мутацией live-очереди
- * legacy intent обязан «освободить» CATALOG-сессию — сохранить слот и
- * снять activeSessionId. Иначе setQueue незаметно испортит session state.
+ * Перед мутацией live-очереди legacy intent освобождает активную
+ * мигрированную сессию (catalog | search | album): flush durable + active=null.
  */
+import type { PlaybackSessionId } from '../../playbackSession/types.ts'
 import { isSessionSwitchIntegrationEnabled } from '../featureFlag.ts'
-import { playbackExportToSessionQueue } from '../queueSnapshotBridge.ts'
+import {
+  bumpFlushRevision,
+  flushActiveSessionToStore,
+} from './flushActiveSession.ts'
 import { getSessionSwitchAppRuntime } from './sessionSwitchAppRuntime.ts'
 
 export type LegacyIntentKind =
@@ -17,73 +20,51 @@ export type LegacyIntentKind =
   | 'library'
   | 'other'
 
+const MIGRATED_SESSIONS: ReadonlySet<PlaybackSessionId> = new Set([
+  'catalog',
+  'search',
+  'album',
+])
+
 /**
- * Если активна CATALOG-сессия — сохранить durable-снимок и отдать live queue legacy.
- * No-op при flag OFF / нет runtime / active !== catalog.
+ * Если активна мигрированная сессия — сохранить durable-снимок и отдать live queue legacy.
+ * No-op при flag OFF / нет runtime / active не catalog|search|album.
  */
 export function releaseCatalogSessionForLegacyIntent(
   _kind: LegacyIntentKind = 'other',
 ): {
   released: boolean
   savedCatalog: boolean
+  savedSessionId: PlaybackSessionId | null
 } {
   if (!isSessionSwitchIntegrationEnabled()) {
-    return { released: false, savedCatalog: false }
+    return { released: false, savedCatalog: false, savedSessionId: null }
   }
   const runtime = getSessionSwitchAppRuntime()
   if (!runtime) {
-    return { released: false, savedCatalog: false }
+    return { released: false, savedCatalog: false, savedSessionId: null }
   }
-  if (runtime.store.getActiveSessionId() !== 'catalog') {
-    return { released: false, savedCatalog: false }
+  const active = runtime.store.getActiveSessionId()
+  if (!active || !MIGRATED_SESSIONS.has(active)) {
+    return { released: false, savedCatalog: false, savedSessionId: null }
   }
 
   runtime.coordinator.invalidatePending('user_rebind')
+  bumpFlushRevision()
+  const flushed = flushActiveSessionToStore({
+    reason: 'release',
+    sessionId: active,
+    clearActiveAfter: true,
+    playing: false,
+  })
 
-  let savedCatalog = false
-  const userId = runtime.store.getUserId()
-  try {
-    const queue = runtime.queue
-    const positionSeconds = runtime.player.getPositionSeconds()
-    const playingTrackId = runtime.player.getCurrentTrackId()
-    const exported = queue.exportSessionState()
-    const pending = queue.getPendingRemovalIds()
-    const snap = playbackExportToSessionQueue(exported, {
-      positionSeconds,
-      playingTrackId,
-      pendingRemovalIds: pending,
-      phase: 'user_paused',
-      updatedAt: new Date().toISOString(),
-    })
-    const prevMeta = runtime.store.getSlot('catalog').meta
-    runtime.store.replaceSlot('catalog', {
-      meta:
-        prevMeta.kind === 'catalog'
-          ? prevMeta
-          : { kind: 'catalog', catalogId: null, title: null },
-      queue: snap,
-    })
-    if (userId) {
-      try {
-        runtime.persistence.saveSlot(
-          userId,
-          runtime.deviceId,
-          runtime.store.getSlot('catalog'),
-        )
-        runtime.persistence.saveMeta(userId, runtime.deviceId, {
-          activeSessionId: null,
-          switchEpoch: runtime.store.getSwitchEpoch(),
-          playRequestId: runtime.store.getPlayRequestId(),
-        })
-      } catch {
-        // best-effort persist
-      }
-    }
-    savedCatalog = true
-  } catch {
-    savedCatalog = false
+  return {
+    released: true,
+    savedCatalog: flushed.flushed && active === 'catalog',
+    savedSessionId: flushed.flushed ? active : null,
   }
-
-  runtime.store.setActiveSessionId(null)
-  return { released: true, savedCatalog }
 }
+
+/** Alias: освободить любую мигрированную active-сессию для legacy SWIPES/WAVE. */
+export const releaseActiveSessionForLegacyIntent =
+  releaseCatalogSessionForLegacyIntent

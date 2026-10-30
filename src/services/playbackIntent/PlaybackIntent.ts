@@ -32,13 +32,39 @@ function clampIndex(length: number, startIndex: number): number {
  */
 export class PlaybackIntent {
   async playAlbum(input: PlayAlbumInput): Promise<void> {
-    releaseCatalogSessionForLegacyIntent('album')
     const { tracks, album } = input
     const startIndex = clampIndex(tracks.length, input.startIndex)
     if (startIndex < 0) {
       return
     }
 
+    const { isSessionSwitchIntegrationEnabled } = await import(
+      '../sessionSwitch/featureFlag.ts'
+    )
+    if (isSessionSwitchIntegrationEnabled()) {
+      const { playAlbumViaSessionSwitch } = await import(
+        '../sessionSwitch/integration/playAlbumSession.ts'
+      )
+      const switched = await playAlbumViaSessionSwitch({
+        tracks,
+        startIndex,
+        albumId: album.id,
+        albumTitle: album.title,
+        ...(album.artist ? { artist: album.artist } : {}),
+      })
+      if (switched.ok) {
+        return
+      }
+      if (
+        switched.reason !== 'flag_off' &&
+        switched.reason !== 'no_runtime'
+      ) {
+        // Prepare/commit fail: coordinator rollback — не затирать live legacy-путём.
+        return
+      }
+    }
+
+    releaseCatalogSessionForLegacyIntent('album')
     const track = tracks[startIndex]!
     const player = getAudioPlayer()
     player.setQueue(tracks, startIndex, {
@@ -119,8 +145,6 @@ export class PlaybackIntent {
     if (!input.track.id) {
       return
     }
-    releaseCatalogSessionForLegacyIntent('search')
-    const player = getAudioPlayer()
     const before = getPlaybackQueue().getSnapshot()
     noteSearchFlowEvent({
       source: 'PlaybackIntent.playSearchTrack',
@@ -132,6 +156,40 @@ export class PlaybackIntent {
       detail: 'commit-search-seed',
     })
     ensureSearchRecommendation()
+
+    const { isSessionSwitchIntegrationEnabled } = await import(
+      '../sessionSwitch/featureFlag.ts'
+    )
+    if (isSessionSwitchIntegrationEnabled()) {
+      const { playSearchViaSessionSwitch } = await import(
+        '../sessionSwitch/integration/playSearchSession.ts'
+      )
+      const { invalidateRecommendationAdvance } = await import(
+        '../recommendation/advanceEpoch.ts'
+      )
+      const switched = await playSearchViaSessionSwitch({
+        track: input.track,
+        query: input.query,
+        searchHits: input.searchHits,
+      })
+      if (switched.ok) {
+        invalidateRecommendationAdvance()
+        const ctx = getPlaybackQueue().getPlaybackContext()
+        if (ctx.type === 'search-seed') {
+          getContinuationSession().prepare(input.track, ctx, { force: true })
+        }
+        return
+      }
+      if (
+        switched.reason !== 'flag_off' &&
+        switched.reason !== 'no_runtime'
+      ) {
+        return
+      }
+    }
+
+    releaseCatalogSessionForLegacyIntent('search')
+    const player = getAudioPlayer()
     commitSearchSeedQueue(getPlaybackQueue(), getContinuationSession(), {
       track: input.track,
       query: input.query,

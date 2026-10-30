@@ -166,6 +166,8 @@ export async function bindPlaybackSessionsForAuth(
 
     const player = getAudioPlayer()
     const queue = getPlaybackQueue()
+    const hydratedActive = store.getActiveSessionId()
+
     handoffLiveQueueAfterAuth({
       userId,
       deviceId,
@@ -174,6 +176,7 @@ export async function bindPlaybackSessionsForAuth(
       player,
     })
 
+    // Пока не восстановили — не держим active на пустой/чужой live queue.
     store.setActiveSessionId(null)
 
     const resolve = createAudioPlayerResolveFn(player)
@@ -225,6 +228,21 @@ export async function bindPlaybackSessionsForAuth(
     }
     setSessionSwitchAppRuntime(appRuntime)
 
+    const { restoreActiveSessionWithoutAutoplay } = await import(
+      './restoreActiveSession.ts'
+    )
+    restoreActiveSessionWithoutAutoplay({
+      store,
+      queue,
+      player,
+      hydratedActiveSessionId: hydratedActive,
+    })
+
+    const { startActiveSessionDurableSync } = await import(
+      './activeSessionDurableSync.ts'
+    )
+    startActiveSessionDurableSync({ queue, player })
+
     return {
       bound: true,
       skipped: false,
@@ -259,6 +277,15 @@ export async function teardownPlaybackSessionsForAuth(
 
   bumpSessionSwitchBootstrapGeneration()
   const runtime = getSessionSwitchAppRuntime()
+
+  try {
+    const { stopActiveSessionDurableSync } = await import(
+      './activeSessionDurableSync.ts'
+    )
+    stopActiveSessionDurableSync()
+  } catch {
+    // partial graph
+  }
 
   if (runtime) {
     runtime.coordinator.invalidatePending('logout')
