@@ -1,6 +1,7 @@
 export {
   PlaybackQueue,
   getPlaybackQueue,
+  createSessionPlaybackQueue,
   PLAYBACK_QUEUE_STORAGE_KEY,
   type RepeatMode,
   type ShuffleMode,
@@ -10,6 +11,8 @@ export {
   type PlaybackQueueSessionState,
   type SessionStateIssue,
   type ImportSessionStateResult,
+  type PlaybackQueuePersistenceMode,
+  type PlaybackQueueOptions,
 } from './PlaybackQueue'
 export {
   validatePlaybackQueueSessionState,

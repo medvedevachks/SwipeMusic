@@ -27,6 +27,20 @@ export type ImportSessionStateResult =
   | { ok: true; state: PlaybackQueueSessionState }
   | { ok: false; issues: SessionStateIssue[] }
 
+/**
+ * Разделение legacy v1 localStorage и session-aware пути (PLAYBACK-DEV-03A).
+ *
+ * - `legacy` (default): constructor restore + emit→persist в
+ *   `swipe-music-playback-queue-v1`. Текущий production через getPlaybackQueue().
+ * - `session`: без auto-restore из v1; emit не пишет в legacy-ключ.
+ *   Для очередей, питаемых PlaybackSessionStore / importSessionState.
+ */
+export type PlaybackQueuePersistenceMode = 'legacy' | 'session'
+
+export type PlaybackQueueOptions = {
+  persistenceMode?: PlaybackQueuePersistenceMode
+}
+
 export type PlaybackQueueSnapshot = {
   items: Track[]
   /** Индекс в исходном items[]. */
@@ -163,9 +177,36 @@ export class PlaybackQueue {
   private pendingRemovalIds = new Set<string>()
   private readonly listeners = new Set<PlaybackQueueListener>()
   private persistTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * true = писать/читать swipe-music-playback-queue-v1.
+   * false после detachLegacyPersistence / mode=session.
+   */
+  private legacyPersistenceEnabled: boolean
 
-  constructor() {
-    this.restore()
+  constructor(options: PlaybackQueueOptions = {}) {
+    const mode = options.persistenceMode ?? 'legacy'
+    this.legacyPersistenceEnabled = mode === 'legacy'
+    if (this.legacyPersistenceEnabled) {
+      this.restore()
+    }
+  }
+
+  /** Текущий режим persist (для тестов / будущей интеграции). */
+  getPersistenceMode(): PlaybackQueuePersistenceMode {
+    return this.legacyPersistenceEnabled ? 'legacy' : 'session'
+  }
+
+  /**
+   * Отключает чтение/запись legacy v1 для этого экземпляра.
+   * Не удаляет ключ и не меняет содержимое очереди.
+   * Production singleton не вызывает это, пока SessionStore не подключён.
+   */
+  detachLegacyPersistence(): void {
+    this.legacyPersistenceEnabled = false
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = null
+    }
   }
 
   subscribe(listener: PlaybackQueueListener): () => void {
@@ -563,6 +604,10 @@ export class PlaybackQueue {
    * Валидация до мутации: при ошибке очередь не меняется.
    * Один emit() подписчикам. Не запускает / не останавливает AudioPlayer.
    * pendingRemovalIds после импорта пусты (durable).
+   *
+   * DEV-03A: импорт всегда отключает legacy persist для экземпляра и
+   * не планирует запись в swipe-music-playback-queue-v1 — иначе
+   * пользовательская v2-сессия утекла бы в общий ключ без userId.
    */
   importSessionState(raw: unknown): ImportSessionStateResult {
     const validated = validatePlaybackQueueSessionState(raw)
@@ -572,6 +617,9 @@ export class PlaybackQueue {
     const next = validated.value
     const contextBefore = this.context.type
     const lengthBefore = this.items.length
+
+    // До мутации: отменить отложенный legacy persist и запретить новые записи.
+    this.detachLegacyPersistence()
 
     this.items = next.items.map(stripPreview)
     this.currentIndex = next.currentIndex
@@ -596,7 +644,7 @@ export class PlaybackQueue {
       detail: 'session-state-import',
     })
 
-    this.emit()
+    this.emit({ persist: false })
     return { ok: true, state: this.exportSessionState() }
   }
 
@@ -970,15 +1018,21 @@ export class PlaybackQueue {
     }
   }
 
-  private emit(): void {
+  private emit(options?: { persist?: boolean }): void {
     const snapshot = this.getSnapshot()
     for (const listener of this.listeners) {
       listener(snapshot)
+    }
+    if (options?.persist === false) {
+      return
     }
     this.schedulePersist()
   }
 
   private schedulePersist(): void {
+    if (!this.legacyPersistenceEnabled) {
+      return
+    }
     if (this.persistTimer) {
       clearTimeout(this.persistTimer)
     }
@@ -988,6 +1042,9 @@ export class PlaybackQueue {
   }
 
   private persist(): void {
+    if (!this.legacyPersistenceEnabled) {
+      return
+    }
     try {
       const payload: PersistedPlaybackQueue = {
         ...this.getSnapshot(),
@@ -1002,6 +1059,9 @@ export class PlaybackQueue {
   }
 
   private restore(): void {
+    if (!this.legacyPersistenceEnabled) {
+      return
+    }
     try {
       const raw = localStorage.getItem(PLAYBACK_QUEUE_STORAGE_KEY)
       if (!raw) {
@@ -1114,9 +1174,18 @@ export class PlaybackQueue {
 
 let singleton: PlaybackQueue | null = null
 
+/**
+ * Production singleton — всегда legacy mode (прежнее поведение).
+ * Не вызывать importSessionState на нём до явного session wiring.
+ */
 export function getPlaybackQueue(): PlaybackQueue {
   if (!singleton) {
-    singleton = new PlaybackQueue()
+    singleton = new PlaybackQueue({ persistenceMode: 'legacy' })
   }
   return singleton
+}
+
+/** Очередь без legacy restore/persist — для SessionStore / тестов DEV-03+. */
+export function createSessionPlaybackQueue(): PlaybackQueue {
+  return new PlaybackQueue({ persistenceMode: 'session' })
 }
