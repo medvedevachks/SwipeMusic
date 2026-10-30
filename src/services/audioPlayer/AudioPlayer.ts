@@ -1096,10 +1096,14 @@ export class AudioPlayer {
     }
     const track = getPlaybackQueue().next({ fromEnded: true })
     if (!track) {
-      // DEV-07: album end → continuation contract (no-op/stop until DEV-08 CME).
+      // PLAYBACK-CME-01: album end → related (same-artist library) или stop.
       const endedContext = before.context
       if (endedContext.type === 'album') {
         try {
+          const { ensureAlbumRelatedContinuationPort } = await import(
+            '../sessionSwitch/integration/albumRelatedContinuation.ts'
+          )
+          ensureAlbumRelatedContinuationPort()
           const { resolveAlbumExhaustedContinuation } = await import(
             '../sessionSwitch/integration/albumContinuationContract.ts'
           )
@@ -1107,15 +1111,34 @@ export class AudioPlayer {
             '../sessionSwitch/integration/sessionSwitchAppRuntime.ts'
           )
           const runtime = getSessionSwitchAppRuntime()
-          const meta = runtime?.store.getSlot('album').meta
-          if (meta?.kind === 'album') {
-            await resolveAlbumExhaustedContinuation({
+          const meta =
+            runtime?.store.getSlot('album').meta ??
+            ({
+              kind: 'album' as const,
+              albumId: endedContext.id,
+              title: endedContext.title,
+              ...(endedContext.artist
+                ? { artist: endedContext.artist }
+                : {}),
+              phase: 'album' as const,
+            })
+          if (meta.kind === 'album') {
+            const decision = await resolveAlbumExhaustedContinuation({
               meta,
               lastTrack: this.state.currentTrack,
             })
+            if (decision.action === 'related') {
+              const { applyAlbumRelatedContinuation } = await import(
+                '../sessionSwitch/integration/albumRelatedContinuation.ts'
+              )
+              const applied = await applyAlbumRelatedContinuation(decision)
+              if (applied) {
+                return
+              }
+            }
           }
         } catch {
-          // contract optional when flag OFF / no runtime
+          // contract optional
         }
       }
       this.stop()
