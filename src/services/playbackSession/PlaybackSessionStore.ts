@@ -197,14 +197,20 @@ export class PlaybackSessionStore {
   }
 
   /**
-   * Обновить только queue слота (история/порядок/позиция), meta без изменений.
-   * bump slotGeneration.
+   * Обновить queue слота (история/порядок/позиция), meta без изменений.
+   * По умолчанию bump slotGeneration (смена содержимого).
+   *
+   * R8 / DEV-04: для периодического сохранения только position/phase
+   * передайте `{ bumpGeneration: false }`, чтобы не инвалидировать
+   * незавершённый Prepare (token.targetSlotGeneration).
    */
   saveSlotQueue(
     id: PlaybackSessionId,
     queue: SessionQueueSnapshot,
+    options?: { bumpGeneration?: boolean },
   ): PlaybackSessionSlot {
     const prev = this.slots[id]!
+    const bump = options?.bumpGeneration !== false
     const next: PlaybackSessionSlot = {
       id,
       meta: cloneMeta(prev.meta),
@@ -213,10 +219,34 @@ export class PlaybackSessionStore {
         items: queue.items.map((item) => toSessionTrack(item as SessionTrack)),
         updatedAt: queue.updatedAt || this.now(),
       }),
-      slotGeneration: prev.slotGeneration + 1,
+      slotGeneration: bump ? prev.slotGeneration + 1 : prev.slotGeneration,
     }
     this.slots[id] = next
     return clonePlaybackSessionSlot(next)
+  }
+
+  /**
+   * Runtime-only обновление позиции/phase без bump slotGeneration (R8).
+   */
+  saveSlotRuntime(
+    id: PlaybackSessionId,
+    patch: {
+      positionSeconds: number
+      phase?: SessionQueueSnapshot['phase']
+      updatedAt?: string
+    },
+  ): PlaybackSessionSlot {
+    const prev = this.slots[id]!
+    return this.saveSlotQueue(
+      id,
+      {
+        ...cloneSessionQueueSnapshot(prev.queue),
+        positionSeconds: patch.positionSeconds,
+        phase: patch.phase ?? prev.queue.phase,
+        updatedAt: patch.updatedAt || this.now(),
+      },
+      { bumpGeneration: false },
+    )
   }
 
   setActiveSessionId(id: PlaybackSessionId | null): void {
