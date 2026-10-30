@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { CanonicalOrganizedList } from '../components/catalog/CanonicalOrganizedList'
 import { CatalogList } from '../components/catalog/CatalogList'
+import { LibrarySystemFolders } from '../components/catalog/LibrarySystemFolders'
 import { BulkActionBar } from '../components/library/BulkActionBar'
 import { LibraryBreadcrumb } from '../components/library/LibraryBreadcrumb'
 import { LibraryContentTable } from '../components/library/LibraryContentTable'
@@ -221,8 +221,8 @@ export default function Library() {
         </button>
       </div>
 
+      <LibrarySystemFolders />
       <CatalogList />
-      <CanonicalOrganizedList />
 
       <div className="space-y-1">
         <h2 className="font-display text-lg font-semibold text-[var(--color-fg)]">
@@ -409,7 +409,7 @@ export default function Library() {
             ? { track: actionRow.track, meta: actionRow.meta }
             : null
         }
-        categories={categories}
+        categories={categories.filter((category) => category.id !== 'sys_swipes')}
         onClose={() => setActionTrackId(null)}
         onPlay={() => {
           if (actionRow) {

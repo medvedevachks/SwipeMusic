@@ -3,6 +3,7 @@ import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
 import type { Category } from '../../types/category.ts'
 import type { CanonicalLibraryItem, CanonicalMembership, SourceCopySnapshot, TrackIdentity } from '../../types/canonical.ts'
 import type { Track } from '../../types/track.ts'
+import { SYS_SWIPES_ID } from '../catalogs/systemFolders.ts'
 import { libraryClient } from '../libraryPersistence/client.ts'
 import { runLibraryMutation } from '../libraryPersistence/mutations.ts'
 import { sourceTrackKeyOf, snapshotFromTrack } from './mapCanonical.ts'
@@ -149,14 +150,39 @@ export async function commitCatalogChoice(
   catalogId: string,
   category?: Category,
 ): Promise<boolean> {
-  const saved = await assignSourceToCatalog(track, catalogId)
-  if (!saved) {
+  if (catalogId === SYS_SWIPES_ID) {
+    // Inbox только через like, не через picker «Каталог».
     return false
   }
-  useCollectionStore.getState().recordHistory({
-    track,
-    action: 'categorize',
-    category,
-  })
+
+  const key = sourceTrackKeyOf(track)
+  const before = useCanonicalLibraryStore.getState()
+  const priorId = before.sourceKeyToCanonicalId[key]
+  const priorItem = priorId ? before.itemsById[priorId] : null
+  const alreadyInTarget = priorItem?.catalogIds.includes(catalogId) ?? false
+
+  if (!alreadyInTarget) {
+    const saved = await assignSourceToCatalog(track, catalogId)
+    if (!saved) {
+      return false
+    }
+  }
+
+  const after = useCanonicalLibraryStore.getState()
+  const canonicalId = priorId ?? after.sourceKeyToCanonicalId[key]
+  const item = canonicalId ? after.itemsById[canonicalId] : null
+  if (canonicalId && item?.catalogIds.includes(SYS_SWIPES_ID)) {
+    // После разбора в пользовательский каталог — выйти из накопителя sys_swipes.
+    // liked не трогаем (unassign только membership).
+    await removeCanonicalFromCatalog(canonicalId, SYS_SWIPES_ID)
+  }
+
+  if (!alreadyInTarget) {
+    useCollectionStore.getState().recordHistory({
+      track,
+      action: 'categorize',
+      category,
+    })
+  }
   return true
 }

@@ -89,6 +89,11 @@ export class PlaybackQueue {
    * Отличает continuation / «играть следующим» от чужого search-hit в хвосте.
    */
   private sessionTailIds = new Set<string>()
+  /**
+   * Убраны из будущих циклов / Previous, но current ещё играет до Next или ended.
+   * Не персистим: после reload безопаснее не восстанавливать «призраков».
+   */
+  private pendingRemovalIds = new Set<string>()
   private readonly listeners = new Set<PlaybackQueueListener>()
   private persistTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -171,6 +176,7 @@ export class PlaybackQueue {
 
     this.items = cleaned
     this.sessionTailIds.clear()
+    this.pendingRemovalIds.clear()
     if (cleaned.length === 0) {
       this.currentIndex = -1
       this.playOrder = []
@@ -242,15 +248,31 @@ export class PlaybackQueue {
       return false
     }
 
-    const nextIndex = cleaned.findIndex((track) => track.id === playingId)
+    // Pending removal: не возвращать в хвост; current оставляем, пока играет.
+    let nextTracks = cleaned.filter(
+      (track) =>
+        track.id === playingId || !this.pendingRemovalIds.has(track.id),
+    )
+    if (!nextTracks.some((track) => track.id === playingId)) {
+      const playing = this.items[this.currentIndex]
+      if (!playing) {
+        return false
+      }
+      nextTracks = [playing, ...nextTracks]
+    }
+
+    const nextIndex = nextTracks.findIndex((track) => track.id === playingId)
     if (nextIndex < 0) {
       return false
     }
 
-    const knownIds = new Set(cleaned.map((track) => track.id))
-    this.items = cleaned
+    const knownIds = new Set(nextTracks.map((track) => track.id))
+    this.items = nextTracks
     this.sessionTailIds = new Set(
       [...this.sessionTailIds].filter((id) => knownIds.has(id)),
+    )
+    this.pendingRemovalIds = new Set(
+      [...this.pendingRemovalIds].filter((id) => knownIds.has(id)),
     )
     this.rebuildPlayOrder(nextIndex)
     // history / historyIndex / repeat / shuffle / context не сбрасываем.
@@ -338,39 +360,38 @@ export class PlaybackQueue {
   }
 
   remove(trackId: string): void {
-    const removeIndex = this.items.findIndex((track) => track.id === trackId)
-    if (removeIndex < 0) {
-      return
-    }
+    this.pendingRemovalIds.delete(trackId)
+    this.hardRemoveTrack(trackId, { advanceIfCurrent: true })
+  }
 
-    const wasCurrent = removeIndex === this.currentIndex
-    this.items.splice(removeIndex, 1)
-    const removedHistoryAt = this.history.lastIndexOf(trackId)
-    this.history = this.history.filter((id) => id !== trackId)
-    if (removedHistoryAt >= 0 && this.historyIndex >= removedHistoryAt) {
-      this.historyIndex = Math.max(-1, this.historyIndex - 1)
-    }
-    if (this.historyIndex >= this.history.length) {
-      this.historyIndex = this.history.length - 1
-    }
+  /**
+   * Убрать трек из будущих циклов и Previous, не останавливая текущее аудио.
+   * Current остаётся до Next / ended; затем вычищается.
+   * Чужой контекст вызывающий код не должен трогать — проверка ownership снаружи.
+   */
+  removePreservingCurrentPlayback(trackId: string): void {
+    this.stripTrackFromHistory(trackId)
     this.sessionTailIds.delete(trackId)
 
-    if (this.items.length === 0) {
-      this.clear()
+    const removeIndex = this.items.findIndex((track) => track.id === trackId)
+    if (removeIndex < 0) {
+      this.pendingRemovalIds.delete(trackId)
       return
     }
 
-    if (wasCurrent) {
-      const nextIndex = Math.min(removeIndex, this.items.length - 1)
-      this.currentIndex = nextIndex
-      this.rebuildPlayOrder(nextIndex)
-    } else {
-      if (removeIndex < this.currentIndex) {
-        this.currentIndex -= 1
-      }
-      this.rebuildPlayOrder(this.currentIndex)
+    if (removeIndex !== this.currentIndex) {
+      this.pendingRemovalIds.delete(trackId)
+      this.hardRemoveTrack(trackId, { advanceIfCurrent: false })
+      return
     }
+
+    this.pendingRemovalIds.add(trackId)
     this.emit()
+  }
+
+  /** Id, отложенно снятые с очереди, но ещё звучащие. Для тестов / UI. */
+  getPendingRemovalIds(): readonly string[] {
+    return [...this.pendingRemovalIds]
   }
 
   move(from: number, to: number): void {
@@ -407,6 +428,7 @@ export class PlaybackQueue {
     this.history = []
     this.historyIndex = -1
     this.sessionTailIds.clear()
+    this.pendingRemovalIds.clear()
     this.context = NONE_PLAYBACK_CONTEXT
     this.emit()
   }
@@ -427,15 +449,37 @@ export class PlaybackQueue {
       return null
     }
 
+    const leavingId =
+      this.currentIndex >= 0 ? (this.items[this.currentIndex]?.id ?? null) : null
+    const leavingWasPending =
+      leavingId !== null && this.pendingRemovalIds.has(leavingId)
+
     if (options?.fromEnded && this.repeatMode === 'ONE') {
+      // Sorted current: не зацикливать одну удалённую композицию.
+      if (leavingWasPending) {
+        this.purgePendingTrack(leavingId!)
+        this.emit()
+        return null
+      }
       return this.current()
     }
 
     const upcoming = this.peekNextIndex(options?.fromEnded === true)
     if (upcoming == null) {
       if (this.repeatMode === 'ALL') {
-        this.playOrderIndex = 0
-        this.currentIndex = this.playOrder[0] ?? 0
+        const restart = this.peekFirstEligiblePlayOrderIndex()
+        if (restart == null) {
+          if (leavingWasPending && leavingId) {
+            this.purgePendingTrack(leavingId)
+          }
+          this.emit()
+          return null
+        }
+        this.playOrderIndex = restart.playOrderIndex
+        this.currentIndex = restart.itemIndex
+        if (leavingWasPending && leavingId) {
+          this.purgePendingTrack(leavingId)
+        }
         const track = this.current()
         if (track) {
           this.pushHistory(track.id)
@@ -443,11 +487,18 @@ export class PlaybackQueue {
         this.emit()
         return track
       }
+      if (leavingWasPending && leavingId) {
+        this.purgePendingTrack(leavingId)
+        this.emit()
+      }
       return null
     }
 
     this.playOrderIndex = upcoming.playOrderIndex
     this.currentIndex = upcoming.itemIndex
+    if (leavingWasPending && leavingId) {
+      this.purgePendingTrack(leavingId)
+    }
     const track = this.current()
     if (track) {
       this.pushHistory(track.id)
@@ -493,8 +544,9 @@ export class PlaybackQueue {
   peekNext(): Track | null {
     const upcoming = this.peekNextIndex(false)
     if (upcoming == null) {
-      if (this.repeatMode === 'ALL' && this.playOrder.length > 0) {
-        return this.items[this.playOrder[0]!] ?? null
+      if (this.repeatMode === 'ALL') {
+        const restart = this.peekFirstEligiblePlayOrderIndex()
+        return restart ? (this.items[restart.itemIndex] ?? null) : null
       }
       return null
     }
@@ -553,13 +605,104 @@ export class PlaybackQueue {
     if (this.playOrder.length === 0) {
       return null
     }
-    const nextPos = this.playOrderIndex + 1
-    if (nextPos >= this.playOrder.length) {
-      return null
+    for (let pos = this.playOrderIndex + 1; pos < this.playOrder.length; pos += 1) {
+      const itemIndex = this.playOrder[pos]!
+      const id = this.items[itemIndex]?.id
+      if (id && this.pendingRemovalIds.has(id)) {
+        continue
+      }
+      return { playOrderIndex: pos, itemIndex }
     }
-    return {
-      playOrderIndex: nextPos,
-      itemIndex: this.playOrder[nextPos]!,
+    return null
+  }
+
+  private peekFirstEligiblePlayOrderIndex(): {
+    playOrderIndex: number
+    itemIndex: number
+  } | null {
+    for (let pos = 0; pos < this.playOrder.length; pos += 1) {
+      const itemIndex = this.playOrder[pos]!
+      const id = this.items[itemIndex]?.id
+      if (!id || this.pendingRemovalIds.has(id)) {
+        continue
+      }
+      return { playOrderIndex: pos, itemIndex }
+    }
+    return null
+  }
+
+  private stripTrackFromHistory(trackId: string): void {
+    const removedHistoryAt = this.history.lastIndexOf(trackId)
+    this.history = this.history.filter((id) => id !== trackId)
+    if (removedHistoryAt >= 0 && this.historyIndex >= removedHistoryAt) {
+      this.historyIndex = Math.max(-1, this.historyIndex - 1)
+    }
+    if (this.historyIndex >= this.history.length) {
+      this.historyIndex = this.history.length - 1
+    }
+  }
+
+  /**
+   * Жёсткое удаление из items. advanceIfCurrent — поведение классического remove().
+   */
+  private hardRemoveTrack(
+    trackId: string,
+    options: { advanceIfCurrent: boolean },
+  ): void {
+    const removeIndex = this.items.findIndex((track) => track.id === trackId)
+    if (removeIndex < 0) {
+      return
+    }
+
+    const wasCurrent = removeIndex === this.currentIndex
+    this.items.splice(removeIndex, 1)
+    this.stripTrackFromHistory(trackId)
+    this.sessionTailIds.delete(trackId)
+    this.pendingRemovalIds.delete(trackId)
+
+    if (this.items.length === 0) {
+      this.clear()
+      return
+    }
+
+    if (wasCurrent && options.advanceIfCurrent) {
+      const nextIndex = Math.min(removeIndex, this.items.length - 1)
+      this.currentIndex = nextIndex
+      this.rebuildPlayOrder(nextIndex)
+    } else {
+      if (removeIndex < this.currentIndex) {
+        this.currentIndex -= 1
+      } else if (wasCurrent) {
+        // Current уже сдвинут next(); индекс мог указывать на тот же слот.
+        this.currentIndex = Math.min(this.currentIndex, this.items.length - 1)
+      }
+      this.rebuildPlayOrder(this.currentIndex)
+    }
+    this.emit()
+  }
+
+  /** После ухода с pending current — вырезать id, сохранив новый currentIndex. */
+  private purgePendingTrack(trackId: string): void {
+    this.pendingRemovalIds.delete(trackId)
+    const removeIndex = this.items.findIndex((track) => track.id === trackId)
+    if (removeIndex < 0) {
+      return
+    }
+    const pinnedId =
+      this.currentIndex >= 0 ? (this.items[this.currentIndex]?.id ?? null) : null
+    this.items.splice(removeIndex, 1)
+    this.sessionTailIds.delete(trackId)
+    if (this.items.length === 0) {
+      this.currentIndex = -1
+      this.playOrder = []
+      this.playOrderIndex = -1
+      return
+    }
+    if (pinnedId && pinnedId !== trackId) {
+      const restored = this.items.findIndex((track) => track.id === pinnedId)
+      this.rebuildPlayOrder(restored >= 0 ? restored : 0)
+    } else {
+      this.rebuildPlayOrder(Math.min(removeIndex, this.items.length - 1))
     }
   }
 

@@ -14,6 +14,7 @@ import {
   formatCatalogTrackCount,
   getCatalogById,
 } from '../services/catalogs/selectCatalogs'
+import { SYS_SWIPES_ID } from '../services/catalogs/systemFolders'
 import {
   CATALOG_PLAYBACK_MESSAGE,
   cancelCatalogPlaybackGate,
@@ -51,6 +52,16 @@ export default function CatalogDetail() {
       cancelCatalogPlaybackGate()
     }
   }, [catalogId])
+
+  useEffect(() => {
+    if (catalogId === SYS_SWIPES_ID) {
+      navigate('/library/swipes', { replace: true })
+    }
+  }, [catalogId, navigate])
+
+  if (catalogId === SYS_SWIPES_ID) {
+    return null
+  }
 
   if (removed) {
     return null

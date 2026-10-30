@@ -3,6 +3,7 @@ import { resetPlaybackAvailability } from '../playbackAvailability/resetPlayback
 import { cancelActiveFallback } from '../runtimeFallback/fallbackControl.ts'
 import { clearPlaybackFallbackUx } from '../../store/playbackFallbackUxStore.ts'
 import { mapCanonicalLibrary } from '../canonical/mapCanonical.ts'
+import { ensureSysSwipesCategory } from '../catalogs/ensureSysSwipes.ts'
 import { createDefaultCategories } from '../defaultCategories.ts'
 import { getCollectionEngine } from '../collectionEngine/index.ts'
 import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
@@ -76,6 +77,10 @@ export function bootstrapLibrary(userId: string): Promise<void> {
         },
       })
       if (!isCurrent() || outcome === 'stale') {
+        return
+      }
+      await ensureSysSwipesCategory(isCurrent)
+      if (!isCurrent()) {
         return
       }
       useCanonicalLibraryStore.getState().beginLoad()

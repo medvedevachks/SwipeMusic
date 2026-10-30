@@ -16,6 +16,7 @@ import {
   beginCatalogLoopSession,
   resetCatalogRepeatPolicyForTests,
 } from './catalogRepeatPolicy.ts'
+import { filterQueueToLiveCatalogMembership } from './liveCatalogQueue.ts'
 import { CATALOG_PREPARE_CONCURRENCY } from './mapPool.ts'
 import { CATALOG_PLAYBACK_MESSAGE } from './messages.ts'
 
@@ -363,9 +364,35 @@ export async function playUserCatalog(
           )
         })
       // generation + ownership: чужой/устаревший prepare не трогает очередь и Repeat.
+      // Live membership: разобранные во время prepare не возвращаются expand'ом.
       if (isCurrent(generation)) {
-        await replaceQueue({ tracks, startIndex, context })
-        applyCatalogLoopRepeatIfOwned(input.catalog.id)
+        const liveQueue = filterQueueToLiveCatalogMembership(
+          input.catalog.id,
+          queue,
+        )
+        const liveTracks = liveQueue.map((entry) => entry.track)
+        let liveStart = 0
+        if (earlyStartCanonicalId) {
+          const index = liveQueue.findIndex(
+            (entry) => entry.canonicalTrackId === earlyStartCanonicalId,
+          )
+          liveStart = index >= 0 ? index : 0
+        }
+        if (liveTracks.length > 0) {
+          await replaceQueue({
+            tracks: liveTracks,
+            startIndex: liveStart,
+            context,
+          })
+          applyCatalogLoopRepeatIfOwned(input.catalog.id)
+        }
+        return {
+          status: 'played',
+          tracks: liveTracks.length > 0 ? liveTracks : tracks,
+          startIndex: liveTracks.length > 0 ? liveStart : startIndex,
+          queue: liveQueue.length > 0 ? liveQueue : queue,
+          needsUserPlayGesture,
+        }
       }
       return {
         status: 'played',

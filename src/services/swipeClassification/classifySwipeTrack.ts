@@ -1,4 +1,4 @@
-import { commitSwipeLike } from '../canonical/userOrganization.ts'
+import { commitSwipeLikeWithInbox } from '../canonical/swipeInbox.ts'
 import { useCollectionEngineStore } from '../../store/collectionEngineStore.ts'
 import { useCollectionStore } from '../../store/collectionStore.ts'
 import type { SwipeAction } from '../../types/swipe'
@@ -11,7 +11,7 @@ export type ClassifySwipeResult =
 /**
  * Единый semantic handler классификации свайпа.
  * Не трогает playback / queue / context.
- * Семантика действий — как до разделения Swipe/Playback.
+ * like → liked + sys_swipes (накопитель). skip → skipped, без inbox.
  */
 export function classifySwipeTrack(
   track: Track,
@@ -24,11 +24,11 @@ export function classifySwipeTrack(
 
   switch (action) {
     case 'like':
-      // Классификация без навигации. Подтверждение показывает вызывающий код после ответа.
-      return { kind: 'applied', action, saved: commitSwipeLike(track) }
+      // Один liked + membership sys_swipes. Не markSkipped.
+      return { kind: 'applied', action, saved: commitSwipeLikeWithInbox(track) }
 
     case 'skip':
-      // «Дальше» / skip classification — не playback Skip.
+      // «Дальше»: прежняя семантика skipped. В sys_swipes НЕ добавляем.
       collection.recordHistory({ track, action: 'skip' })
       engine.markSkipped(track.id, track)
       return { kind: 'applied', action }

@@ -9,6 +9,7 @@ import {
   formatCatalogTrackCount,
   listCatalogs,
 } from '../../services/catalogs/selectCatalogs'
+import { listUserOrganizationCatalogs } from '../../services/catalogs/systemFolders'
 import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore'
 import { useCollectionStore } from '../../store/collectionStore'
 import type { Catalog } from '../../types/category'
@@ -42,7 +43,7 @@ export function CatalogList({
   const createCategory = useCollectionStore((state) => state.createCategory)
   const canonicalItems = listCanonicalItems(Object.values(itemsById))
   const [creating, setCreating] = useState(false)
-  const catalogs = listCatalogs(categories)
+  const catalogs = listCatalogs(listUserOrganizationCatalogs(categories))
 
   return (
     <section className="space-y-3" aria-label="Мои каталоги">

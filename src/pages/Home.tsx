@@ -61,7 +61,11 @@ export default function Home() {
   const { tracks, isLoading, error, mode, searchQuery } = useSwipeFeed()
   const resetToCatalog = useSwipeDeckSessionStore((state) => state.resetToCatalog)
   const gestureConfig = useCollectionStore((state) => state.gestureConfig)
-  const categories = useCollectionStore((state) => state.categories)
+  const allCategories = useCollectionStore((state) => state.categories)
+  const categories = useMemo(
+    () => allCategories.filter((category) => category.id !== 'sys_swipes'),
+    [allCategories],
+  )
   const createCategory = useCollectionStore((state) => state.createCategory)
 
   const setQueue = usePlayerStore((state) => state.setQueue)

@@ -5,10 +5,10 @@
 
 | Поле | Значение |
 |---|---|
-| Дата снимка | 2026-10-28 (RELEASE-RECOMMENDATION-13) |
+| Дата снимка | 2026-10-30 (LIBRARY-UX-03A локально, без commit) |
 | Канонический репозиторий | https://github.com/medvedevachks/SwipeMusic |
 | Ветка снимка | `feature/deploy-windows-01` |
-| Проверенный HEAD | см. Git после commit RELEASE-RECOMMENDATION-13 (предок baseline `b403874`) |
+| Проверенный HEAD | production baseline `26e056f`; локально незакоммичен LIBRARY-UX-03A (like→sys_swipes) |
 | Исторический upstream | https://github.com/r-sh-galimov/SwipeMusic |
 
 **Легенда источников фактов**
@@ -233,9 +233,10 @@ Last.fm и MusicBrainz для рекомендаций **не** подключа
 
 | Приоритет | Задача | Суть |
 |---|---|---|
-| **1** | RELEASE-RECOMMENDATION-13 deploy на S1 | На Server: backup `dist` → `git pull` до release SHA → `VITE_SEARCH_SEED_PLAYBACK=true` `npm run build` → staging swap → smoke. Откат = вернуть backup dist. **Без** restart backend/Caddy/AD. Реальный Yandex playback — только владелец. |
-| **2** | RADIO-08 | Убрать нерелевантные и повторяющиеся треки волны/свайпов на уровне ранжирования ядра. |
-| **3** | MEDIA-REMOTE-02 | Проверить физические кнопки руля на Android-магнитоле. |
+| **1** | LIBRARY-UX-03A/04 commit/push/deploy | «Свайпы» = liked inbox + review UX-04 (deferred queue removal, expand race, partial like, bootstrap 409). На KOMPUTER готово **без** commit. Дождаться решения владельца. |
+| **2** | RELEASE / S1 sync | Production baseline `26e056f`; frontend deploy на S1 только с Server. **Без** restart backend/Caddy/AD без задачи. |
+| **3** | RADIO-08 | Убрать нерелевантные и повторяющиеся треки волны/свайпов на уровне ранжирования ядра. |
+| **4** | MEDIA-REMOTE-02 | Проверить физические кнопки руля на Android-магнитоле. |
 
 Не начинать RADIO-08 до закрытия пользовательской проверки RELEASE-13. Car Mode / VK / Zaycev — только по отдельному решению.
 

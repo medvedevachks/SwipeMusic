@@ -351,6 +351,11 @@ test('swipe like writes canonical state and source history, not a second like', 
     assert.equal(calls.liked.length, 1)
     assert.equal(calls.liked[0]?.liked, true)
     assert.equal(useCanonicalLibraryStore.getState().itemsById.can_x?.state.liked, true)
+    assert.deepEqual(useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds, [
+      'sys_swipes',
+    ])
+    assert.equal(calls.assign.length, 1)
+    assert.equal(calls.assign[0]?.catalogId, 'sys_swipes')
     assert.equal(getCollectionEngine().getTrack(track.id)?.liked ?? false, false)
     assert.equal(useCollectionStore.getState().likedTracks.length, 0)
     const history = useCollectionStore.getState().history
@@ -362,6 +367,7 @@ test('swipe like writes canonical state and source history, not a second like', 
     assert.equal(again.kind, 'applied')
     assert.equal(await again.saved, true)
     assert.equal(calls.liked.length, 1)
+    assert.equal(calls.assign.length, 1)
     assert.equal(useCollectionStore.getState().history.length, 1)
     const unliked = await likeSourceTrack(track, false)
     assert.equal(unliked?.state.liked, false)
@@ -606,6 +612,172 @@ test('legacy library-state still hydrates source compatibility state', () => {
   assert.equal(useCollectionStore.getState().history[0]?.track.id, 'spotify:track-x')
   assert.equal(Object.keys(useCanonicalLibraryStore.getState().itemsById).length, 0)
   resetRuntime()
+})
+
+test('swipe skip does not add to sys_swipes inbox', () => {
+  resetRuntime()
+  arm()
+  const track = sourceTrack('yandex-music', '101', 'Город')
+  const calls = installRemote({
+    'yandex-music:101': identityFrom('can_x', [track]),
+  })
+  const result = classifySwipeTrack(track, 'skip')
+  assert.equal(result.kind, 'applied')
+  assert.equal(result.action, 'skip')
+  assert.equal(calls.assign.length, 0)
+  assert.equal(calls.liked.length, 0)
+  assert.equal(useCollectionStore.getState().history[0]?.action, 'skip')
+  assert.equal(getCollectionEngine().getTrack(track.id)?.skipped ?? 0, 1)
+  assert.equal(useCanonicalLibraryStore.getState().itemsById.can_x, undefined)
+  resetRuntime()
+})
+
+test('categorize removes sys_swipes membership and keeps liked', async () => {
+  resetRuntime()
+  arm()
+  const track = sourceTrack('yandex-music', '101', 'Город')
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [
+    canonicalItem(
+      'can_x',
+      'Город',
+      [sourceCopy('yandex-music', '101', 'can_x', 'Город')],
+      true,
+      ['sys_swipes'],
+    ),
+  ])
+  const calls = installRemote({
+    'yandex-music:101': identityFrom('can_x', [track]),
+  })
+  const saved = await commitCatalogChoice(track, 'cat_car', {
+    id: 'cat_car',
+    name: 'В машину',
+    icon: 'car',
+    color: '#2563eb',
+    description: '',
+    createdAt: NOW,
+    updatedAt: NOW,
+    sortOrder: 0,
+    favorite: false,
+    system: false,
+  })
+  assert.equal(saved, true)
+  assert.deepEqual(calls.assign, [{ catalogId: 'cat_car', canonicalTrackId: 'can_x' }])
+  assert.deepEqual(calls.unassign, [
+    { catalogId: 'sys_swipes', canonicalTrackId: 'can_x' },
+  ])
+  const stored = useCanonicalLibraryStore.getState().itemsById.can_x
+  assert.deepEqual(stored?.catalogIds, ['cat_car'])
+  assert.equal(stored?.state.liked, true)
+  assert.equal(useCollectionStore.getState().history[0]?.action, 'categorize')
+  const again = await commitCatalogChoice(track, 'cat_car')
+  assert.equal(again, true)
+  assert.equal(calls.assign.length, 1)
+  assert.equal(useCollectionStore.getState().history.length, 1)
+  resetRuntime()
+})
+
+test('like keeps liked when inbox assign fails and retry completes inbox', async () => {
+  resetRuntime()
+  arm()
+  const track = sourceTrack('yandex-music', '101', 'Город')
+  let assignFails = true
+  const calls = installRemote({
+    'yandex-music:101': identityFrom('can_x', [track]),
+  })
+  setCanonicalRemote({
+    ensureIdentity: async (snapshot) => {
+      calls.identity.push(snapshot)
+      return identityFrom('can_x', [track])
+    },
+    patchCanonicalLiked: async (id, liked) => {
+      calls.liked.push({ id, liked })
+      const current = useCanonicalLibraryStore.getState().itemsById[id]
+      if (!current) {
+        useCanonicalLibraryStore.getState().absorbIdentity(identityFrom('can_x', [track]))
+      }
+      const item = useCanonicalLibraryStore.getState().itemsById[id]!
+      const next = {
+        ...item,
+        state: {
+          ...item.state,
+          liked,
+          likedAt: liked ? NOW : null,
+        },
+      }
+      useCanonicalLibraryStore.getState().upsertItem(next)
+      return { item: next }
+    },
+    assignCanonical: async (catalogId, canonicalTrackId) => {
+      calls.assign.push({ catalogId, canonicalTrackId })
+      if (assignFails) {
+        throw new LibraryHttpError(500)
+      }
+      return {
+        membership: {
+          catalogId,
+          canonicalTrackId,
+          createdAt: NOW,
+        },
+      }
+    },
+    unassignCanonical: async (catalogId, canonicalTrackId) => {
+      calls.unassign.push({ catalogId, canonicalTrackId })
+    },
+  })
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => new Response(null, { status: 204 })) as typeof fetch
+  try {
+    const first = classifySwipeTrack(track, 'like')
+    assert.equal(await first.saved, false)
+    assert.equal(useCanonicalLibraryStore.getState().itemsById.can_x?.state.liked, true)
+    assert.deepEqual(useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds, [])
+    assert.equal(useCollectionStore.getState().history.length, 1)
+    assignFails = false
+    const retry = classifySwipeTrack(track, 'like')
+    assert.equal(await retry.saved, true)
+    assert.equal(calls.liked.length, 1)
+    assert.equal(useCollectionStore.getState().history.length, 1)
+    assert.deepEqual(useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds, [
+      'sys_swipes',
+    ])
+  } finally {
+    globalThis.fetch = originalFetch
+    resetRuntime()
+  }
+})
+
+test('like does not push already organized track into sys_swipes', async () => {
+  resetRuntime()
+  arm()
+  const track = sourceTrack('yandex-music', '101', 'Город')
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [
+    canonicalItem(
+      'can_x',
+      'Город',
+      [sourceCopy('yandex-music', '101', 'can_x', 'Город')],
+      false,
+      ['cat_car'],
+    ),
+  ])
+  const calls = installRemote({
+    'yandex-music:101': identityFrom('can_x', [track]),
+  })
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => new Response(null, { status: 204 })) as typeof fetch
+  try {
+    const result = classifySwipeTrack(track, 'like')
+    assert.equal(await result.saved, true)
+    assert.equal(calls.liked.length, 1)
+    assert.equal(calls.assign.length, 0)
+    assert.deepEqual(
+      useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds,
+      ['cat_car'],
+    )
+    assert.equal(useCanonicalLibraryStore.getState().itemsById.can_x?.state.liked, true)
+  } finally {
+    globalThis.fetch = originalFetch
+    resetRuntime()
+  }
 })
 
 test('unauthorized canonical save uses the existing auth failure path', async () => {

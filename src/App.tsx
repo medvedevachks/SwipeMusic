@@ -9,6 +9,7 @@ import MainLayout from './layouts/MainLayout'
 import CatalogDetail from './pages/CatalogDetail'
 import Home from './pages/Home'
 import Library from './pages/Library'
+import LibraryFolder from './pages/LibraryFolder'
 import Login from './pages/Login'
 import Profile from './pages/Profile'
 import QueuePage from './pages/Queue'
@@ -34,6 +35,15 @@ function App() {
             <Route index element={<Home />} />
             <Route path="search" element={<Search />} />
             <Route path="library" element={<Library />} />
+            <Route path="library/swipes" element={<LibraryFolder folderId="swipes" />} />
+            <Route
+              path="library/favorites"
+              element={<LibraryFolder folderId="favorites" />}
+            />
+            <Route
+              path="library/my-music"
+              element={<LibraryFolder folderId="my-music" />}
+            />
             <Route path="library/catalogs/:catalogId" element={<CatalogDetail />} />
             <Route path="queue" element={<QueuePage />} />
             <Route path="profile" element={<Profile />} />

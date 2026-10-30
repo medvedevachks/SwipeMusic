@@ -1,5 +1,6 @@
 import { classifyPlaybackSignal } from '../playbackAnalytics/classifySignal.ts'
 import { PLAYBACK_ANALYTICS_LIMITS, PLAYBACK_EVENT, PLAYBACK_REASON } from '../playbackAnalytics/types.ts'
+import { SYS_SWIPES_ID } from '../catalogs/systemFolders.ts'
 import { TASTE_LIMITS, TASTE_WEIGHTS } from './weights.ts'
 import type {
   TasteActivity,
@@ -93,6 +94,10 @@ export function buildUserTasteProfile(
       }
     }
     for (const catalogId of item.catalogIds) {
+      // sys_swipes — накопитель лайков, не отдельный вкусовой каталог и не второй лайк.
+      if (catalogId === SYS_SWIPES_ID) {
+        continue
+      }
       const keys = catalogTracks.get(catalogId) ?? new Set<string>()
       keys.add(keyId(bucket.key))
       catalogTracks.set(catalogId, keys)
@@ -161,7 +166,7 @@ export function buildUserTasteProfile(
     } else if (entry.action === 'skip') {
       bucket.historySkipped += 1
     }
-    if (entry.catalogId) {
+    if (entry.catalogId && entry.catalogId !== SYS_SWIPES_ID) {
       const keys = catalogTracks.get(entry.catalogId) ?? new Set<string>()
       keys.add(keyId(bucket.key))
       catalogTracks.set(entry.catalogId, keys)

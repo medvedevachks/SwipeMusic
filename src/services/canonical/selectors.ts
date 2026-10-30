@@ -1,6 +1,7 @@
 import type { CanonicalLibraryItem } from '../../types/canonical.ts'
 import type { TrackMeta } from '../../types/trackMeta.ts'
 import type { Track } from '../../types/track.ts'
+import { isDemoSourceId } from '../../sources/demoSource.ts'
 import { sourceTrackKeyOf } from './mapCanonical.ts'
 
 export type CanonicalLookup = {
@@ -18,6 +19,27 @@ export function likedCanonicalItems(
   items: readonly CanonicalLibraryItem[],
 ): CanonicalLibraryItem[] {
   return items.filter((item) => item.state.liked).sort(byTitle)
+}
+
+/** Первая не-demo копия → Track для плеера / assign. */
+export function preferredTrackFromCanonical(
+  item: CanonicalLibraryItem,
+): Track | null {
+  const copy =
+    item.copies.find((row) => !isDemoSourceId(row.sourceId)) ?? item.copies[0]
+  if (!copy) {
+    return null
+  }
+  return {
+    id: copy.sourceTrackKey,
+    sourceId: copy.sourceId,
+    externalId: copy.externalId,
+    title: copy.title,
+    artist: copy.artist,
+    album: copy.album ?? undefined,
+    durationMs: copy.durationMs ?? undefined,
+    coverUrl: copy.artworkUrl ?? undefined,
+  }
 }
 
 export function canonicalTracksInCatalog(
