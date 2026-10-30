@@ -214,3 +214,212 @@ test('classic remove of non-current still works without stopping current', () =>
     ['a', 'c'],
   )
 })
+
+const PLAYLIST = {
+  type: 'playlist' as const,
+  id: 'cat_party',
+  title: 'Вечеринка',
+}
+
+/** Math.random → 0 даёт identity playOrder после pin current в setShuffleMode. */
+function enableDeterministicShuffle(queue: PlaybackQueue): void {
+  const original = Math.random
+  Math.random = () => 0
+  try {
+    queue.setShuffleMode('ON')
+  } finally {
+    Math.random = original
+  }
+}
+
+test('Shuffle ON expand keeps planned Next (A→C→B + D → Next stays C)', () => {
+  const queue = new PlaybackQueue()
+  // items в порядке A,C,B → identity shuffle сохраняет A→C→B.
+  queue.setQueue([track('a'), track('c'), track('b')], 0, PLAYLIST)
+  enableDeterministicShuffle(queue)
+  queue.setRepeatMode('ALL')
+  assert.equal(queue.current()?.id, 'a')
+  assert.equal(queue.peekNext()?.id, 'c')
+  const historyBefore = queue.getSnapshot().history
+
+  const ok = queue.replacePlaylistItemsPreservingPlayback(
+    [track('a'), track('b'), track('c'), track('d')],
+    { type: 'playlist', id: PLAYLIST.id },
+  )
+  assert.equal(ok, true)
+  const snap = queue.getSnapshot()
+  assert.equal(snap.shuffleMode, 'ON')
+  assert.equal(snap.repeatMode, 'ALL')
+  assert.equal(queue.current()?.id, 'a')
+  assert.equal(queue.peekNext()?.id, 'c')
+  assert.deepEqual(snap.history, historyBefore)
+  // Дальше: C, B, затем новый D.
+  assert.equal(queue.next()?.id, 'c')
+  assert.equal(queue.next()?.id, 'b')
+  assert.equal(queue.next()?.id, 'd')
+})
+
+test('Shuffle ON expand is idempotent for the same track set', () => {
+  const queue = new PlaybackQueue()
+  queue.setQueue([track('a'), track('c'), track('b')], 0, PLAYLIST)
+  enableDeterministicShuffle(queue)
+  const incoming = [track('a'), track('b'), track('c'), track('d')]
+  assert.equal(
+    queue.replacePlaylistItemsPreservingPlayback(incoming, {
+      type: 'playlist',
+      id: PLAYLIST.id,
+    }),
+    true,
+  )
+  const first = queue.getSnapshot()
+  assert.equal(
+    queue.replacePlaylistItemsPreservingPlayback(incoming, {
+      type: 'playlist',
+      id: PLAYLIST.id,
+    }),
+    true,
+  )
+  const second = queue.getSnapshot()
+  assert.deepEqual(
+    second.playOrder.map((index) => second.items[index]?.id),
+    first.playOrder.map((index) => first.items[index]?.id),
+  )
+  assert.equal(second.currentIndex, first.currentIndex)
+  assert.equal(second.playOrderIndex, first.playOrderIndex)
+})
+
+test('Shuffle ON expand drops removed catalog tracks from future order', () => {
+  const queue = new PlaybackQueue()
+  queue.setQueue([track('a'), track('c'), track('b')], 0, PLAYLIST)
+  enableDeterministicShuffle(queue)
+  assert.equal(queue.peekNext()?.id, 'c')
+  assert.equal(
+    queue.replacePlaylistItemsPreservingPlayback(
+      [track('a'), track('b'), track('d')],
+      { type: 'playlist', id: PLAYLIST.id },
+    ),
+    true,
+  )
+  assert.equal(queue.current()?.id, 'a')
+  // C убран из каталога — Next больше не C.
+  assert.equal(queue.peekNext()?.id, 'b')
+  assert.equal(queue.next()?.id, 'b')
+  assert.equal(queue.next()?.id, 'd')
+  assert.equal(
+    queue.getSnapshot().items.some((item) => item.id === 'c'),
+    false,
+  )
+})
+
+test('Shuffle ON expand after Next/Previous keeps current and history cursor', () => {
+  const queue = new PlaybackQueue()
+  queue.setQueue([track('a'), track('c'), track('b')], 0, PLAYLIST)
+  enableDeterministicShuffle(queue)
+  assert.equal(queue.next()?.id, 'c')
+  assert.equal(queue.previous()?.id, 'a')
+  assert.equal(queue.next()?.id, 'c')
+  const before = queue.getSnapshot()
+  assert.equal(
+    queue.replacePlaylistItemsPreservingPlayback(
+      [track('a'), track('b'), track('c'), track('d')],
+      { type: 'playlist', id: PLAYLIST.id },
+    ),
+    true,
+  )
+  const after = queue.getSnapshot()
+  assert.equal(queue.current()?.id, 'c')
+  assert.deepEqual(after.history, before.history)
+  assert.equal(after.historyIndex, before.historyIndex)
+  assert.equal(queue.peekNext()?.id, 'b')
+})
+
+test('Shuffle OFF expand still follows catalog item order', () => {
+  const queue = new PlaybackQueue()
+  queue.setQueue([track('a'), track('b'), track('c')], 1, PLAYLIST)
+  assert.equal(queue.current()?.id, 'b')
+  assert.equal(queue.getSnapshot().shuffleMode, 'OFF')
+  assert.equal(
+    queue.replacePlaylistItemsPreservingPlayback(
+      [track('a'), track('b'), track('c'), track('d')],
+      { type: 'playlist', id: PLAYLIST.id },
+    ),
+    true,
+  )
+  assert.equal(queue.current()?.id, 'b')
+  assert.equal(queue.peekNext()?.id, 'c')
+  assert.equal(queue.getSnapshot().shuffleMode, 'OFF')
+})
+
+test('Shuffle ON expand ignores foreign playlist / search / wave context', () => {
+  const queue = new PlaybackQueue()
+  queue.setQueue([track('a'), track('c'), track('b')], 0, PLAYLIST)
+  enableDeterministicShuffle(queue)
+  queue.setQueue([track('hit')], 0, {
+    type: 'search-seed',
+    query: 'hit',
+    seedTrackId: 'hit',
+  })
+  assert.equal(
+    queue.replacePlaylistItemsPreservingPlayback(
+      [track('a'), track('b'), track('c')],
+      { type: 'playlist', id: PLAYLIST.id },
+    ),
+    false,
+  )
+  assert.equal(queue.current()?.id, 'hit')
+
+  queue.setQueue([track('wave')], 0, {
+    type: 'radio',
+    id: 'my-wave',
+    title: 'Моя волна',
+    origin: 'recommendations',
+  })
+  assert.equal(
+    queue.replacePlaylistItemsPreservingPlayback(
+      [track('a'), track('b')],
+      { type: 'playlist', id: PLAYLIST.id },
+    ),
+    false,
+  )
+  assert.equal(queue.current()?.id, 'wave')
+})
+
+test('Shuffle ON expand keeps Repeat ONE and removed current as pending anchor', () => {
+  const queue = new PlaybackQueue()
+  queue.setQueue([track('a'), track('c'), track('b')], 0, PLAYLIST)
+  enableDeterministicShuffle(queue)
+  queue.setRepeatMode('ONE')
+  assert.equal(
+    queue.replacePlaylistItemsPreservingPlayback([track('c'), track('b')], {
+      type: 'playlist',
+      id: PLAYLIST.id,
+    }),
+    true,
+  )
+  assert.equal(queue.current()?.id, 'a')
+  assert.deepEqual(queue.getPendingRemovalIds(), ['a'])
+  assert.equal(queue.getSnapshot().repeatMode, 'ONE')
+  assert.equal(queue.peekNext()?.id, 'c')
+})
+
+test('Shuffle ON expand appends 100+ new tracks after planned tail', () => {
+  const queue = new PlaybackQueue()
+  queue.setQueue([track('a'), track('c'), track('b')], 0, PLAYLIST)
+  enableDeterministicShuffle(queue)
+  const extras = Array.from({ length: 120 }, (_, index) =>
+    track(`n${index}`),
+  )
+  const incoming = [track('a'), track('b'), track('c'), ...extras]
+  assert.equal(
+    queue.replacePlaylistItemsPreservingPlayback(incoming, {
+      type: 'playlist',
+      id: PLAYLIST.id,
+    }),
+    true,
+  )
+  assert.equal(queue.current()?.id, 'a')
+  assert.equal(queue.next()?.id, 'c')
+  assert.equal(queue.next()?.id, 'b')
+  assert.equal(queue.next()?.id, 'n0')
+  assert.equal(queue.getSnapshot().items.length, 123)
+})

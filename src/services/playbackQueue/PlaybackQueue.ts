@@ -274,17 +274,77 @@ export class PlaybackQueue {
     }
 
     const knownIds = new Set(nextTracks.map((track) => track.id))
-    this.items = nextTracks
     this.sessionTailIds = new Set(
       [...this.sessionTailIds].filter((id) => knownIds.has(id)),
     )
     this.pendingRemovalIds = new Set(
       [...this.pendingRemovalIds].filter((id) => knownIds.has(id)),
     )
-    this.rebuildPlayOrder(nextIndex)
+    // Shuffle ON: не вызывать rebuildPlayOrder — иначе Next переиграется.
+    this.rebindPlayOrderAfterItemReplace(nextTracks, playingId)
     // history / historyIndex / repeat / shuffle / context не сбрасываем.
     this.emit()
     return true
+  }
+
+  /**
+   * После replace items: перепривязать playOrder к новым индексам.
+   * Shuffle OFF — identity как раньше.
+   * Shuffle ON — сохранить уже запланированный порядок (вкл. Next),
+   * новые id добавить после непрослушанного хвоста (или после current).
+   */
+  private rebindPlayOrderAfterItemReplace(
+    nextTracks: Track[],
+    playingId: string,
+  ): void {
+    const nextIndex = nextTracks.findIndex((track) => track.id === playingId)
+    if (nextIndex < 0) {
+      this.items = nextTracks
+      this.rebuildPlayOrder(0)
+      return
+    }
+
+    if (this.shuffleMode !== 'ON') {
+      this.items = nextTracks
+      this.rebuildPlayOrder(nextIndex)
+      return
+    }
+
+    const idToNewIndex = new Map(
+      nextTracks.map((track, index) => [track.id, index] as const),
+    )
+    const seen = new Set<string>()
+    const preservedIds: string[] = []
+    for (const orderIndex of this.playOrder) {
+      const id = this.items[orderIndex]?.id
+      if (!id || !idToNewIndex.has(id) || seen.has(id)) {
+        continue
+      }
+      seen.add(id)
+      preservedIds.push(id)
+    }
+
+    if (!seen.has(playingId)) {
+      preservedIds.unshift(playingId)
+      seen.add(playingId)
+    }
+
+    // Новые — в порядке nextTracks, после всего сохранённого хвоста.
+    const appendedIds: string[] = []
+    for (const track of nextTracks) {
+      if (seen.has(track.id)) {
+        continue
+      }
+      seen.add(track.id)
+      appendedIds.push(track.id)
+    }
+
+    const nextOrderIds = [...preservedIds, ...appendedIds]
+    this.items = nextTracks
+    this.playOrder = nextOrderIds.map((id) => idToNewIndex.get(id)!)
+    this.currentIndex = nextIndex
+    const orderPos = this.playOrder.indexOf(nextIndex)
+    this.playOrderIndex = orderPos >= 0 ? orderPos : 0
   }
 
   append(tracks: Track[]): void {
