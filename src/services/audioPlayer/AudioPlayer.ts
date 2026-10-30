@@ -59,6 +59,14 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
+/** Resolver miss / network — await playTrack должен отклоняться. */
+class PlaybackResolveError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PlaybackResolveError'
+  }
+}
+
 /**
  * Воспроизведение текущего трека.
  * Порядок — только PlaybackQueue; AudioPlayer не владеет очередью.
@@ -377,6 +385,7 @@ export class AudioPlayer {
       }
       if (!resolution) {
         this.adapter.pause()
+        const message = resolver.buildUnavailableMessage()
         this.patchState({
           pendingTrack: null,
           activeCandidate: null,
@@ -384,7 +393,7 @@ export class AudioPlayer {
           paused: true,
           loading: false,
           buffering: false,
-          error: resolver.buildUnavailableMessage(),
+          error: message,
         })
         reportPlayback({
           type: 'failed',
@@ -393,7 +402,7 @@ export class AudioPlayer {
           canonicalTrackId: null,
           reason: 'load-failed',
         })
-        return
+        throw new PlaybackResolveError(message)
       }
       playbackUrl = resolution.url
       candidate = resolution.candidate
@@ -401,7 +410,12 @@ export class AudioPlayer {
       if (generation !== this.playGeneration) {
         return
       }
+      if (error instanceof PlaybackResolveError) {
+        throw error
+      }
       this.adapter.pause()
+      const message =
+        error instanceof Error ? error.message : 'Failed to resolve playback'
       this.patchState({
         pendingTrack: null,
         activeCandidate: null,
@@ -409,10 +423,7 @@ export class AudioPlayer {
         paused: true,
         loading: false,
         buffering: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : 'Failed to resolve playback',
+        error: message,
       })
       reportPlayback({
         type: 'failed',
@@ -421,7 +432,7 @@ export class AudioPlayer {
         canonicalTrackId: null,
         reason: 'load-failed',
       })
-      return
+      throw error instanceof Error ? error : new Error(message)
     }
 
     await pausePromise.catch(() => undefined)

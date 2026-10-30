@@ -6,7 +6,10 @@ import {
   resetAuthSessionEpochForTests,
 } from '../auth/sessionEpoch.ts'
 import { LibraryHttpError } from './client.ts'
-import { runLibraryMutation } from './mutations.ts'
+import {
+  resetLibraryMutationQueuesForTests,
+  runLibraryMutation,
+} from './mutations.ts'
 import {
   SAVE_FAILED_MESSAGE,
   useLibraryPersistenceStore,
@@ -28,7 +31,11 @@ function deferred<T>(): {
 
 function reset(): void {
   resetAuthSessionEpochForTests()
-  useAuthStore.setState({ user: { id: 'user-b', email: 'b@test' } as never, status: 'authenticated' })
+  resetLibraryMutationQueuesForTests()
+  useAuthStore.setState({
+    user: { id: 'user-b', email: 'b@test' } as never,
+    status: 'authenticated',
+  })
   useLibraryPersistenceStore.setState({
     armed: true,
     status: 'ready',
@@ -130,4 +137,85 @@ test('stale finally does not clear B saving when A was last pending count', asyn
   assert.equal(await pendingA, null)
   // A finally не должен перевести saving → ready за B.
   assert.equal(useLibraryPersistenceStore.getState().status, 'saving')
+})
+
+test('A hung save then B completes to ready; late A does not deadlock saving', async () => {
+  reset()
+  bindAuthSessionEpoch('user-a')
+  useLibraryPersistenceStore.setState({
+    armed: true,
+    status: 'ready',
+    message: null,
+  })
+  const gateA = deferred<'a'>()
+  const pendingA = runLibraryMutation(async () => {
+    await gateA.promise
+    return 'a' as const
+  })
+  assert.equal(useLibraryPersistenceStore.getState().status, 'saving')
+
+  bindAuthSessionEpoch('user-b')
+  useAuthStore.setState({
+    user: { id: 'user-b', email: 'b@test' } as never,
+    status: 'authenticated',
+  })
+  useLibraryPersistenceStore.setState({
+    armed: true,
+    status: 'ready',
+    message: null,
+  })
+
+  const resultB = await runLibraryMutation(async () => 'b' as const)
+  assert.equal(resultB, 'b')
+  assert.equal(useLibraryPersistenceStore.getState().status, 'ready')
+  assert.equal(useLibraryPersistenceStore.getState().message, null)
+
+  gateA.resolve('a')
+  assert.equal(await pendingA, null)
+  assert.equal(useLibraryPersistenceStore.getState().status, 'ready')
+  assert.equal(useAuthStore.getState().user?.id, 'user-b')
+  assert.notEqual(
+    useLibraryPersistenceStore.getState().message,
+    SAVE_FAILED_MESSAGE,
+  )
+})
+
+test('A completes after B while B still has parallel saves; B reaches ready', async () => {
+  reset()
+  bindAuthSessionEpoch('user-a')
+  const gateA = deferred<'a'>()
+  const pendingA = runLibraryMutation(async () => {
+    await gateA.promise
+    return 'a' as const
+  })
+
+  bindAuthSessionEpoch('user-b')
+  useLibraryPersistenceStore.setState({
+    armed: true,
+    status: 'ready',
+    message: null,
+  })
+  const gateB1 = deferred<'b1'>()
+  const gateB2 = deferred<'b2'>()
+  const pendingB1 = runLibraryMutation(async () => {
+    await gateB1.promise
+    return 'b1' as const
+  })
+  const pendingB2 = runLibraryMutation(async () => {
+    await gateB2.promise
+    return 'b2' as const
+  })
+  assert.equal(useLibraryPersistenceStore.getState().status, 'saving')
+
+  gateA.resolve('a')
+  assert.equal(await pendingA, null)
+  assert.equal(useLibraryPersistenceStore.getState().status, 'saving')
+
+  gateB1.resolve('b1')
+  assert.equal(await pendingB1, 'b1')
+  assert.equal(useLibraryPersistenceStore.getState().status, 'saving')
+
+  gateB2.resolve('b2')
+  assert.equal(await pendingB2, 'b2')
+  assert.equal(useLibraryPersistenceStore.getState().status, 'ready')
 })

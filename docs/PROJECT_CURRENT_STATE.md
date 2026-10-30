@@ -5,10 +5,10 @@
 
 | Поле | Значение |
 |---|---|
-| Дата снимка | 2026-10-30 (UX-10 swipe UP + inbox→Home sorting) |
+| Дата снимка | 2026-10-30 (UX-10E playback & persistence review) |
 | Канонический репозиторий | https://github.com/medvedevachks/SwipeMusic |
-| Ветка снимка | `feature/deploy-windows-01` |
-| Проверенный HEAD | UX-10 локально (BUG1 UP/next + BUG2 `/library/swipes` → Home sorting); shuffle hotfix уже в ветке `3f3d27e`. Production S1 — без deploy по этой задаче. |
+| Ветка снимка | `fix/ux-10a-left-up-race` → PR #2 в `feature/deploy-windows-01` |
+| Проверенный HEAD | UX-10E на `fix/ux-10a-left-up-race` (session mutation buckets + resolver fail ≠ played + inbox play generation). Production S1 — без deploy. |
 | Исторический upstream | https://github.com/r-sh-galimov/SwipeMusic |
 
 **Легенда источников фактов**
@@ -233,7 +233,7 @@ Last.fm и MusicBrainz для рекомендаций **не** подключа
 
 | Приоритет | Задача | Суть |
 |---|---|---|
-| **1** | UX-10 review → commit/push | BUG1 (UP/next + like semantics) и BUG2 (Play inbox → Home sorting, categorize без обрыва звука) готовы локально. Push/deploy только по отдельному разрешению. |
+| **1** | UX-10 / PR #2 merge | UX-10…UX-10E на `fix/ux-10a-left-up-race` (PR #2). Merge в `feature/deploy-windows-01` и S1 deploy — только по отдельному разрешению. |
 | **2** | LIBRARY-UX / S1 deploy | Inbox + compact `/library` на ветке; production deploy только после PASS review. **S1 не трогать** без задачи. |
 | **3** | RELEASE / S1 sync | Frontend deploy на S1 только с Server. **Без** restart backend/Caddy/AD без задачи. |
 | **4** | RADIO-08 | Убрать нерелевантные и повторяющиеся треки волны/свайпов на уровне ранжирования ядра. |

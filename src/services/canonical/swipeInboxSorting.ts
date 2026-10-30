@@ -26,14 +26,25 @@ export type StartSwipeInboxSortingInput = {
   items?: readonly CanonicalLibraryItem[]
   playTrack?: (track: Track) => Promise<void>
   /** Сброс leftover search mode колоды; по умолчанию swipeDeckSessionStore. */
-  resetDeckSession?: () => void
+  resetDeckSession?: () => void | Promise<void>
 }
 
+/**
+ * `played` — очередь inbox принята и play intent запущен (или autoplay block).
+ * Не гарантирует audible start; ошибка resolver → `error`.
+ */
 export type StartSwipeInboxSortingResult =
   | { status: 'played'; tracks: Track[]; startIndex: number }
   | { status: 'empty'; message: string }
   | { status: 'unavailable'; message: string }
   | { status: 'error'; message: string }
+
+/** Отмена устаревшего inbox Play после нового пользовательского запуска. */
+let inboxPlayGeneration = 0
+
+export function resetSwipeInboxPlayGenerationForTests(): void {
+  inboxPlayGeneration = 0
+}
 
 export function buildSwipeInboxPlaybackTracks(
   items: readonly CanonicalLibraryItem[],
@@ -60,6 +71,7 @@ export function buildSwipeInboxPlaybackTracks(
 export async function startSwipeInboxSorting(
   input: StartSwipeInboxSortingInput = {},
 ): Promise<StartSwipeInboxSortingResult> {
+  const generation = ++inboxPlayGeneration
   try {
     const sourceItems =
       input.items ??
@@ -79,10 +91,25 @@ export async function startSwipeInboxSorting(
       startIndex = index
     }
 
-    // Явный inbox Play: сбросить leftover search mode колоды Home.
+    const startTrack = tracks[startIndex]
+    if (!startTrack) {
+      return { status: 'unavailable', message: SWIPE_INBOX_UNAVAILABLE_MESSAGE }
+    }
+
+    // Очередь — до любых await, чтобы поздний import не гонялся с Wave/Catalog.
+    clearRecommendationSession()
+    if (generation !== inboxPlayGeneration) {
+      return { status: 'error', message: 'Не удалось начать воспроизведение.' }
+    }
+    getPlaybackQueue().setQueue(tracks, startIndex, {
+      type: 'playlist',
+      id: SYS_SWIPES_ID,
+      title: 'Свайпы',
+    })
+
     try {
       if (input.resetDeckSession) {
-        input.resetDeckSession()
+        await input.resetDeckSession()
       } else {
         const { useSwipeDeckSessionStore } = await import(
           '../../store/swipeDeckSessionStore.ts'
@@ -90,19 +117,10 @@ export async function startSwipeInboxSorting(
         useSwipeDeckSessionStore.getState().resetToCatalog()
       }
     } catch {
-      // Unit env без browser module graph — очередь всё равно выставляется.
+      // Unit env без browser module graph — очередь уже выставлена.
     }
-    clearRecommendationSession()
-    const queue = getPlaybackQueue()
-    queue.setQueue(tracks, startIndex, {
-      type: 'playlist',
-      id: SYS_SWIPES_ID,
-      title: 'Свайпы',
-    })
-
-    const startTrack = tracks[startIndex]
-    if (!startTrack) {
-      return { status: 'unavailable', message: SWIPE_INBOX_UNAVAILABLE_MESSAGE }
+    if (generation !== inboxPlayGeneration) {
+      return { status: 'error', message: 'Не удалось начать воспроизведение.' }
     }
 
     const play =
@@ -114,6 +132,9 @@ export async function startSwipeInboxSorting(
     try {
       await play(startTrack)
     } catch (error) {
+      if (generation !== inboxPlayGeneration) {
+        return { status: 'error', message: 'Не удалось начать воспроизведение.' }
+      }
       // Autoplay block: очередь уже выставлена — пользователь нажмёт Play в доке.
       if (
         error instanceof Error &&
@@ -122,10 +143,18 @@ export async function startSwipeInboxSorting(
       ) {
         return { status: 'played', tracks, startIndex }
       }
-      // Неуспешный resolve/play — не маскировать под успешный audible start.
-      return { status: 'error', message: 'Не удалось начать воспроизведение.' }
+      return {
+        status: 'error',
+        message:
+          error instanceof Error && error.message
+            ? error.message
+            : 'Не удалось начать воспроизведение.',
+      }
     }
 
+    if (generation !== inboxPlayGeneration) {
+      return { status: 'error', message: 'Не удалось начать воспроизведение.' }
+    }
     return { status: 'played', tracks, startIndex }
   } catch {
     return { status: 'error', message: 'Не удалось начать воспроизведение.' }

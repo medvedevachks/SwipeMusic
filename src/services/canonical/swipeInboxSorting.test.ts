@@ -16,6 +16,7 @@ import { useCollectionStore } from '../../store/collectionStore.ts'
 import { removeSortedCanonicalFromSwipesQueue } from './swipeInboxQueue.ts'
 import {
   buildSwipeInboxPlaybackTracks,
+  resetSwipeInboxPlayGenerationForTests,
   startSwipeInboxSorting,
 } from './swipeInboxSorting.ts'
 
@@ -174,15 +175,63 @@ test('startSwipeInboxSorting play failure is error not fake audible success', as
   installMemoryLocalStorage()
   resetRecommendationSessionRuntimeForTests()
   resetRecommendationSessionStateForTests()
+  resetSwipeInboxPlayGenerationForTests()
   getPlaybackQueue().clear()
   const result = await startSwipeInboxSorting({
     items: [item('can_a', 'A')],
     playTrack: async () => {
-      throw new Error('provider resolve failed')
+      throw new Error('Track unavailable')
     },
   })
   assert.equal(result.status, 'error')
-  assert.notEqual(result.status, 'played')
+  if (result.status === 'error') {
+    assert.match(result.message, /unavailable|Не удалось/i)
+  }
+  getPlaybackQueue().clear()
+})
+
+test('stale inbox Play does not replace queue after newer launch', async () => {
+  installMemoryLocalStorage()
+  resetRecommendationSessionRuntimeForTests()
+  resetRecommendationSessionStateForTests()
+  resetSwipeInboxPlayGenerationForTests()
+  getPlaybackQueue().clear()
+
+  let releaseSlowReset!: () => void
+  const slowReset = new Promise<void>((resolve) => {
+    releaseSlowReset = resolve
+  })
+  let firstPlayCalls = 0
+
+  const first = startSwipeInboxSorting({
+    items: [item('can_a', 'A'), item('can_b', 'B')],
+    startCanonicalTrackId: 'can_a',
+    resetDeckSession: async () => {
+      await slowReset
+    },
+    playTrack: async () => {
+      firstPlayCalls += 1
+    },
+  })
+
+  // Дать первому вызову дойти до await resetDeckSession (после setQueue A).
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.equal(getPlaybackQueue().current()?.id, 'yandex-music:can_a')
+
+  const second = await startSwipeInboxSorting({
+    items: [item('can_a', 'A'), item('can_b', 'B')],
+    startCanonicalTrackId: 'can_b',
+    playTrack: async () => undefined,
+  })
+  assert.equal(second.status, 'played')
+  assert.equal(getPlaybackQueue().current()?.id, 'yandex-music:can_b')
+
+  releaseSlowReset()
+  const firstResult = await first
+  assert.equal(firstResult.status, 'error')
+  assert.equal(firstPlayCalls, 0)
+  assert.equal(getPlaybackQueue().current()?.id, 'yandex-music:can_b')
   getPlaybackQueue().clear()
 })
 

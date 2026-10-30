@@ -22,8 +22,31 @@ import {
   useLibraryPersistenceStore,
 } from './statusStore.ts'
 
-let chain: Promise<void> = Promise.resolve()
-let pending = 0
+/**
+ * Счётчик и цепочка мутаций — на поколение auth-сессии.
+ * Иначе finally A оставляет pending>0 и B зависает в saving.
+ */
+type SessionMutationBucket = {
+  pending: number
+  chain: Promise<void>
+}
+
+const buckets = new Map<number, SessionMutationBucket>()
+
+function bucketFor(generation: number): SessionMutationBucket {
+  let bucket = buckets.get(generation)
+  if (!bucket) {
+    bucket = { pending: 0, chain: Promise.resolve() }
+    buckets.set(generation, bucket)
+  }
+  return bucket
+}
+
+function releaseBucketIfIdle(generation: number, bucket: SessionMutationBucket): void {
+  if (bucket.pending <= 0) {
+    buckets.delete(generation)
+  }
+}
 
 function noteIdleAfterSave(): void {
   const { status } = useLibraryPersistenceStore.getState()
@@ -56,12 +79,18 @@ export function handleLibraryFailure(error: unknown, kind: 'load' | 'save'): voi
   )
 }
 
+/** Сброс для unit-тестов. */
+export function resetLibraryMutationQueuesForTests(): void {
+  buckets.clear()
+}
+
 export async function runLibraryMutation<T>(task: () => Promise<T>): Promise<T | null> {
   if (!isLibraryPersistenceArmed()) {
     return null
   }
   const session = captureAuthSession()
-  pending += 1
+  const bucket = bucketFor(session.generation)
+  bucket.pending += 1
   if (useLibraryPersistenceStore.getState().status !== 'loading') {
     useLibraryPersistenceStore.getState().setStatus('saving', null)
   }
@@ -82,9 +111,13 @@ export async function runLibraryMutation<T>(task: () => Promise<T>): Promise<T |
     applyFailureIfCurrent(session, error, 'save')
     return null
   } finally {
-    pending -= 1
-    // Старый finally A не сбрасывает saving/ready пользователя B.
-    if (pending === 0 && isAuthSessionCurrent(session)) {
+    bucket.pending -= 1
+    const idle = bucket.pending <= 0
+    if (idle) {
+      releaseBucketIfIdle(session.generation, bucket)
+    }
+    // Только текущая сессия и её нулевой счётчик → ready.
+    if (idle && isAuthSessionCurrent(session)) {
       noteIdleAfterSave()
     }
   }
@@ -95,7 +128,8 @@ function enqueue(task: () => Promise<void>): void {
     return
   }
   const session = captureAuthSession()
-  pending += 1
+  const bucket = bucketFor(session.generation)
+  bucket.pending += 1
   if (useLibraryPersistenceStore.getState().status !== 'loading') {
     useLibraryPersistenceStore.getState().setStatus('saving', null)
   }
@@ -110,13 +144,18 @@ function enqueue(task: () => Promise<void>): void {
         applyFailureIfCurrent(session, error, 'save')
       }
     } finally {
-      pending -= 1
-      if (pending === 0 && isAuthSessionCurrent(session)) {
+      bucket.pending -= 1
+      const idle = bucket.pending <= 0
+      if (idle) {
+        releaseBucketIfIdle(session.generation, bucket)
+      }
+      if (idle && isAuthSessionCurrent(session)) {
         noteIdleAfterSave()
       }
     }
   }
-  chain = chain.then(run, run)
+  // Сериализация только внутри поколения; цепочка A не блокирует B.
+  bucket.chain = bucket.chain.then(run, run)
 }
 
 export function persistCategory(category: Category, mode: 'create' | 'update'): void {
