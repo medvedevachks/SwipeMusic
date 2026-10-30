@@ -1,8 +1,20 @@
 export {
   recommendNext,
+  recommendNextLegacy,
   recommendationStrategyFingerprint,
   sameRecommendationStrategy,
 } from './engine.ts'
+export {
+  pickContinuousRandom,
+  CONTINUOUS_RANDOM_STRATEGY,
+  CONTINUOUS_DISCOVERY_QUERIES,
+} from './continuousRandomV1.ts'
+export {
+  invalidateContinuousBuffer,
+  resetContinuousBufferForTests,
+  getContinuousBufferSize,
+  CONTINUOUS_BUFFER_TARGET,
+} from './continuousBuffer.ts'
 export { createRecommendationContinuationProvider } from './continuationBridge.ts'
 export type { RecommendationContinuationDeps } from './continuationBridge.ts'
 export {
@@ -37,6 +49,10 @@ export {
   markRecommendationExhausted,
   clearRecommendationExhausted,
   isRecommendationExhausted,
+  noteRecommendationMiss,
+  takeRecommendationMiss,
+  peekRecommendationMiss,
+  clearRecommendationMiss,
   resetRecommendationSessionStateForTests,
 } from './sessionState.ts'
 export type { ActiveRecommendationMode } from './sessionState.ts'

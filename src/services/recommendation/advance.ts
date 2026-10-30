@@ -7,6 +7,7 @@ import { noteSearchPlaybackEvent } from '../continuation/searchPlaybackDebug.ts'
 import { isContinuationCandidateAvailable } from '../continuation/types.ts'
 import type { PlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
 import type { RecommendationMode } from './types.ts'
+import { takeContinuousBufferedTrack } from './continuousBuffer.ts'
 import { getActiveRecommendationMode } from './sessionState.ts'
 
 /** Контексты, где Next/ended/жест идут через Recommendation Engine. */
@@ -112,6 +113,36 @@ export function consumeRecommendationAdvance(
       return track
     }
     session.takePrepared()
+  }
+
+  // Prefetch buffer continuous-random-v1 (metadata only).
+  const currentId = queue.current()?.id ?? null
+  const buffered = takeContinuousBufferedTrack(
+    new Set(
+      [
+        currentId,
+        ...queue.getItems().map((item) => item.id),
+      ].filter((id): id is string => Boolean(id)),
+    ),
+  )
+  if (
+    buffered &&
+    currentId &&
+    isContinuationCandidateAvailable(buffered, currentId, queue.getItems())
+  ) {
+    queue.insertNext(buffered)
+    const track = queue.next(fromEnded ? { fromEnded: true } : undefined)
+    noteSearchFlowEvent({
+      source: 'consumeRecommendationAdvance',
+      contextBefore: context.type,
+      contextAfter: queue.getPlaybackContext().type,
+      queueLengthAfter: queue.getItems().length,
+      currentIndex: queue.getSnapshot().currentIndex,
+      trackId: track?.id ?? null,
+      nextSource: 'continuation',
+      detail: fromEnded ? 'advance-buffer:ended' : 'advance-buffer:next',
+    })
+    return track
   }
 
   if (repeatMode === 'ALL') {

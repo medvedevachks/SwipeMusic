@@ -18,6 +18,7 @@ import {
   clearRecommendationExhausted,
   isRecommendationExhausted,
   markRecommendationExhausted,
+  takeRecommendationMiss,
 } from '../recommendation/sessionState.ts'
 import {
   getRecommendationAdvanceEpoch,
@@ -923,6 +924,21 @@ export class AudioPlayer {
       const lastTrack =
         this.state.currentTrack ?? this.state.pendingTrack ?? getPlaybackQueue().current()
       const liveIndex = getPlaybackQueue().getSnapshot().currentIndex
+      const miss = takeRecommendationMiss()
+      if (miss?.soft) {
+        // Временный miss: не permanent exhausted — UP/Retry можно повторить.
+        this.patchState({
+          currentTrack: lastTrack,
+          pendingTrack: null,
+          queueIndex: liveIndex >= 0 ? liveIndex : this.state.queueIndex,
+          playing: false,
+          paused: true,
+          loading: false,
+          buffering: false,
+          error: miss.message,
+        })
+        return
+      }
       markRecommendationExhausted()
       this.stop()
       this.patchState({
@@ -932,6 +948,7 @@ export class AudioPlayer {
         queueIndex: liveIndex >= 0 ? liveIndex : this.state.queueIndex,
         playing: false,
         paused: true,
+        error: miss?.message ?? null,
       })
       return
     }

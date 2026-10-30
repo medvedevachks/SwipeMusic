@@ -25,6 +25,21 @@ async function findByArtist(
   return page.tracks.filter((track) => track.artist.toLowerCase().includes(needle))
 }
 
+async function resolveCandidatesPlayable(
+  adapter: MusicSourceAdapter,
+  track: Track,
+): Promise<boolean> {
+  if (!adapter.getPlaybackCandidates) {
+    return false
+  }
+  try {
+    const candidates = await adapter.getPlaybackCandidates(track)
+    return candidates.some((candidate) => candidate.available && Boolean(candidate.url))
+  } catch {
+    return false
+  }
+}
+
 export async function probeTrackPlayable(track: Track, signal: AbortSignal): Promise<boolean> {
   if (signal.aborted || isDemoSourceId(track.sourceId)) {
     return false
@@ -36,13 +51,16 @@ export async function probeTrackPlayable(track: Track, signal: AbortSignal): Pro
   }
   if (adapter.checkTrackAvailability) {
     const probe = await adapter.checkTrackAvailability(track)
-    return probe.status === PLAYBACK_AVAILABILITY_STATUS.PLAYABLE
-  }
-  if (!adapter.getPlaybackCandidates) {
+    if (probe.status === PLAYBACK_AVAILABILITY_STATUS.PLAYABLE) {
+      return true
+    }
+    // UNKNOWN ≠ UNAVAILABLE: дополнительная проверка через candidates/resolver path.
+    if (probe.status === PLAYBACK_AVAILABILITY_STATUS.UNKNOWN) {
+      return resolveCandidatesPlayable(adapter, track)
+    }
     return false
   }
-  const candidates = await adapter.getPlaybackCandidates(track)
-  return candidates.some((candidate) => candidate.available && Boolean(candidate.url))
+  return resolveCandidatesPlayable(adapter, track)
 }
 
 export async function createLiveRadioPort(): Promise<RadioSearchPort> {
@@ -77,6 +95,18 @@ export async function createLiveRadioPort(): Promise<RadioSearchPort> {
         return Promise.resolve([])
       }
       return findByArtist(adapter, query, signal)
+    },
+    fetchFeed: async (sourceId: string, signal: AbortSignal) => {
+      const adapter = sources.find((item) => item.id === sourceId)
+      if (!adapter) {
+        return []
+      }
+      try {
+        const page = await adapter.fetchTracks({ limit: 40, signal })
+        return page.tracks
+      } catch {
+        return []
+      }
     },
     isPlayable: probeTrackPlayable,
   }

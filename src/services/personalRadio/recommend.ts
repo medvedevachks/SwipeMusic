@@ -49,6 +49,8 @@ export type RadioSearchPort = {
   sources: readonly { id: string }[]
   search: (sourceId: string, query: string, signal: AbortSignal) => Promise<Track[]>
   isPlayable: (track: Track, signal: AbortSignal) => Promise<boolean>
+  /** Browse/library лента для continuous-random-v1 (опционально). */
+  fetchFeed?: (sourceId: string, signal: AbortSignal) => Promise<Track[]>
 }
 
 export type RadioPlan = {

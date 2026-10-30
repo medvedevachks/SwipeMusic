@@ -14,6 +14,7 @@ import { mapCanonicalContinuationLibrary } from '../continuation/libraryContinua
 import { isSearchFlowHarnessEnabled } from '../continuation/searchFlowHarnessFlag.ts'
 import { getPlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
 import { loadSessionTasteProfile } from '../taste/loadSessionTasteProfile.ts'
+import { invalidateContinuousBuffer } from './continuousBuffer.ts'
 import { recommendNext } from './engine.ts'
 import {
   getRecommendationAdvanceEpoch,
@@ -97,6 +98,7 @@ export function clearRecommendationSession(): void {
   setActiveRecommendationMode(null)
   // Inbox/Catalog поверх Wave/Search: inflight Next/ended не должен stop()/playTrack.
   invalidateRecommendationAdvance()
+  invalidateContinuousBuffer('clear-session')
 }
 
 export function resetRecommendationSessionRuntimeForTests(): void {
@@ -145,6 +147,7 @@ export function commitRecommendationSeed(input: {
 }): void {
   // Новый seed (wave/swipe) отменяет inflight advance предыдущей сессии.
   invalidateRecommendationAdvance()
+  invalidateContinuousBuffer(`seed:${input.mode}`)
   activateRecommendationSession(input.mode, { forceProvider: true })
   const queue = getPlaybackQueue()
   if (input.mode === 'wave') {

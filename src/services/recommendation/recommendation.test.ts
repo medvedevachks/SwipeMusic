@@ -5,6 +5,7 @@ import type { ContinuationLibraryTrack } from '../continuation/libraryContinuati
 import type { UserTasteProfile } from '../taste/types.ts'
 import {
   recommendNext,
+  recommendNextLegacy,
   sameRecommendationStrategy,
   type RecommendationCatalogPort,
   type RecommendationRequest,
@@ -116,7 +117,7 @@ test('picks a catalog track outside the personal library', async () => {
     catalog: { сплин: [catalogHit] },
     playable: new Set([catalogHit.id]),
   })
-  const result = await recommendNext(
+  const result = await recommendNextLegacy(
     baseRequest({
       mode: 'swipe',
       current,
@@ -185,7 +186,7 @@ test('hard-excludes search hits even when Сплин likes would win', async () 
       outside.id,
     ]),
   })
-  const result = await recommendNext(
+  const result = await recommendNextLegacy(
     baseRequest({
       mode: 'swipe',
       current,
@@ -263,7 +264,7 @@ test('taste / liked artists beat same-artist search dump after ATL', async () =>
       kinoHit.id,
     ]),
   })
-  const result = await recommendNext(
+  const result = await recommendNextLegacy(
     baseRequest({
       mode: 'swipe',
       current,
@@ -316,7 +317,7 @@ test('user seed current drives next recommendation', async () => {
     catalog: { 'би-2': [next] },
     playable: new Set([next.id]),
   })
-  const result = await recommendNext(
+  const result = await recommendNextLegacy(
     baseRequest({ mode: 'wave', current, port }),
   )
   assert.equal(result.ok, true)
@@ -344,7 +345,7 @@ test('automatic start without current uses liked library then catalog', async ()
     catalog: { сплин: [catalogHit] },
     playable: new Set([liked.id, catalogHit.id]),
   })
-  const result = await recommendNext(
+  const result = await recommendNextLegacy(
     baseRequest({
       mode: 'swipe',
       current: null,
@@ -383,7 +384,7 @@ test('excludes already proposed tracks and prefers the next catalog hit', async 
     catalog: { x: [first, second] },
     playable: new Set([first.id, second.id]),
   })
-  const result = await recommendNext(
+  const result = await recommendNextLegacy(
     baseRequest({
       mode: 'swipe',
       current,
@@ -408,7 +409,7 @@ test('returns controlled miss when nothing is available', async () => {
     catalog: { solo: [] },
     playable: new Set(),
   })
-  const result = await recommendNext(
+  const result = await recommendNextLegacy(
     baseRequest({
       mode: 'wave',
       current,
@@ -439,7 +440,7 @@ test('all candidates unavailable yields all-unavailable', async () => {
     catalog: { band: [hit] },
     playable: new Set(),
   })
-  const result = await recommendNext(
+  const result = await recommendNextLegacy(
     baseRequest({ mode: 'swipe', current, port }),
   )
   assert.equal(result.ok, false)
@@ -448,7 +449,7 @@ test('all candidates unavailable yields all-unavailable', async () => {
   }
 })
 
-test('swipe and wave share the same base strategy and pick', async () => {
+test('swipe and wave share continuous-random-v1 strategy', async () => {
   assert.equal(sameRecommendationStrategy('swipe', 'wave'), true)
   const current = track({
     sourceId: 'yandex-music',
@@ -462,32 +463,31 @@ test('swipe and wave share the same base strategy and pick', async () => {
     title: 'H',
     artist: 'Artist',
   })
-  const make = (mode: 'swipe' | 'wave') =>
-    recommendNext(
-      baseRequest({
-        mode,
-        current,
-        port: mockPort({
-          catalog: { artist: [hit] },
-          playable: new Set([hit.id]),
-        }),
-      }),
-    )
-  const swipe = await make('swipe')
-  const wave = await make('wave')
+  const makePort = (): RecommendationCatalogPort => ({
+    sources: [{ id: 'yandex-music' }],
+    search: async () => [hit],
+    fetchFeed: async () => [hit],
+    isPlayable: async (candidate) => candidate.id === hit.id,
+  })
+  const swipe = await recommendNext(
+    baseRequest({ mode: 'swipe', current, port: makePort() }),
+  )
+  const wave = await recommendNext(
+    baseRequest({ mode: 'wave', current, port: makePort() }),
+  )
   assert.equal(swipe.ok, true)
   assert.equal(wave.ok, true)
   if (swipe.ok && wave.ok) {
-    assert.equal(swipe.track.id, wave.track.id)
-    assert.equal(swipe.reason, wave.reason)
+    assert.equal(swipe.reason, 'continuous-random')
+    assert.equal(wave.reason, 'continuous-random')
     assert.equal(swipe.mode, 'swipe')
     assert.equal(wave.mode, 'wave')
   }
 })
 
-test('no-seed cold start without likes is controlled', async () => {
+test('legacy no-seed cold start without likes is controlled', async () => {
   const port = mockPort({ catalog: {}, playable: new Set() })
-  const result = await recommendNext(
+  const result = await recommendNextLegacy(
     baseRequest({
       mode: 'swipe',
       current: null,
@@ -506,6 +506,32 @@ test('no-seed cold start without likes is controlled', async () => {
   assert.equal(result.ok, false)
   if (!result.ok) {
     assert.equal(result.emptyReason, 'no-seed')
+  }
+})
+
+test('continuous-random cold start without likes still works', async () => {
+  const hit = track({
+    sourceId: 'yandex-music',
+    externalId: 'hit',
+    title: 'Hit',
+    artist: 'Band',
+  })
+  const result = await recommendNext(
+    baseRequest({
+      mode: 'wave',
+      current: null,
+      library: [],
+      port: {
+        sources: [{ id: 'yandex-music' }],
+        search: async () => [hit],
+        fetchFeed: async () => [hit],
+        isPlayable: async () => true,
+      },
+    }),
+  )
+  assert.equal(result.ok, true)
+  if (result.ok) {
+    assert.equal(result.reason, 'continuous-random')
   }
 })
 
@@ -533,7 +559,7 @@ test('library-like candidate can win over catalog when ranked first and playable
     catalog: { сплин: [catalogHit] },
     playable: new Set([liked.id, catalogHit.id]),
   })
-  const result = await recommendNext(
+  const result = await recommendNextLegacy(
     baseRequest({
       mode: 'wave',
       current,

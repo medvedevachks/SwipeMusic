@@ -16,6 +16,7 @@ import {
   type RecommendationRequest,
   type RecommendationResult,
 } from './types.ts'
+import { pickContinuousRandom } from './continuousRandomV1.ts'
 
 type RankedCandidate = {
   track: Track
@@ -370,10 +371,17 @@ async function firstPlayable(
 
 /**
  * Единый Recommendation Engine.
+ * Production swipe/wave: continuous-random-v1 (непрерывный поток без вкуса как критерия).
  * Search UI results сюда не передаются и не читаются.
- * mode (swipe|wave) пока не меняет правила — только маркирует вызов.
  */
 export async function recommendNext(
+  request: RecommendationRequest,
+): Promise<RecommendationResult> {
+  return pickContinuousRandom(request)
+}
+
+/** Legacy taste/liked path — только для сравнительных/регрессионных тестов. */
+export async function recommendNextLegacy(
   request: RecommendationRequest,
 ): Promise<RecommendationResult> {
   const parent = request.signal ?? new AbortController().signal
@@ -533,9 +541,9 @@ export async function recommendNext(
   }
 }
 
-/** Сравнивает стратегию режимов: пока правила идентичны. */
+/** Сравнивает стратегию режимов: continuous-random-v1 одинакова для swipe/wave. */
 export function recommendationStrategyFingerprint(mode: RecommendationRequest['mode']): string {
-  return `unified-v1:${mode}:same-rules`
+  return `continuous-random-v1:${mode}:same-rules`
 }
 
 export function sameRecommendationStrategy(

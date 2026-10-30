@@ -14,6 +14,7 @@ export type RecommendationReason =
   | 'taste-positive'
   | 'same-artist'
   | 'known-rest'
+  | 'continuous-random'
 
 export type RecommendationEmptyReason =
   | 'no-sources'
@@ -24,11 +25,13 @@ export type RecommendationEmptyReason =
   | 'timeout'
   | 'error'
 
-/** Порт каталога: те же контракты, что у Personal Radio search. */
+/** Порт каталога: search + опциональный feed / availability probe. */
 export type RecommendationCatalogPort = {
   sources: readonly { id: string }[]
   search: (sourceId: string, query: string, signal: AbortSignal) => Promise<Track[]>
   isPlayable: (track: Track, signal: AbortSignal) => Promise<boolean>
+  /** Browse/library лента без поискового запроса (если адаптер умеет). */
+  fetchFeed?: (sourceId: string, signal: AbortSignal) => Promise<Track[]>
 }
 
 export type RecommendationExcludedTrack = {

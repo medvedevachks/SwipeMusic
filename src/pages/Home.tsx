@@ -25,7 +25,10 @@ import {
   resolveHomeDeckFocusId,
   resolveHomeDeckTracks,
 } from '../services/recommendation/homeDeck.ts'
-import { isRecommendationExhausted } from '../services/recommendation/sessionState.ts'
+import {
+  clearRecommendationExhausted,
+  isRecommendationExhausted,
+} from '../services/recommendation/sessionState.ts'
 import {
   activateRecommendationSession,
   commitRecommendationSeed,
@@ -440,8 +443,28 @@ export default function Home() {
     error: playerError,
   }
 
+  const retryContinuousPick = () => {
+    clearRecommendationExhausted()
+    void getAudioPlayer().next()
+  }
+
   return (
     <div className="space-y-3 pb-2">
+      {playerError &&
+      (playbackContext.type === 'swipe' ||
+        playbackContext.type === 'search-seed' ||
+        (playbackContext.type === 'radio' && playbackContext.id === 'my-wave')) ? (
+        <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-center sm:text-left">
+          <p className="text-sm text-[var(--color-fg)]">{playerError}</p>
+          <button
+            type="button"
+            className="mt-2 text-sm font-medium text-[var(--color-accent)] underline-offset-2 hover:underline"
+            onClick={retryContinuousPick}
+          >
+            Повторить подбор
+          </button>
+        </div>
+      ) : null}
       <div className="space-y-2 px-1">
         <div
           className="home-mode-tabs"
