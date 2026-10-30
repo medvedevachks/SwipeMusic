@@ -47,6 +47,13 @@ export {
   createAudioPlayerPhysicalPort,
   PreparedTrackCache,
   createControllablePlayerAdapter,
+  bindPlaybackSessionsForAuth,
+  teardownPlaybackSessionsForAuth,
+  playCatalogViaSessionSwitch,
+  expandCatalogSessionQueue,
+  releaseCatalogSessionForLegacyIntent,
+  getSessionSwitchAppRuntime,
+  getSessionSwitchCoordinator,
 } from './integration/index.ts'
 export type {
   SessionSwitchRuntime,
@@ -56,4 +63,5 @@ export type {
   ResolvePlaybackFn,
   AdapterPhysicalPort,
   AudioPlayerSessionApi,
+  BindPlaybackSessionsResult,
 } from './integration/index.ts'

@@ -1,7 +1,8 @@
 /**
  * Feature flag интеграции SessionSwitchCoordinator ↔ AudioPlayer (PLAYBACK-DEV-05).
  * По умолчанию выключен. В production-сборке всегда false.
- * Не подключает PlaybackIntent / UI play paths.
+ * При ON (DEV): auth bootstrap SessionStore + CATALOG play через SessionSwitchCoordinator.
+ * SEARCH/WAVE/SWIPES/ALBUM остаются на legacy Intent.
  */
 
 export const SESSION_SWITCH_INTEGRATION_STORAGE_KEY =

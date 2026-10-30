@@ -8,6 +8,7 @@ import { noteSearchFlowEvent } from '../continuation/searchFlowDiag.ts'
 import { ensureSearchRecommendation } from '../continuation/searchContinuationRuntime.ts'
 import { getAudioPlayer } from '../audioPlayer'
 import { getPlaybackQueue } from '../playbackQueue'
+import { releaseCatalogSessionForLegacyIntent } from '../sessionSwitch/integration/legacyQueueClaim.ts'
 import type {
   ExitAlbumModeInput,
   PlayAlbumInput,
@@ -31,6 +32,7 @@ function clampIndex(length: number, startIndex: number): number {
  */
 export class PlaybackIntent {
   async playAlbum(input: PlayAlbumInput): Promise<void> {
+    releaseCatalogSessionForLegacyIntent('album')
     const { tracks, album } = input
     const startIndex = clampIndex(tracks.length, input.startIndex)
     if (startIndex < 0) {
@@ -61,6 +63,7 @@ export class PlaybackIntent {
       return
     }
 
+    releaseCatalogSessionForLegacyIntent('swipe')
     const { tracks } = input
     const startIndex = clampIndex(tracks.length, input.startIndex)
     if (startIndex < 0) {
@@ -93,6 +96,8 @@ export class PlaybackIntent {
   }
 
   async playFromLibrary(input: PlayFromLibraryInput): Promise<void> {
+    // User catalog идёт через playUserCatalog → session-switch; остальной library — legacy.
+    releaseCatalogSessionForLegacyIntent('library')
     const { tracks } = input
     const startIndex = clampIndex(tracks.length, input.startIndex)
     if (startIndex < 0) {
@@ -114,6 +119,7 @@ export class PlaybackIntent {
     if (!input.track.id) {
       return
     }
+    releaseCatalogSessionForLegacyIntent('search')
     const player = getAudioPlayer()
     const before = getPlaybackQueue().getSnapshot()
     noteSearchFlowEvent({
@@ -143,6 +149,7 @@ export class PlaybackIntent {
 
   /** Очередь «Моей волны». Не создаёт второй плеер. */
   async playRadio(input: PlayRadioInput): Promise<void> {
+    releaseCatalogSessionForLegacyIntent('wave')
     const startIndex = clampIndex(input.tracks.length, input.startIndex)
     if (startIndex < 0) {
       return
@@ -163,6 +170,7 @@ export class PlaybackIntent {
    * Anchor: если current нет в deck — [current, ...deck].
    */
   exitAlbumMode(input: ExitAlbumModeInput): void {
+    releaseCatalogSessionForLegacyIntent('swipe')
     const { swipeTracks, currentTrack: playing } = input
     const player = getAudioPlayer()
     const queue = getPlaybackQueue()

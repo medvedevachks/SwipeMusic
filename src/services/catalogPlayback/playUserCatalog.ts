@@ -163,10 +163,45 @@ export async function playUserCatalog(
     /** Canonical id раннего старта (выбранный трек или первая доступная). */
     let earlyStartCanonicalId: string | null = preferredId
 
+    const resolvePlaySelection = async () => {
+      if (deps.playSelection) {
+        return deps.playSelection
+      }
+      const { isSessionSwitchIntegrationEnabled } = await import(
+        '../sessionSwitch/featureFlag.ts'
+      )
+      if (isSessionSwitchIntegrationEnabled()) {
+        const { playCatalogViaSessionSwitch } = await import(
+          '../sessionSwitch/integration/playCatalogSession.ts'
+        )
+        return async (options: {
+          tracks: Track[]
+          startIndex: number
+          context: PlaylistPlayContext
+        }) => {
+          const switched = await playCatalogViaSessionSwitch({
+            tracks: options.tracks,
+            startIndex: options.startIndex,
+            catalogId: options.context.id,
+            catalogTitle: options.context.title,
+          })
+          if (switched.ok) {
+            return
+          }
+          if (switched.reason === 'user_gesture_required') {
+            const err = new Error('NotAllowedError')
+            err.name = 'NotAllowedError'
+            throw err
+          }
+          throw new Error(switched.message ?? switched.reason)
+        }
+      }
+      return (await import('../playbackIntent/PlaybackIntent.ts'))
+        .playLibrarySelection
+    }
+
     const playEarlyTrack = async (entry: CatalogQueueEntry): Promise<'ok' | 'error'> => {
-      const playSelection =
-        deps.playSelection ??
-        (await import('../playbackIntent/PlaybackIntent.ts')).playLibrarySelection
+      const playSelection = await resolvePlaySelection()
       try {
         await playSelection({
           tracks: [entry.track],
@@ -357,6 +392,20 @@ export async function playUserCatalog(
       const replaceQueue =
         deps.replaceQueue ??
         (async (options) => {
+          const { isSessionSwitchIntegrationEnabled } = await import(
+            '../sessionSwitch/featureFlag.ts'
+          )
+          if (isSessionSwitchIntegrationEnabled()) {
+            const { expandCatalogSessionQueue } = await import(
+              '../sessionSwitch/integration/playCatalogSession.ts'
+            )
+            return expandCatalogSessionQueue({
+              tracks: options.tracks,
+              startIndex: options.startIndex,
+              catalogId: options.context.id,
+              catalogTitle: options.context.title,
+            })
+          }
           const { getPlaybackQueue } = await import('../playbackQueue/PlaybackQueue.ts')
           return getPlaybackQueue().replacePlaylistItemsPreservingPlayback(
             options.tracks,
@@ -405,9 +454,7 @@ export async function playUserCatalog(
 
     // На случай если early-path не сработал (не должно при штатном потоке).
     try {
-      const playSelection =
-        deps.playSelection ??
-        (await import('../playbackIntent/PlaybackIntent.ts')).playLibrarySelection
+      const playSelection = await resolvePlaySelection()
       if (!isCurrent(generation)) {
         return { status: 'busy', message: CATALOG_PLAYBACK_MESSAGE.BUSY }
       }

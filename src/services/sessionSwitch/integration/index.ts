@@ -44,6 +44,23 @@ export type {
   SessionSwitchRuntime,
   CreateSessionSwitchRuntimeOptions,
 } from './createSessionSwitchRuntime.ts'
+export {
+  bindPlaybackSessionsForAuth,
+  teardownPlaybackSessionsForAuth,
+  resetPlaybackSessionBootstrapForTests,
+} from './playbackSessionBootstrap.ts'
+export type { BindPlaybackSessionsResult } from './playbackSessionBootstrap.ts'
+export {
+  playCatalogViaSessionSwitch,
+  expandCatalogSessionQueue,
+  isCatalogSessionPlaybackActive,
+} from './playCatalogSession.ts'
+export { releaseCatalogSessionForLegacyIntent } from './legacyQueueClaim.ts'
+export {
+  getSessionSwitchAppRuntime,
+  getSessionSwitchCoordinator,
+  resetSessionSwitchAppRuntimeForTests,
+} from './sessionSwitchAppRuntime.ts'
 export { createControllablePlayerAdapter } from './ControllablePlayerAdapter.ts'
 export type { ControllablePlayerAdapter } from './ControllablePlayerAdapter.ts'
 /* productionResolve.ts тянет PlaybackResolver/AudioPlayer — только из Vite-бандла */

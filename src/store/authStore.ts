@@ -14,6 +14,21 @@ function clearContinuousRuntimeOnAuthChange(): void {
   clearContinuousDiscoveryRuntime('auth-change')
 }
 
+/** Dynamic import: не тянуть AudioPlayer в node:test graph authStore. */
+function bindPlaybackSessionsSafe(userId: string | null): void {
+  void import('../services/sessionSwitch/integration/playbackSessionBootstrap.ts')
+    .then(async (mod) => {
+      if (!userId) {
+        await mod.teardownPlaybackSessionsForAuth()
+        return
+      }
+      await mod.bindPlaybackSessionsForAuth(userId)
+    })
+    .catch(() => {
+      // Session bootstrap не должен ломать login / restore
+    })
+}
+
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
 
 type AuthState = {
@@ -48,6 +63,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           bindSessionTasteUser(user?.id ?? null)
           bindAuthSessionEpoch(user?.id ?? null)
           clearContinuousRuntimeOnAuthChange()
+          bindPlaybackSessionsSafe(user?.id ?? null)
           set({
             user,
             status: user ? 'authenticated' : 'anonymous',
@@ -58,6 +74,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           bindSessionTasteUser(null)
           bindAuthSessionEpoch(null)
           clearContinuousRuntimeOnAuthChange()
+          bindPlaybackSessionsSafe(null)
           set({ user: null, status: 'anonymous' })
         })
         .finally(() => {
@@ -73,6 +90,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     bindSessionTasteUser(user.id)
     bindAuthSessionEpoch(user.id)
     clearContinuousRuntimeOnAuthChange()
+    bindPlaybackSessionsSafe(user.id)
     set({ user, status: 'authenticated' })
   },
 
@@ -82,6 +100,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     bindSessionTasteUser(user.id)
     bindAuthSessionEpoch(user.id)
     clearContinuousRuntimeOnAuthChange()
+    bindPlaybackSessionsSafe(user.id)
     set({ user, status: 'authenticated' })
   },
 
@@ -91,6 +110,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     bindSessionTasteUser(null)
     bindAuthSessionEpoch(null)
     clearContinuousRuntimeOnAuthChange()
+    bindPlaybackSessionsSafe(null)
     set({ user: null, status: 'anonymous' })
   },
 }))
