@@ -41,10 +41,11 @@ export function classifySwipeTrack(
     case 'like': {
       const key = sourceTrackKeyOf(track)
       // Intent до await: быстрый UP не должен писать skip.
-      beginPendingSwipeLike(key)
+      // Token сессии: finally A не снимает pending B после logout/login.
+      const likeSession = beginPendingSwipeLike(key)
       const commit = deps.commitLike ?? commitSwipeLikeWithInbox
       const saved = commit(track).finally(() => {
-        endPendingSwipeLike(key)
+        endPendingSwipeLike(key, likeSession)
       })
       return { kind: 'applied', action, saved }
     }

@@ -138,6 +138,54 @@ test('startSwipeInboxSorting empty inbox', async () => {
   assert.equal(result.status, 'empty')
 })
 
+test('startSwipeInboxSorting resets leftover search deck mode', async () => {
+  installMemoryLocalStorage()
+  resetRecommendationSessionRuntimeForTests()
+  resetRecommendationSessionStateForTests()
+  getPlaybackQueue().clear()
+  let resetCalls = 0
+  const result = await startSwipeInboxSorting({
+    items: [item('can_a', 'A'), item('can_b', 'B')],
+    startCanonicalTrackId: 'can_a',
+    playTrack: async () => undefined,
+    resetDeckSession: () => {
+      resetCalls += 1
+    },
+  })
+  assert.equal(result.status, 'played')
+  assert.equal(resetCalls, 1)
+  getPlaybackQueue().clear()
+})
+
+test('startSwipeInboxSorting unavailable preferred without playable copy', async () => {
+  const bare = item('can_bare', 'Bare')
+  bare.copies = []
+  const result = await startSwipeInboxSorting({
+    items: [bare],
+    startCanonicalTrackId: 'can_bare',
+    playTrack: async () => {
+      throw new Error('should not play')
+    },
+  })
+  assert.equal(result.status, 'empty')
+})
+
+test('startSwipeInboxSorting play failure is error not fake audible success', async () => {
+  installMemoryLocalStorage()
+  resetRecommendationSessionRuntimeForTests()
+  resetRecommendationSessionStateForTests()
+  getPlaybackQueue().clear()
+  const result = await startSwipeInboxSorting({
+    items: [item('can_a', 'A')],
+    playTrack: async () => {
+      throw new Error('provider resolve failed')
+    },
+  })
+  assert.equal(result.status, 'error')
+  assert.notEqual(result.status, 'played')
+  getPlaybackQueue().clear()
+})
+
 test('inbox sort: LIKE then UP then categorize removes from queue without stopping current', async () => {
   installMemoryLocalStorage()
   resetRecommendationSessionRuntimeForTests()

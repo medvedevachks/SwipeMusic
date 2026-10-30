@@ -33,17 +33,7 @@ export function isRecommendationHomeDeckContext(input: {
   context: PlaybackContext
 }): boolean {
   const { stage, sessionMode, context } = input
-  // Поиск без seed: пользователь выбирает hit — лента выдачи.
-  if (sessionMode === 'search' && context.type !== 'search-seed') {
-    return false
-  }
-  if (stage === 'sorting' && context.type === 'search-seed') {
-    return true
-  }
-  if (stage === 'sorting' && context.type === 'swipe' && sessionMode === 'catalog') {
-    return true
-  }
-  // Разбор папки «Свайпы»: колода = очередь inbox, sync с плеером.
+  // Inbox / волна: явный playback context важнее leftover search mode.
   if (
     stage === 'sorting' &&
     context.type === 'playlist' &&
@@ -56,6 +46,16 @@ export function isRecommendationHomeDeckContext(input: {
     context.type === 'radio' &&
     context.id === 'my-wave'
   ) {
+    return true
+  }
+  // Поиск без seed: пользователь выбирает hit — лента выдачи.
+  if (sessionMode === 'search' && context.type !== 'search-seed') {
+    return false
+  }
+  if (stage === 'sorting' && context.type === 'search-seed') {
+    return true
+  }
+  if (stage === 'sorting' && context.type === 'swipe' && sessionMode === 'catalog') {
     return true
   }
   return false

@@ -4,7 +4,12 @@ import type { GestureConfig } from '../../types/gesture'
 import type { HistoryEntry } from '../../types/history'
 import type { Track } from '../../types/track'
 import { useAuthStore } from '../../store/authStore.ts'
-import { StaleLibrarySessionError } from '../auth/sessionEpoch.ts'
+import {
+  captureAuthSession,
+  isAuthSessionCurrent,
+  StaleLibrarySessionError,
+  type AuthSessionSnapshot,
+} from '../auth/sessionEpoch.ts'
 import { libraryClient, LibraryHttpError } from './client.ts'
 import {
   toTrackUpsertBody,
@@ -27,6 +32,17 @@ function noteIdleAfterSave(): void {
   }
 }
 
+function applyFailureIfCurrent(
+  session: AuthSessionSnapshot,
+  error: unknown,
+  kind: 'load' | 'save',
+): void {
+  if (!isAuthSessionCurrent(session)) {
+    return
+  }
+  handleLibraryFailure(error, kind)
+}
+
 export function handleLibraryFailure(error: unknown, kind: 'load' | 'save'): void {
   if (error instanceof LibraryHttpError && error.status === 401) {
     useLibraryPersistenceStore.getState().setArmed(false)
@@ -44,25 +60,31 @@ export async function runLibraryMutation<T>(task: () => Promise<T>): Promise<T |
   if (!isLibraryPersistenceArmed()) {
     return null
   }
+  const session = captureAuthSession()
   pending += 1
   if (useLibraryPersistenceStore.getState().status !== 'loading') {
     useLibraryPersistenceStore.getState().setStatus('saving', null)
   }
   try {
-    if (!isLibraryPersistenceArmed()) {
+    if (!isLibraryPersistenceArmed() || !isAuthSessionCurrent(session)) {
       return null
     }
-    return await task()
+    const result = await task()
+    if (!isAuthSessionCurrent(session)) {
+      return null
+    }
+    return result
   } catch (error) {
-    // Смена аккаунта / logout mid-flight — не SAVE_FAILED для нового пользователя.
+    // Смена аккаунта / logout mid-flight — не SAVE_FAILED / не logout для B.
     if (error instanceof StaleLibrarySessionError) {
       return null
     }
-    handleLibraryFailure(error, 'save')
+    applyFailureIfCurrent(session, error, 'save')
     return null
   } finally {
     pending -= 1
-    if (pending === 0) {
+    // Старый finally A не сбрасывает saving/ready пользователя B.
+    if (pending === 0 && isAuthSessionCurrent(session)) {
       noteIdleAfterSave()
     }
   }
@@ -72,23 +94,24 @@ function enqueue(task: () => Promise<void>): void {
   if (!isLibraryPersistenceArmed()) {
     return
   }
+  const session = captureAuthSession()
   pending += 1
   if (useLibraryPersistenceStore.getState().status !== 'loading') {
     useLibraryPersistenceStore.getState().setStatus('saving', null)
   }
   const run = async () => {
     try {
-      if (!isLibraryPersistenceArmed()) {
+      if (!isLibraryPersistenceArmed() || !isAuthSessionCurrent(session)) {
         return
       }
       await task()
     } catch (error) {
       if (!(error instanceof StaleLibrarySessionError)) {
-        handleLibraryFailure(error, 'save')
+        applyFailureIfCurrent(session, error, 'save')
       }
     } finally {
       pending -= 1
-      if (pending === 0) {
+      if (pending === 0 && isAuthSessionCurrent(session)) {
         noteIdleAfterSave()
       }
     }

@@ -314,3 +314,41 @@ test('logout clearCanonicalIdentityFlights drops pending-like for next user', as
   )
   gate.resolve(false)
 })
+
+test('A pending finally after B login does not clear B pending-like', async () => {
+  reset()
+  const {
+    bindAuthSessionEpoch,
+    resetAuthSessionEpochForTests,
+  } = await import('../auth/sessionEpoch.ts')
+  resetAuthSessionEpochForTests()
+  const x = track('30')
+  const gateA = deferred<boolean>()
+  const gateB = deferred<boolean>()
+
+  bindAuthSessionEpoch('user-a')
+  const likeA = classifySwipeTrack(x, 'like', { commitLike: () => gateA.promise })
+  assert.equal(hasPendingSwipeLike(x.id), true)
+
+  resetPendingSwipeLikesForTests()
+  bindAuthSessionEpoch('user-b')
+  const likeB = classifySwipeTrack(x, 'like', { commitLike: () => gateB.promise })
+  assert.equal(hasPendingSwipeLike(x.id), true)
+
+  gateA.resolve(true)
+  assert.equal(await likeA.saved, true)
+  // Старый finally A не снял pending B.
+  assert.equal(hasPendingSwipeLike(x.id), true)
+
+  const up = classifySwipeTrack(x, 'skip')
+  assert.equal(up.kind, 'applied')
+  assert.equal(
+    useCollectionStore.getState().history.some((entry) => entry.action === 'skip'),
+    false,
+  )
+
+  gateB.resolve(true)
+  assert.equal(await likeB.saved, true)
+  assert.equal(hasPendingSwipeLike(x.id), false)
+  resetAuthSessionEpochForTests()
+})

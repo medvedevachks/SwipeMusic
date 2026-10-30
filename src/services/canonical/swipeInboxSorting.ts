@@ -4,6 +4,7 @@
  */
 import type { CanonicalLibraryItem } from '../../types/canonical.ts'
 import type { Track } from '../../types/track.ts'
+import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
 import { SYS_SWIPES_ID } from '../catalogs/systemFolders.ts'
 import { getPlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
 import { clearRecommendationSession } from '../recommendation/sessionRuntime.ts'
@@ -12,7 +13,6 @@ import {
   listCanonicalItems,
   preferredTrackFromCanonical,
 } from './selectors.ts'
-import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
 
 export const SWIPE_INBOX_EMPTY_MESSAGE =
   'Все композиции разобраны. Отмечайте понравившиеся свайпом влево — они появятся здесь.'
@@ -25,6 +25,8 @@ export type StartSwipeInboxSortingInput = {
   /** Для тестов: подставить items вместо store. */
   items?: readonly CanonicalLibraryItem[]
   playTrack?: (track: Track) => Promise<void>
+  /** Сброс leftover search mode колоды; по умолчанию swipeDeckSessionStore. */
+  resetDeckSession?: () => void
 }
 
 export type StartSwipeInboxSortingResult =
@@ -77,6 +79,19 @@ export async function startSwipeInboxSorting(
       startIndex = index
     }
 
+    // Явный inbox Play: сбросить leftover search mode колоды Home.
+    try {
+      if (input.resetDeckSession) {
+        input.resetDeckSession()
+      } else {
+        const { useSwipeDeckSessionStore } = await import(
+          '../../store/swipeDeckSessionStore.ts'
+        )
+        useSwipeDeckSessionStore.getState().resetToCatalog()
+      }
+    } catch {
+      // Unit env без browser module graph — очередь всё равно выставляется.
+    }
     clearRecommendationSession()
     const queue = getPlaybackQueue()
     queue.setQueue(tracks, startIndex, {
@@ -107,6 +122,7 @@ export async function startSwipeInboxSorting(
       ) {
         return { status: 'played', tracks, startIndex }
       }
+      // Неуспешный resolve/play — не маскировать под успешный audible start.
       return { status: 'error', message: 'Не удалось начать воспроизведение.' }
     }
 
