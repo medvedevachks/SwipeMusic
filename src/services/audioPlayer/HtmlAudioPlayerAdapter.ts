@@ -65,6 +65,13 @@ export class HtmlAudioPlayerAdapter implements PlayerAdapter {
       return
     }
 
+    // До смены src: pause()/новый load мог отменить этот вызов.
+    if (generation !== this.loadGeneration) {
+      const error = new Error('Audio load aborted')
+      error.name = 'AbortError'
+      throw error
+    }
+
     // src сам запускает загрузку. Отдельный load() сбрасывает play(), вызванный сразу после.
     this.audio.preload = 'auto'
     this.audio.src = url

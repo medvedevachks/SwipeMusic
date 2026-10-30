@@ -5,10 +5,10 @@
 
 | Поле | Значение |
 |---|---|
-| Дата снимка | 2026-10-30 (UX-10E playback & persistence review) |
+| Дата снимка | 2026-10-30 (UX-10 pre-production release gate) |
 | Канонический репозиторий | https://github.com/medvedevachks/SwipeMusic |
 | Ветка снимка | `fix/ux-10a-left-up-race` → PR #2 в `feature/deploy-windows-01` |
-| Проверенный HEAD | UX-10E на `fix/ux-10a-left-up-race` (session mutation buckets + resolver fail ≠ played + inbox play generation). Production S1 — без deploy. |
+| Проверенный HEAD | Pre-prod gate: stale adapter pause fix + inbox Play без ожидания провайдера + session buckets. S1 deploy не выполнялся. |
 | Исторический upstream | https://github.com/r-sh-galimov/SwipeMusic |
 
 **Легенда источников фактов**
@@ -233,7 +233,7 @@ Last.fm и MusicBrainz для рекомендаций **не** подключа
 
 | Приоритет | Задача | Суть |
 |---|---|---|
-| **1** | UX-10 / PR #2 merge | UX-10…UX-10E на `fix/ux-10a-left-up-race` (PR #2). Merge в `feature/deploy-windows-01` и S1 deploy — только по отдельному разрешению. |
+| **1** | UX-10 / PR #2 → device acceptance | Code ready на PR #2. Нужны: merge approval, затем REAL DEVICE ACCEPTANCE (телефон + реальное аудио), затем frontend-only S1 deploy по плану. |
 | **2** | LIBRARY-UX / S1 deploy | Inbox + compact `/library` на ветке; production deploy только после PASS review. **S1 не трогать** без задачи. |
 | **3** | RELEASE / S1 sync | Frontend deploy на S1 только с Server. **Без** restart backend/Caddy/AD без задачи. |
 | **4** | RADIO-08 | Убрать нерелевантные и повторяющиеся треки волны/свайпов на уровне ранжирования ядра. |

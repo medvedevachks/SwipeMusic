@@ -171,7 +171,40 @@ test('startSwipeInboxSorting unavailable preferred without playable copy', async
   assert.equal(result.status, 'empty')
 })
 
-test('startSwipeInboxSorting play failure is error not fake audible success', async () => {
+test('startSwipeInboxSorting returns played before playTrack settles (no provider await)', async () => {
+  installMemoryLocalStorage()
+  resetRecommendationSessionRuntimeForTests()
+  resetRecommendationSessionStateForTests()
+  resetSwipeInboxPlayGenerationForTests()
+  getPlaybackQueue().clear()
+
+  let releasePlay!: () => void
+  const playGate = new Promise<void>((resolve) => {
+    releasePlay = resolve
+  })
+  let playStarted = false
+
+  const resultPromise = startSwipeInboxSorting({
+    items: [item('can_a', 'A'), item('can_b', 'B')],
+    startCanonicalTrackId: 'can_a',
+    playTrack: async () => {
+      playStarted = true
+      await playGate
+    },
+  })
+
+  const result = await resultPromise
+  assert.equal(result.status, 'played')
+  assert.equal(getPlaybackQueue().current()?.id, 'yandex-music:can_a')
+  // play мог ещё не стартовать (microtask), но navigate уже не ждёт audible.
+  releasePlay()
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.equal(playStarted, true)
+  getPlaybackQueue().clear()
+})
+
+test('startSwipeInboxSorting play failure does not block played intent for Home', async () => {
   installMemoryLocalStorage()
   resetRecommendationSessionRuntimeForTests()
   resetRecommendationSessionStateForTests()
@@ -183,10 +216,11 @@ test('startSwipeInboxSorting play failure is error not fake audible success', as
       throw new Error('Track unavailable')
     },
   })
-  assert.equal(result.status, 'error')
-  if (result.status === 'error') {
-    assert.match(result.message, /unavailable|Не удалось/i)
-  }
+  // Intent принят: очередь sys_swipes; ошибка источника — в PlayerStore, не блок navigate.
+  assert.equal(result.status, 'played')
+  assert.equal(getPlaybackQueue().current()?.id, 'yandex-music:can_a')
+  await Promise.resolve()
+  await Promise.resolve()
   getPlaybackQueue().clear()
 })
 

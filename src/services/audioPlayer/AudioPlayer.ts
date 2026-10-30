@@ -35,6 +35,7 @@ import { routeLivePlayback } from '../runtimeFallback/livePlayback.ts'
 import { attachMediaSession } from './mediaSession.ts'
 import type { PlayerAdapter } from './PlayerAdapter'
 import { getPlayerManager } from './PlayerManager'
+import { settlePlayGeneration } from './stalePlaySettlement.ts'
 
 type StateListener = (state: PlayerState) => void
 
@@ -259,19 +260,35 @@ export class AudioPlayer {
     try {
       this.patchState({ loading: true, buffering: true, error: null })
       await this.adapter.load(url)
-      if (generation !== this.playGeneration) {
-        this.adapter.pause()
+      if (
+        settlePlayGeneration({
+          attemptGeneration: generation,
+          currentPlayGeneration: this.playGeneration,
+          phase: 'after-await',
+        }) === 'abandon-silent'
+      ) {
         return
       }
       await this.adapter.play()
-      if (generation !== this.playGeneration) {
-        this.adapter.pause()
+      if (
+        settlePlayGeneration({
+          attemptGeneration: generation,
+          currentPlayGeneration: this.playGeneration,
+          phase: 'after-await',
+        }) === 'abandon-silent'
+      ) {
         return
       }
       this.patchState({ error: null, loading: false, buffering: false })
     } catch (error) {
-      if (isAbortError(error) || generation !== this.playGeneration) {
-        this.adapter.pause()
+      if (
+        settlePlayGeneration({
+          attemptGeneration: generation,
+          currentPlayGeneration: this.playGeneration,
+          phase: 'on-error',
+          isAbortError: isAbortError(error),
+        }) === 'abandon-silent'
+      ) {
         return
       }
 
@@ -444,8 +461,13 @@ export class AudioPlayer {
 
     try {
       await this.adapter.load(playbackUrl)
-      if (generation !== this.playGeneration) {
-        this.adapter.pause()
+      if (
+        settlePlayGeneration({
+          attemptGeneration: generation,
+          currentPlayGeneration: this.playGeneration,
+          phase: 'after-await',
+        }) === 'abandon-silent'
+      ) {
         return
       }
 
@@ -465,8 +487,13 @@ export class AudioPlayer {
       })
 
       await this.adapter.play()
-      if (generation !== this.playGeneration) {
-        this.adapter.pause()
+      if (
+        settlePlayGeneration({
+          attemptGeneration: generation,
+          currentPlayGeneration: this.playGeneration,
+          phase: 'after-await',
+        }) === 'abandon-silent'
+      ) {
         return
       }
 
@@ -499,8 +526,14 @@ export class AudioPlayer {
         durationMs: track.durationMs ?? null,
       })
     } catch (error) {
-      if (isAbortError(error) || generation !== this.playGeneration) {
-        this.adapter.pause()
+      if (
+        settlePlayGeneration({
+          attemptGeneration: generation,
+          currentPlayGeneration: this.playGeneration,
+          phase: 'on-error',
+          isAbortError: isAbortError(error),
+        }) === 'abandon-silent'
+      ) {
         return
       }
 

@@ -30,8 +30,9 @@ export type StartSwipeInboxSortingInput = {
 }
 
 /**
- * `played` — очередь inbox принята и play intent запущен (или autoplay block).
- * Не гарантирует audible start; ошибка resolver → `error`.
+ * `played` — очередь inbox принята и play intent запущен (arm/pending).
+ * Не ждёт resolve/audible; ошибка источника видна в PlayerStore на главной.
+ * `error` — устаревший запуск или сбой до принятия intent (не сеть провайдера).
  */
 export type StartSwipeInboxSortingResult =
   | { status: 'played'; tracks: Track[]; startIndex: number }
@@ -123,38 +124,23 @@ export async function startSwipeInboxSorting(
       return { status: 'error', message: 'Не удалось начать воспроизведение.' }
     }
 
+    if (generation !== inboxPlayGeneration) {
+      return { status: 'error', message: 'Не удалось начать воспроизведение.' }
+    }
+
     const play =
       input.playTrack ??
       (async (track: Track) => {
         const { getAudioPlayer } = await import('../audioPlayer/AudioPlayer.ts')
         await getAudioPlayer().playTrack(track)
       })
-    try {
-      await play(startTrack)
-    } catch (error) {
-      if (generation !== inboxPlayGeneration) {
-        return { status: 'error', message: 'Не удалось начать воспроизведение.' }
-      }
-      // Autoplay block: очередь уже выставлена — пользователь нажмёт Play в доке.
-      if (
-        error instanceof Error &&
-        (error.name === 'NotAllowedError' ||
-          /user did not interact|notallowed|autoplay/i.test(error.message))
-      ) {
-        return { status: 'played', tracks, startIndex }
-      }
-      return {
-        status: 'error',
-        message:
-          error instanceof Error && error.message
-            ? error.message
-            : 'Не удалось начать воспроизведение.',
-      }
-    }
 
-    if (generation !== inboxPlayGeneration) {
-      return { status: 'error', message: 'Не удалось начать воспроизведение.' }
-    }
+    // Не блокируем navigate ожиданием провайдера/dynamic import.
+    // Очередь уже выставлена — Home берёт focus из queueIndex; arm/error — в PlayerStore.
+    void Promise.resolve()
+      .then(() => play(startTrack))
+      .catch(() => undefined)
+
     return { status: 'played', tracks, startIndex }
   } catch {
     return { status: 'error', message: 'Не удалось начать воспроизведение.' }
