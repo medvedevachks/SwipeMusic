@@ -5,10 +5,10 @@
 
 | Поле | Значение |
 |---|---|
-| Дата снимка | 2026-10-31 (PLAYBACK-CME-01) |
+| Дата снимка | 2026-10-31 (PLAYBACK-DEV-09) |
 | Канонический репозиторий | https://github.com/medvedevachks/SwipeMusic |
 | Ветка снимка | `feature/playback-session-store-v2` (поверх deploy-windows-01) |
-| Проверенный HEAD | PLAYBACK-CME-01 на ветке session-store-v2; suite 746; flag session-switch default OFF. Deploy не выполнялся. |
+| Проверенный HEAD | DEV-09: BUG-01 fixed (`historyRanks`); suite 753; flag default OFF / PROD always false. Staging verdict: NOT READY (см. блокеры continuous UI). Deploy не выполнялся. |
 | Исторический upstream | https://github.com/r-sh-galimov/SwipeMusic |
 
 **Легенда источников фактов**
@@ -52,7 +52,7 @@ UI (pages / BottomPlayer)
 
 **Ограничение:** не создавать второй GlobalPlayer и не заводить конкурирующую очередь.
 
-**Playback sessions v2 + CME-01 (ветка `feature/playback-session-store-v2`):** SessionStore + Coordinator; flag **default OFF** (PROD false). Пять слотов; durable sync; CME ownership. Cold seed: `requireIdleQueue` + epoch. Buffer playable **10 / watermark 5**; SWIPES soft mix **~70% new / 30% familiar** (liked/favorite/inCatalog); hidden canonical excluded from auto streams; ALBUM related = same-artist library (не vector similarity). Production flag не включать до DEV-09.
+**Playback sessions v2 + CME-01 + BUG-01 (ветка `feature/playback-session-store-v2`):** SessionStore + Coordinator; flag **default OFF** (PROD always false). Пять слотов; durable sync; CME ownership. Cold seed idle/epoch. Buffer **10/5**; SWIPES ~70/30; hidden excluded; ALBUM related = same-artist. **BUG-01 fixed:** historyRanks + occurrence rank for duplicate track IDs. DEV-09 UI: Wave/Search partial PASS on `dev-acceptance` WAV; SWIPES Next/continuous 10× — FAIL в локальном smoke (empty discovery). Production flag не включать.
 
 ---
 
