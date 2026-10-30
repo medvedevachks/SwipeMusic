@@ -45,6 +45,11 @@ export type PersistedPlaybackQueue = PlaybackQueueSnapshot & {
    * Отсутствие поля = legacy payload без достоверного provenance.
    */
   sessionTailIds?: string[]
+  /**
+   * Разобранные, но ещё звучавшие на момент persist.
+   * После restore вычищаются из items (нет mid-play якоря).
+   */
+  pendingRemovalIds?: string[]
 }
 
 function stripPreview(track: Track): Track {
@@ -218,9 +223,9 @@ export class PlaybackQueue {
 
   /**
    * Дополняет/заменяет items уже запущенного playlist-контекста без setQueue().
-   * Сохраняет текущий трек, currentIndex (по id), history, repeat/shuffle, context.
-   * Возвращает false, если очередь больше не принадлежит ожидаемому каталогу
-   * (поиск, «Моя волна», другой playlist) или текущий трек пропал из списка.
+   * Сохраняет текущий трек как временный якорь даже если его нет в `tracks`
+   * (разобран из sys_swipes во время background prepare).
+   * Возвращает false только при чужом context или отсутствии current.
    */
   replacePlaylistItemsPreservingPlayback(
     tracks: Track[],
@@ -236,29 +241,31 @@ export class PlaybackQueue {
     const cleaned = tracks
       .filter((track) => Boolean(track.sourceId) || Boolean(track.id))
       .map(stripPreview)
-    if (cleaned.length === 0) {
-      return false
-    }
 
-    const playingId =
+    const playing =
       this.currentIndex >= 0 && this.currentIndex < this.items.length
-        ? this.items[this.currentIndex]?.id
+        ? this.items[this.currentIndex]
         : null
-    if (!playingId) {
+    const playingId = playing?.id ?? null
+    if (!playingId || !playing) {
       return false
     }
 
-    // Pending removal: не возвращать в хвост; current оставляем, пока играет.
+    // Не возвращать pending в хвост; current — только якорь.
     let nextTracks = cleaned.filter(
-      (track) =>
-        track.id === playingId || !this.pendingRemovalIds.has(track.id),
+      (track) => !this.pendingRemovalIds.has(track.id),
     )
+    const playingInIncoming = cleaned.some((track) => track.id === playingId)
     if (!nextTracks.some((track) => track.id === playingId)) {
-      const playing = this.items[this.currentIndex]
-      if (!playing) {
-        return false
-      }
       nextTracks = [playing, ...nextTracks]
+      // Разобран / отфильтрован live membership — не для будущих циклов.
+      if (!playingInIncoming) {
+        this.pendingRemovalIds.add(playingId)
+      }
+    }
+
+    if (nextTracks.length === 0) {
+      return false
     }
 
     const nextIndex = nextTracks.findIndex((track) => track.id === playingId)
@@ -455,13 +462,10 @@ export class PlaybackQueue {
       leavingId !== null && this.pendingRemovalIds.has(leavingId)
 
     if (options?.fromEnded && this.repeatMode === 'ONE') {
-      // Sorted current: не зацикливать одну удалённую композицию.
-      if (leavingWasPending) {
-        this.purgePendingTrack(leavingId!)
-        this.emit()
-        return null
+      if (!leavingWasPending) {
+        return this.current()
       }
-      return this.current()
+      // Sorted current: не повторять A — перейти к B как при обычном next.
     }
 
     const upcoming = this.peekNextIndex(options?.fromEnded === true)
@@ -790,6 +794,7 @@ export class PlaybackQueue {
         ...this.getSnapshot(),
         items: this.items.map(stripPreview),
         sessionTailIds: [...this.sessionTailIds],
+        pendingRemovalIds: [...this.pendingRemovalIds],
       }
       localStorage.setItem(PLAYBACK_QUEUE_STORAGE_KEY, JSON.stringify(payload))
     } catch {
@@ -830,7 +835,9 @@ export class PlaybackQueue {
       }
       this.context = parsePlaybackContext(data.context)
       this.sessionTailIds.clear()
+      this.pendingRemovalIds.clear()
       this.applyRestoredSessionTail(data)
+      this.purgeRestoredPendingRemovals(data)
 
       if (this.items.length > 0 && this.currentIndex < 0) {
         this.currentIndex = 0
@@ -839,6 +846,42 @@ export class PlaybackQueue {
     } catch {
       // ignore corrupt storage
     }
+  }
+
+  /**
+   * После reload mid-play якоря нет: разобранные треки не должны
+   * возвращаться в очередь (призраки sys_swipes).
+   */
+  private purgeRestoredPendingRemovals(data: PersistedPlaybackQueue): void {
+    const raw = Array.isArray(data.pendingRemovalIds)
+      ? data.pendingRemovalIds
+      : []
+    const pending = new Set(
+      raw.filter((id): id is string => typeof id === 'string' && Boolean(id)),
+    )
+    if (pending.size === 0) {
+      return
+    }
+    const pinnedId =
+      this.currentIndex >= 0 ? (this.items[this.currentIndex]?.id ?? null) : null
+    this.items = this.items.filter((track) => !pending.has(track.id))
+    for (const id of pending) {
+      this.stripTrackFromHistory(id)
+      this.sessionTailIds.delete(id)
+    }
+    this.pendingRemovalIds.clear()
+    if (this.items.length === 0) {
+      this.currentIndex = -1
+      this.playOrder = []
+      this.playOrderIndex = -1
+      return
+    }
+    if (pinnedId && !pending.has(pinnedId)) {
+      const restored = this.items.findIndex((track) => track.id === pinnedId)
+      this.rebuildPlayOrder(restored >= 0 ? restored : 0)
+      return
+    }
+    this.rebuildPlayOrder(0)
   }
 
   /**

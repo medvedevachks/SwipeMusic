@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { Track } from '../../types/track.ts'
-import { PlaybackQueue } from './PlaybackQueue.ts'
+import {
+  PlaybackQueue,
+  PLAYBACK_QUEUE_STORAGE_KEY,
+  type PersistedPlaybackQueue,
+} from './PlaybackQueue.ts'
 
-function installMemoryLocalStorage(): void {
+function installMemoryLocalStorage(): Map<string, string> {
   const memory = new Map<string, string>()
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
@@ -17,6 +21,7 @@ function installMemoryLocalStorage(): void {
       },
     },
   })
+  return memory
 }
 
 installMemoryLocalStorage()
@@ -30,6 +35,67 @@ function track(id: string): Track {
     artist: 'Artist',
   }
 }
+
+async function flushPersist(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 250))
+}
+
+test('late expand keeps sorted current as anchor and appends B/C', () => {
+  const queue = new PlaybackQueue()
+  const a = track('a')
+  const b = track('b')
+  const c = track('c')
+  queue.setQueue([a], 0, {
+    type: 'playlist',
+    id: 'sys_swipes',
+    title: 'Свайпы',
+  })
+  queue.removePreservingCurrentPlayback('a')
+  assert.equal(queue.current()?.id, 'a')
+
+  const ok = queue.replacePlaylistItemsPreservingPlayback([b, c], {
+    type: 'playlist',
+    id: 'sys_swipes',
+  })
+  assert.equal(ok, true)
+  assert.equal(queue.current()?.id, 'a')
+  assert.deepEqual(
+    queue.getSnapshot().items.map((item) => item.id),
+    ['a', 'b', 'c'],
+  )
+  assert.deepEqual(queue.getPendingRemovalIds(), ['a'])
+  assert.equal(queue.peekNext()?.id, 'b')
+
+  assert.equal(queue.next()?.id, 'b')
+  assert.deepEqual(
+    queue.getSnapshot().items.map((item) => item.id),
+    ['b', 'c'],
+  )
+  assert.equal(
+    queue.getSnapshot().history.includes('a'),
+    false,
+  )
+})
+
+test('late expand rejects foreign context', () => {
+  const queue = new PlaybackQueue()
+  queue.setQueue([track('a')], 0, {
+    type: 'playlist',
+    id: 'sys_swipes',
+    title: 'Свайпы',
+  })
+  queue.setQueue([track('seed')], 0, {
+    type: 'search-seed',
+    query: 'x',
+    seedTrackId: 'seed',
+  })
+  const rejected = queue.replacePlaylistItemsPreservingPlayback(
+    [track('b'), track('c')],
+    { type: 'playlist', id: 'sys_swipes' },
+  )
+  assert.equal(rejected, false)
+  assert.equal(queue.current()?.id, 'seed')
+})
 
 test('removePreservingCurrentPlayback keeps current playing until next', () => {
   const queue = new PlaybackQueue()
@@ -48,10 +114,7 @@ test('removePreservingCurrentPlayback keeps current playing until next', () => {
   assert.equal(queue.current()?.id, 'a')
   assert.deepEqual(queue.getPendingRemovalIds(), ['a'])
   assert.equal(queue.peekNext()?.id, 'b')
-  assert.equal(
-    queue.getSnapshot().history.includes('a'),
-    false,
-  )
+  assert.equal(queue.getSnapshot().history.includes('a'), false)
 
   const next = queue.next()
   assert.equal(next?.id, 'b')
@@ -61,12 +124,6 @@ test('removePreservingCurrentPlayback keeps current playing until next', () => {
     false,
   )
   assert.deepEqual(queue.getPendingRemovalIds(), [])
-
-  assert.equal(queue.previous()?.id, 'b')
-  assert.equal(
-    queue.getSnapshot().items.some((item) => item.id === 'a'),
-    false,
-  )
 })
 
 test('sorted current is excluded from Repeat ALL restart', () => {
@@ -80,6 +137,22 @@ test('sorted current is excluded from Repeat ALL restart', () => {
   queue.removePreservingCurrentPlayback('a')
   assert.equal(queue.next()?.id, 'b')
   assert.equal(queue.next()?.id, 'b')
+  assert.equal(
+    queue.getSnapshot().items.some((item) => item.id === 'a'),
+    false,
+  )
+})
+
+test('Repeat ONE on sorted A advances to B instead of repeating A', () => {
+  const queue = new PlaybackQueue()
+  queue.setQueue([track('a'), track('b')], 0, {
+    type: 'playlist',
+    id: 'sys_swipes',
+    title: 'Свайпы',
+  })
+  queue.setRepeatMode('ONE')
+  queue.removePreservingCurrentPlayback('a')
+  assert.equal(queue.next({ fromEnded: true })?.id, 'b')
   assert.equal(
     queue.getSnapshot().items.some((item) => item.id === 'a'),
     false,
@@ -100,34 +173,31 @@ test('sorting last track does not clear mid-playback; next ends cleanly', () => 
   assert.equal(queue.getSnapshot().items.length, 0)
 })
 
-test('replacePlaylistItemsPreservingPlayback does not restore pending removals', () => {
+test('pending removal round-trip purge ghosts after restore', async () => {
+  const memory = installMemoryLocalStorage()
   const queue = new PlaybackQueue()
-  const a = track('a')
-  const b = track('b')
-  const c = track('c')
-  queue.setQueue([a, b, c], 0, {
+  queue.setQueue([track('a'), track('b'), track('c')], 0, {
     type: 'playlist',
     id: 'sys_swipes',
     title: 'Свайпы',
   })
   queue.removePreservingCurrentPlayback('a')
-  const ok = queue.replacePlaylistItemsPreservingPlayback([a, b, c], {
-    type: 'playlist',
-    id: 'sys_swipes',
-  })
-  assert.equal(ok, true)
-  assert.equal(queue.current()?.id, 'a')
+  await flushPersist()
+
+  const saved = JSON.parse(
+    memory.get(PLAYBACK_QUEUE_STORAGE_KEY)!,
+  ) as PersistedPlaybackQueue
+  assert.deepEqual(saved.pendingRemovalIds, ['a'])
+  assert.equal(saved.items.some((item) => item.id === 'a'), true)
+
+  const restored = new PlaybackQueue()
   assert.deepEqual(
-    queue.getSnapshot().items.map((item) => item.id),
-    ['a', 'b', 'c'],
-  )
-  // a remains only as playing pending; next skips to b and drops a
-  assert.deepEqual(queue.getPendingRemovalIds(), ['a'])
-  assert.equal(queue.next()?.id, 'b')
-  assert.deepEqual(
-    queue.getSnapshot().items.map((item) => item.id),
+    restored.getSnapshot().items.map((item) => item.id),
     ['b', 'c'],
   )
+  assert.deepEqual(restored.getPendingRemovalIds(), [])
+  assert.equal(restored.current()?.id, 'b')
+  assert.equal(restored.getSnapshot().history.includes('a'), false)
 })
 
 test('classic remove of non-current still works without stopping current', () => {

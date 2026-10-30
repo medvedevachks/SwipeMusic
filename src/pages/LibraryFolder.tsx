@@ -10,8 +10,9 @@ import {
   listCanonicalItems,
   preferredTrackFromCanonical,
 } from '../services/canonical/selectors'
-import { removeSortedTrackFromSwipesQueue } from '../services/canonical/swipeInboxQueue'
+import { removeSortedCanonicalFromSwipesQueue } from '../services/canonical/swipeInboxQueue'
 import { commitCatalogChoice } from '../services/canonical/userOrganization'
+import { sourceTrackKeyOf } from '../services/canonical/mapCanonical'
 import {
   CATALOG_PLAYBACK_MESSAGE,
   cancelCatalogPlaybackGate,
@@ -81,6 +82,7 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
   const [playError, setPlayError] = useState<string | null>(null)
   const [playHint, setPlayHint] = useState<string | null>(null)
   const [sortTrack, setSortTrack] = useState<Track | null>(null)
+  const [sortCanonicalId, setSortCanonicalId] = useState<string | null>(null)
   const [sortNotice, setSortNotice] = useState<string | null>(null)
   const playGeneration = useRef(0)
 
@@ -135,11 +137,34 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
 
   const openSort = (itemCanonicalId: string) => {
     const item = tracks.find((row) => row.canonicalTrack.id === itemCanonicalId)
-    const track = item ? preferredTrackFromCanonical(item) : null
+    if (!item) {
+      return
+    }
+    // Для assign берём copy; для снятия с очереди — canonical id (см. onSelect).
+    const playingCopy = currentTrack
+      ? item.copies.find(
+          (copy) =>
+            copy.sourceTrackKey === currentTrack.id ||
+            copy.sourceTrackKey === sourceTrackKeyOf(currentTrack),
+        )
+      : null
+    const track = playingCopy
+      ? {
+          id: playingCopy.sourceTrackKey,
+          sourceId: playingCopy.sourceId,
+          externalId: playingCopy.externalId,
+          title: playingCopy.title,
+          artist: playingCopy.artist,
+          album: playingCopy.album ?? undefined,
+          durationMs: playingCopy.durationMs ?? undefined,
+          coverUrl: playingCopy.artworkUrl ?? undefined,
+        }
+      : preferredTrackFromCanonical(item)
     if (!track) {
       return
     }
     setSortNotice(null)
+    setSortCanonicalId(item.canonicalTrack.id)
     setSortTrack(track)
   }
 
@@ -147,7 +172,13 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
     if (!currentTrack || !isThisPlaylistPlaying) {
       return
     }
+    const key = sourceTrackKeyOf(currentTrack)
+    const canonicalId =
+      useCanonicalLibraryStore.getState().sourceKeyToCanonicalId[key] ??
+      useCanonicalLibraryStore.getState().sourceKeyToCanonicalId[currentTrack.id] ??
+      null
     setSortNotice(null)
+    setSortCanonicalId(canonicalId)
     setSortTrack(currentTrack)
   }
 
@@ -347,21 +378,35 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
         open={sortTrack !== null}
         trackTitle={sortTrack?.title}
         categories={categories}
-        onClose={() => setSortTrack(null)}
+        onClose={() => {
+          setSortTrack(null)
+          setSortCanonicalId(null)
+        }}
         onCreateCategory={createCategory}
         onSelect={(categoryId) => {
           if (!sortTrack) {
             return
           }
           const track = sortTrack
+          const canonicalId = sortCanonicalId
           const category = allCategories.find((item) => item.id === categoryId)
           setSortTrack(null)
-          void commitCatalogChoice(track, categoryId, category).then((ok) => {
-            if (!ok) {
+          setSortCanonicalId(null)
+          void commitCatalogChoice(track, categoryId, category).then((result) => {
+            if (result.status === 'failed') {
               setSortNotice(SAVE_FAILED_MESSAGE)
               return
             }
-            removeSortedTrackFromSwipesQueue(track.id)
+            if (result.status === 'partial') {
+              setSortNotice(
+                'Сохранено в каталог, но не удалось убрать из «Свайпов». Нажмите «В каталог» ещё раз.',
+              )
+              return
+            }
+            const id = result.canonicalTrackId ?? canonicalId
+            if (id) {
+              removeSortedCanonicalFromSwipesQueue(id)
+            }
             setSortNotice(null)
           })
         }}

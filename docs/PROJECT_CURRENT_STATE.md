@@ -233,7 +233,7 @@ Last.fm и MusicBrainz для рекомендаций **не** подключа
 
 | Приоритет | Задача | Суть |
 |---|---|---|
-| **1** | LIBRARY-UX-03A/04 commit/push/deploy | «Свайпы» = liked inbox + review UX-04 (deferred queue removal, expand race, partial like, bootstrap 409). На KOMPUTER готово **без** commit. Дождаться решения владельца. |
+| **1** | LIBRARY-UX review → S1 deploy | Inbox `sys_swipes` на `feature/deploy-windows-01` (UX-03…06: deferred removal, late expand anchor, canonical queue id, partial assign/unassign, persist purge). Deploy только после PASS review. |
 | **2** | RELEASE / S1 sync | Production baseline `26e056f`; frontend deploy на S1 только с Server. **Без** restart backend/Caddy/AD без задачи. |
 | **3** | RADIO-08 | Убрать нерелевантные и повторяющиеся треки волны/свайпов на уровне ранжирования ядра. |
 | **4** | MEDIA-REMOTE-02 | Проверить физические кнопки руля на Android-магнитоле. |

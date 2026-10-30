@@ -401,7 +401,7 @@ test('swipe catalog assignment writes canonical membership', async () => {
       favorite: false,
       system: false,
     })
-    assert.equal(saved, true)
+    assert.equal(saved.status, 'ok')
     assert.deepEqual(calls.assign, [{ catalogId: 'cat_car', canonicalTrackId: 'can_x' }])
     assert.deepEqual(useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds, ['cat_car'])
     assert.equal(useCollectionStore.getState().assignments.length, 0)
@@ -660,7 +660,7 @@ test('categorize removes sys_swipes membership and keeps liked', async () => {
     favorite: false,
     system: false,
   })
-  assert.equal(saved, true)
+  assert.equal(saved.status, 'ok')
   assert.deepEqual(calls.assign, [{ catalogId: 'cat_car', canonicalTrackId: 'can_x' }])
   assert.deepEqual(calls.unassign, [
     { catalogId: 'sys_swipes', canonicalTrackId: 'can_x' },
@@ -670,8 +670,82 @@ test('categorize removes sys_swipes membership and keeps liked', async () => {
   assert.equal(stored?.state.liked, true)
   assert.equal(useCollectionStore.getState().history[0]?.action, 'categorize')
   const again = await commitCatalogChoice(track, 'cat_car')
-  assert.equal(again, true)
+  assert.equal(again.status, 'ok')
   assert.equal(calls.assign.length, 1)
+  assert.equal(useCollectionStore.getState().history.length, 1)
+  resetRuntime()
+})
+
+test('categorize partial unassign keeps target membership and retries without second assign', async () => {
+  resetRuntime()
+  arm()
+  const track = sourceTrack('yandex-music', '101', 'Город')
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [
+    canonicalItem(
+      'can_x',
+      'Город',
+      [sourceCopy('yandex-music', '101', 'can_x', 'Город')],
+      true,
+      ['sys_swipes'],
+    ),
+  ])
+  let unassignFails = true
+  const calls = installRemote({
+    'yandex-music:101': identityFrom('can_x', [track]),
+  })
+  setCanonicalRemote({
+    ensureIdentity: async (snapshot) => {
+      calls.identity.push(snapshot)
+      return identityFrom('can_x', [track])
+    },
+    patchCanonicalLiked: async (id, liked) => {
+      calls.liked.push({ id, liked })
+      const item = useCanonicalLibraryStore.getState().itemsById[id]!
+      return {
+        item: {
+          ...item,
+          state: { ...item.state, liked, likedAt: liked ? NOW : null },
+        },
+      }
+    },
+    assignCanonical: async (catalogId, canonicalTrackId) => {
+      calls.assign.push({ catalogId, canonicalTrackId })
+      useCanonicalLibraryStore.getState().addCatalog(canonicalTrackId, catalogId)
+      return {
+        membership: { catalogId, canonicalTrackId, createdAt: NOW },
+      }
+    },
+    unassignCanonical: async (catalogId, canonicalTrackId) => {
+      calls.unassign.push({ catalogId, canonicalTrackId })
+      if (unassignFails) {
+        throw new LibraryHttpError(500)
+      }
+      useCanonicalLibraryStore.getState().removeCatalog(canonicalTrackId, catalogId)
+    },
+  })
+  const first = await commitCatalogChoice(track, 'cat_party')
+  assert.equal(first.status, 'partial')
+  if (first.status === 'partial') {
+    assert.equal(first.reason, 'inbox_unassign_failed')
+  }
+  assert.deepEqual(calls.assign, [
+    { catalogId: 'cat_party', canonicalTrackId: 'can_x' },
+  ])
+  assert.equal(calls.unassign.length, 1)
+  assert.deepEqual(
+    useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds.sort(),
+    ['cat_party', 'sys_swipes'].sort(),
+  )
+  assert.equal(useCollectionStore.getState().history.length, 1)
+  unassignFails = false
+  const retry = await commitCatalogChoice(track, 'cat_party')
+  assert.equal(retry.status, 'ok')
+  assert.equal(calls.assign.length, 1)
+  assert.equal(calls.unassign.length, 2)
+  assert.deepEqual(
+    useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds,
+    ['cat_party'],
+  )
   assert.equal(useCollectionStore.getState().history.length, 1)
   resetRuntime()
 })

@@ -145,14 +145,27 @@ export function commitSwipeLike(track: Track): Promise<boolean> {
   return pending
 }
 
+export type CatalogChoiceResult =
+  | { status: 'ok'; canonicalTrackId: string | null }
+  | { status: 'failed' }
+  | {
+      status: 'partial'
+      reason: 'inbox_unassign_failed'
+      canonicalTrackId: string
+    }
+
+/**
+ * Сохранить в пользовательский каталог и снять с sys_swipes.
+ * Успешный assign не откатывается при ошибке unassign (partial).
+ */
 export async function commitCatalogChoice(
   track: Track,
   catalogId: string,
   category?: Category,
-): Promise<boolean> {
+): Promise<CatalogChoiceResult> {
   if (catalogId === SYS_SWIPES_ID) {
     // Inbox только через like, не через picker «Каталог».
-    return false
+    return { status: 'failed' }
   }
 
   const key = sourceTrackKeyOf(track)
@@ -164,17 +177,34 @@ export async function commitCatalogChoice(
   if (!alreadyInTarget) {
     const saved = await assignSourceToCatalog(track, catalogId)
     if (!saved) {
-      return false
+      return { status: 'failed' }
     }
   }
 
   const after = useCanonicalLibraryStore.getState()
-  const canonicalId = priorId ?? after.sourceKeyToCanonicalId[key]
+  const canonicalId = priorId ?? after.sourceKeyToCanonicalId[key] ?? null
   const item = canonicalId ? after.itemsById[canonicalId] : null
-  if (canonicalId && item?.catalogIds.includes(SYS_SWIPES_ID)) {
-    // После разбора в пользовательский каталог — выйти из накопителя sys_swipes.
-    // liked не трогаем (unassign только membership).
-    await removeCanonicalFromCatalog(canonicalId, SYS_SWIPES_ID)
+  const stillInInbox = Boolean(
+    canonicalId && item?.catalogIds.includes(SYS_SWIPES_ID),
+  )
+
+  if (stillInInbox && canonicalId) {
+    // liked не трогаем. Не откатываем assign при ошибке unassign.
+    const removed = await removeCanonicalFromCatalog(canonicalId, SYS_SWIPES_ID)
+    if (!removed) {
+      if (!alreadyInTarget) {
+        useCollectionStore.getState().recordHistory({
+          track,
+          action: 'categorize',
+          category,
+        })
+      }
+      return {
+        status: 'partial',
+        reason: 'inbox_unassign_failed',
+        canonicalTrackId: canonicalId,
+      }
+    }
   }
 
   if (!alreadyInTarget) {
@@ -184,5 +214,5 @@ export async function commitCatalogChoice(
       category,
     })
   }
-  return true
+  return { status: 'ok', canonicalTrackId: canonicalId }
 }
