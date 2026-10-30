@@ -96,11 +96,8 @@ function metaFor(id: PlaybackSessionId): SessionSlotMeta {
 function setup(options?: {
   prepareDelayMs?: number
   prepareFail?: boolean
-  commitFail?: Parameters<typeof createFakePlayerPort>[0] extends infer O
-    ? O extends { commitFail?: infer C }
-      ? C
-      : never
-    : never
+  commitDelayMs?: number
+  commitFail?: { ok: false; reason: 'load_failed' | 'user_gesture_required' | 'error'; message?: string }
 }) {
   installMemoryLocalStorage()
   const store = createPlaybackSessionStore({
@@ -135,6 +132,7 @@ function setup(options?: {
     initialTrackId: 'wave-1',
     initialPosition: 12.5,
     commitFail: options?.commitFail,
+    commitDelayMs: options?.commitDelayMs,
   })
   const persist = createFakePersistPort()
   const coordinator = createSessionSwitchCoordinator({
@@ -459,11 +457,164 @@ describe('SessionSwitchCoordinator DEV-04', () => {
     )
     const result = prepareExistingLiveQueueForSessionMode(live)
     assert.equal(result.persistenceMode, 'session')
+    assert.equal(result.discardedUntrustedQueue, false)
     assert.equal(live.getPersistenceMode(), 'session')
     assert.equal(live.current()?.id, 'x')
   })
 
   it('фиксирует PLAYBACK-BUG-01 как отдельный дефект', () => {
     assert.ok(PLAYBACK_BUG_01.includes('PLAYBACK-BUG-01'))
+  })
+})
+
+describe('PLAYBACK-DEV-04A invariants', () => {
+  it('полный rollback: SEARCH не потерян, WAVE активна, другие слоты целы', async () => {
+    const { coordinator, store, queue, player } = setup({
+      commitFail: { ok: false, reason: 'load_failed', message: 'boom' },
+    })
+    // Ранее сохранённая SEARCH-сессия
+    store.replaceSlot('search', {
+      meta: { kind: 'search', query: 'old', seedTrackId: 'old-s' },
+      queue: queueOf(['old-search'], 0, {
+        context: { type: 'search', query: 'old' },
+        history: ['old-search'],
+        historyIndex: 0,
+      }),
+    })
+    store.replaceSlot('album', {
+      meta: { kind: 'album', albumId: 'keep', title: 'Keep', phase: 'album' },
+      queue: queueOf(['album-keep']),
+    })
+    const albumId = store.getSlot('album').queue.items[0]?.id
+
+    const result = await coordinator.switchTo({
+      target: 'search',
+      meta: { kind: 'search', query: 'new', seedTrackId: 'new-s' },
+      targetQueue: queueOf(['new-search']),
+      startTrackId: 'new-search',
+    })
+    assert.equal(result.ok, false)
+    assert.equal(store.getActiveSessionId(), 'wave')
+    assert.equal(queue.current()?.id, 'wave-1')
+    assert.equal(player.getCurrentTrackId(), 'wave-1')
+    // Прежняя SEARCH восстановлена
+    assert.equal(store.getSlot('search').queue.items[0]?.id, 'old-search')
+    assert.equal(
+      store.getSlot('search').meta.kind === 'search'
+        ? store.getSlot('search').meta.query
+        : null,
+      'old',
+    )
+    assert.equal(store.getSlot('album').queue.items[0]?.id, albumId)
+    assert.ok(store.getSlot('wave').queue.history.includes('wave-1'))
+  })
+
+  it('B commit медленный после C: B cancelled, C остаётся на плеере', async () => {
+    const { coordinator, store, player } = setup({ prepareDelayMs: 5 })
+    player.nextCommitDelayMs = 80
+    const b = coordinator.switchTo({
+      target: 'search',
+      meta: metaFor('search'),
+      targetQueue: queueOf(['B']),
+      startTrackId: 'B',
+    })
+    await new Promise((r) => setTimeout(r, 20))
+    const c = await coordinator.switchTo({
+      target: 'catalog',
+      meta: { kind: 'catalog', catalogId: 'c', title: 'C' },
+      targetQueue: queueOf(['C']),
+      startTrackId: 'C',
+    })
+    assert.equal(c.ok, true)
+    assert.equal(player.getCurrentTrackId(), 'C')
+    const bResult = await b
+    assert.equal(bResult.ok, false)
+    assert.equal(player.getCurrentTrackId(), 'C')
+    assert.equal(store.getActiveSessionId(), 'catalog')
+  })
+
+  it('legacy bootstrap: discardUntrustedLegacyQueue очищает RAM, ключ v1 сохраняет', () => {
+    const memory = installMemoryLocalStorage()
+    memory.set(
+      PLAYBACK_QUEUE_STORAGE_KEY,
+      JSON.stringify({
+        items: [
+          {
+            id: 'stranger',
+            sourceId: 'y',
+            externalId: 'stranger',
+            title: 'S',
+            artist: 'A',
+          },
+        ],
+        currentIndex: 0,
+        playOrder: [0],
+        playOrderIndex: 0,
+        repeatMode: 'OFF',
+        shuffleMode: 'OFF',
+        history: [],
+        historyIndex: -1,
+        context: { type: 'swipe' },
+        sessionTailIds: [],
+      }),
+    )
+    const live = new PlaybackQueue({ persistenceMode: 'legacy' })
+    assert.equal(live.current()?.id, 'stranger')
+    const result = prepareExistingLiveQueueForSessionMode(live, {
+      discardUntrustedLegacyQueue: true,
+    })
+    assert.equal(result.persistenceMode, 'session')
+    assert.equal(result.discardedUntrustedQueue, true)
+    assert.equal(live.current(), null)
+    assert.equal(live.getPersistenceMode(), 'session')
+    assert.ok(memory.get(PLAYBACK_QUEUE_STORAGE_KEY)?.includes('stranger'))
+  })
+
+  it('pending removal: runtime rollback якорит призрак, durable — без переноса позиции', async () => {
+    const { coordinator, store, queue, player } = setup({
+      commitFail: { ok: false, reason: 'load_failed' },
+    })
+    // Live: a pending, b next; player still on a @ 42
+    queue.setQueue(
+      [
+        { id: 'a', sourceId: 'y', externalId: 'a', title: 'A', artist: 'X' },
+        { id: 'b', sourceId: 'y', externalId: 'b', title: 'B', artist: 'X' },
+      ],
+      0,
+      { type: 'playlist', id: 'p', title: 'P' },
+    )
+    queue.removePreservingCurrentPlayback('a')
+    player.setPlaying('a', 42)
+    store.setActiveSessionId('wave')
+    store.replaceSlot('wave', {
+      meta: { kind: 'wave' },
+      queue: queueOf(['a', 'b'], 0),
+    })
+
+    const durable = playbackExportToSessionQueue(queue.exportSessionState(), {
+      positionSeconds: 42,
+      playingTrackId: 'a',
+      pendingRemovalIds: queue.getPendingRemovalIds(),
+      phase: 'playing',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    })
+    assert.equal(durable.items[0]?.id, 'b')
+    assert.equal(durable.positionSeconds, 0)
+
+    const runtime = queue.exportRuntimeSessionState()
+    assert.ok(runtime.pendingRemovalIds.includes('a'))
+    assert.equal(runtime.state.items[runtime.state.currentIndex]?.id, 'a')
+
+    await coordinator.switchTo({
+      target: 'search',
+      meta: metaFor('search'),
+      targetQueue: queueOf(['s1']),
+      startTrackId: 's1',
+    })
+    // После rollback: runtime вернул призрак a и позицию 42
+    assert.equal(store.getActiveSessionId(), 'wave')
+    assert.equal(player.getCurrentTrackId(), 'a')
+    assert.equal(player.getPositionSeconds(), 42)
+    assert.ok(queue.getPendingRemovalIds().includes('a'))
   })
 })

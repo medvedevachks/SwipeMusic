@@ -24,7 +24,13 @@ export {
   prepareExistingLiveQueueForSessionMode,
   PLAYBACK_BUG_01,
 } from './migrateLiveQueue.ts'
+export type { PrepareLiveQueueForSessionModeOptions } from './migrateLiveQueue.ts'
 export {
   sessionQueueToPlaybackQueueState,
   playbackExportToSessionQueue,
+  captureRuntimePlaybackAnchor,
 } from './queueSnapshotBridge.ts'
+export type {
+  LiveRuntimeCapture,
+  RuntimePlaybackAnchor,
+} from './ports.ts'

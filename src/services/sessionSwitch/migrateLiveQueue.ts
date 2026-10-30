@@ -5,17 +5,37 @@
  * подставлять параллельно с singleton, которым пользуется AudioPlayer.
  *
  * Безопасный путь после авторизации (вызывать на том же singleton):
- *   prepareExistingLiveQueueForSessionMode(getPlaybackQueue())
+ *   prepareExistingLiveQueueForSessionMode(getPlaybackQueue(), {
+ *     discardUntrustedLegacyQueue: true,
+ *   })
  *
- * DEV-04: эта функция НЕ вызывается из production playback path.
+ * Не вызывается из production bootstrap в DEV-04/04A.
  */
 import type { PlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
 
+export type PrepareLiveQueueForSessionModeOptions = {
+  /**
+   * Если true — очистить in-memory очередь, ранее поднятую из legacy v1
+   * без trusted userId. Legacy-ключ на диске НЕ удаляется.
+   * Нужно после login другого аккаунта, чтобы не раскрыть чужую очередь.
+   */
+  discardUntrustedLegacyQueue?: boolean
+}
+
 export function prepareExistingLiveQueueForSessionMode(
   liveQueue: PlaybackQueue,
-): { persistenceMode: 'session' } {
+  options: PrepareLiveQueueForSessionModeOptions = {},
+): {
+  persistenceMode: 'session'
+  discardedUntrustedQueue: boolean
+} {
   liveQueue.detachLegacyPersistence()
-  return { persistenceMode: 'session' }
+  let discardedUntrustedQueue = false
+  if (options.discardUntrustedLegacyQueue) {
+    liveQueue.clear()
+    discardedUntrustedQueue = true
+  }
+  return { persistenceMode: 'session', discardedUntrustedQueue }
 }
 
 /**

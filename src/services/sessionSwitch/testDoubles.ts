@@ -13,12 +13,8 @@ import type {
 } from './ports.ts'
 
 export type FakePrepareOptions = {
-  /** Delay before resolve — for race tests. */
   delayMs?: number
   fail?: boolean
-  /** If set, pause detection: prepare must NOT call this. */
-  onPauseAttempt?: () => void
-  pauses?: number
 }
 
 export function createFakePreparePort(
@@ -34,7 +30,6 @@ export function createFakePreparePort(
     },
     async prepareTrack(request: TrackPrepareRequest): Promise<PreparedTrackHandle> {
       state.prepareCount += 1
-      // Simulate non-destructive work — must never pause
       if (options.delayMs) {
         await new Promise((r) => setTimeout(r, options.delayMs))
       }
@@ -52,22 +47,30 @@ export function createFakePreparePort(
 export function wrapQueuePort(queue: PlaybackQueue): LiveQueuePort {
   return {
     exportSessionState: () => queue.exportSessionState(),
+    exportRuntimeSessionState: () => queue.exportRuntimeSessionState(),
     importSessionState: (raw) => queue.importSessionState(raw),
+    importRuntimeSessionState: (state, pending) =>
+      queue.importRuntimeSessionState(state, pending),
     getPendingRemovalIds: () => queue.getPendingRemovalIds(),
     getPersistenceMode: () => queue.getPersistenceMode(),
     detachLegacyPersistence: () => queue.detachLegacyPersistence(),
+    clear: () => queue.clear(),
   }
 }
 
 export type FakePlayerOptions = {
   commitFail?: CommitPlayResult & { ok: false }
   rollbackFail?: RollbackPlayResult & { ok: false }
-  /** Track currently "playing" during Prepare (old music). */
   initialTrackId?: string | null
   initialPosition?: number
   initialGeneration?: number
+  /** Simulate slow physical commit (race tests). */
+  commitDelayMs?: number
 }
 
+/**
+ * Fake physical port с claim-generation на входе commitPlay (DEV-04A контракт).
+ */
 export function createFakePlayerPort(
   options: FakePlayerOptions = {},
 ): PhysicalPlayerPort & {
@@ -75,6 +78,8 @@ export function createFakePlayerPort(
   commitCount: number
   rollbackCount: number
   pausedDuringPrepare: boolean
+  /** Одноразовая задержка следующего commitPlay (для гонок). */
+  nextCommitDelayMs: number | null
   setPlaying(trackId: string | null, position: number): void
   bumpGeneration(): number
 } {
@@ -84,9 +89,9 @@ export function createFakePlayerPort(
   let pauseCount = 0
   let commitCount = 0
   let rollbackCount = 0
-  let inPrepareWindow = true
 
   const api = {
+    nextCommitDelayMs: null as number | null,
     get pauseCount() {
       return pauseCount
     },
@@ -117,12 +122,27 @@ export function createFakePlayerPort(
       return position
     },
     async commitPlay(input: CommitPlayInput): Promise<CommitPlayResult> {
-      inPrepareWindow = false
       commitCount += 1
-      if (input.playerGenerationAtPrepare !== generation) {
-        // Newer physical play advanced generation
-        return { ok: false, reason: 'stale' }
+      void input.playerGenerationAtPrepare
+      // Claim immediately BEFORE any await — устаревший commit после
+      // более нового claim не перезапишет playback (DEV-04A).
+      const commitClaimGeneration = ++generation
+
+      const delay =
+        api.nextCommitDelayMs ?? options.commitDelayMs ?? 0
+      api.nextCommitDelayMs = null
+      if (delay > 0) {
+        await new Promise((r) => setTimeout(r, delay))
       }
+
+      if (generation !== commitClaimGeneration) {
+        return {
+          ok: false,
+          reason: 'cancelled',
+          message: 'commit superseded after claim; newer playback untouched',
+        }
+      }
+
       if (options.commitFail) {
         if (options.commitFail.reason === 'user_gesture_required') {
           return options.commitFail
@@ -130,13 +150,20 @@ export function createFakePlayerPort(
         pauseCount += 1
         return options.commitFail
       }
-      generation += 1
+
       trackId = input.trackId
       position = 0
       return { ok: true, playerGeneration: generation }
     },
     async rollbackPlay(input: RollbackPlayInput): Promise<RollbackPlayResult> {
       rollbackCount += 1
+      // Не откатывать звук, если уже есть более новый commit claim
+      if (
+        input.commitClaimGeneration != null &&
+        generation !== input.commitClaimGeneration
+      ) {
+        return { ok: false, reason: 'cancelled', message: 'rollback superseded' }
+      }
       if (options.rollbackFail) {
         return options.rollbackFail
       }
@@ -144,10 +171,8 @@ export function createFakePlayerPort(
       position = input.positionSeconds
       return { ok: true, restored: input.trackId != null }
     },
-    /** Test helper: simulate pause (should only happen on commit path). */
     pause() {
       pauseCount += 1
-      void inPrepareWindow
     },
   }
   return api
@@ -168,7 +193,6 @@ export function createFakePersistPort(): SessionSwitchPersistPort & {
     },
     persistAfterCommit() {
       state.commits += 1
-      // never touch legacy
     },
   }
 }

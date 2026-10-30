@@ -1,23 +1,30 @@
 /**
- * Координатор Prepare → Validate → Commit → Finalize/Rollback (PLAYBACK-DEV-04).
+ * Координатор Prepare → Validate → Commit → Finalize/Rollback (PLAYBACK-DEV-04/04A).
  * Не подключён к PlaybackIntent / production AudioPlayer (DEV-05).
  */
 import type { PlaybackSessionStore } from '../playbackSession/PlaybackSessionStore.ts'
-import { isMetaCompatibleWithSession } from '../playbackSession/clone.ts'
+import {
+  clonePlaybackSessionSlot,
+  isMetaCompatibleWithSession,
+} from '../playbackSession/clone.ts'
 import type {
   PlaybackSessionId,
+  PlaybackSessionSlot,
   SessionPlaybackPhase,
   SessionQueueSnapshot,
   SessionSwitchToken,
 } from '../playbackSession/types.ts'
 import {
+  captureRuntimePlaybackAnchor,
   playbackExportToSessionQueue,
   sessionQueueToPlaybackQueueState,
 } from './queueSnapshotBridge.ts'
 import type {
   LiveQueuePort,
+  LiveRuntimeCapture,
   PhysicalPlayerPort,
   PreparedTrackHandle,
+  RuntimePlaybackAnchor,
   SessionSwitchPersistPort,
   SwitchPlayRequest,
   TrackPreparePort,
@@ -52,7 +59,6 @@ export type SwitchResult =
         | 'invalid_request'
       playRequestId: number
       message?: string
-      /** Логическая сессия после операции (может быть прежняя). */
       activeSessionId: PlaybackSessionId | null
       phase?: SessionPlaybackPhase
     }
@@ -63,8 +69,8 @@ type PendingSwitch = {
   prepared: PreparedTrackHandle
   playerGenerationAtPrepare: number
   sourceSessionId: PlaybackSessionId | null
-  /** Снимок источника на Prepare — НЕ использовать для финальной позиции. */
-  sourceHintAtPrepare: SessionQueueSnapshot | null
+  /** Предыдущее содержимое целевого слота до overwrite — для полного rollback. */
+  previousTargetSlot: PlaybackSessionSlot | null
 }
 
 export type SessionSwitchCoordinatorOptions = {
@@ -95,7 +101,6 @@ export class SessionSwitchCoordinator {
 
   private phase: CoordinatorPhase = 'idle'
   private pending: PendingSwitch | null = null
-  /** UI navigation never triggers music switch — explicit no-op surface for tests. */
   private uiNavigationCount = 0
 
   constructor(options: SessionSwitchCoordinatorOptions) {
@@ -116,19 +121,10 @@ export class SessionSwitchCoordinator {
     return this.uiNavigationCount
   }
 
-  /**
-   * Навигация UI не инициирует переключение музыки.
-   * Контракт для DEV-05: роутер/BottomNav зовут это, а не switchTo.
-   */
   onUiNavigation(_path?: string): void {
     this.uiNavigationCount += 1
-    // намеренно пусто — нет switchTo / prepare / pause
   }
 
-  /**
-   * Инвалидация незавершённых операций при logout / смене пользователя.
-   * Store.rebindUser / clearForLogout уже bump playRequestId.
-   */
   invalidatePending(reason: 'logout' | 'user_rebind' = 'logout'): void {
     this.pending = null
     this.phase = 'idle'
@@ -170,8 +166,9 @@ export class SessionSwitchCoordinator {
     const switchEpochAtStart = this.store.getSwitchEpoch()
     const targetGenAtStart = this.store.getSlot(request.target).slotGeneration
     const sourceSessionId = this.store.getActiveSessionId()
-    const sourceHintAtPrepare =
-      sourceSessionId !== null ? this.store.getSlot(sourceSessionId).queue : null
+    const previousTargetSlot = clonePlaybackSessionSlot(
+      this.store.getSlot(request.target),
+    )
 
     this.pending = null
     this.phase = 'preparing'
@@ -195,6 +192,7 @@ export class SessionSwitchCoordinator {
       }
     }
 
+    // После await Prepare
     if (!this.isFresh(playRequestId, switchEpochAtStart)) {
       this.phase = 'idle'
       return {
@@ -205,7 +203,6 @@ export class SessionSwitchCoordinator {
       }
     }
 
-    // Validate: target slot generation не изменилась внешним replace
     this.phase = 'validating'
     if (this.store.getSlot(request.target).slotGeneration !== targetGenAtStart) {
       this.phase = 'idle'
@@ -240,7 +237,7 @@ export class SessionSwitchCoordinator {
       prepared,
       playerGenerationAtPrepare,
       sourceSessionId,
-      sourceHintAtPrepare,
+      previousTargetSlot,
     }
 
     return this.commitPending()
@@ -273,29 +270,40 @@ export class SessionSwitchCoordinator {
 
     this.phase = 'committing'
 
-    // Snapshot непосредственно перед Commit (свежая позиция).
-    const liveExport = this.queue.exportSessionState()
+    // --- Снимки непосредственно перед мутацией ---
+    const runtimeCapture: LiveRuntimeCapture = this.queue.exportRuntimeSessionState()
     const positionNow = this.player.getPositionSeconds()
     const playingId = this.player.getCurrentTrackId()
     const pendingRemovalIds = this.queue.getPendingRemovalIds()
-    const sourceQueue = playbackExportToSessionQueue(liveExport, {
-      positionSeconds: positionNow,
+
+    const runtimeAnchor = captureRuntimePlaybackAnchor({
       playingTrackId: playingId,
+      positionSeconds: positionNow,
       pendingRemovalIds,
-      phase: 'user_paused',
-      updatedAt: this.now(),
     })
 
-    // Сохранить предыдущую активную сессию (если была).
+    // Durable для SessionStore (призраки вычищены, позиция не на чужой трек)
+    const durableSourceQueue = playbackExportToSessionQueue(
+      this.queue.exportSessionState(),
+      {
+        positionSeconds: positionNow,
+        playingTrackId: playingId,
+        pendingRemovalIds,
+        phase: 'user_paused',
+        updatedAt: this.now(),
+      },
+    )
+
+    // 1) Сохранить source slot (durable)
     if (sourceSessionId) {
       const prevMeta = this.store.getSlot(sourceSessionId).meta
       this.store.replaceSlot(sourceSessionId, {
         meta: prevMeta,
-        queue: sourceQueue,
+        queue: durableSourceQueue,
       })
     }
 
-    // Записать целевой слот (catalog A→B / album A→B — overwrite того же слота).
+    // 2) Overwrite target (предыдущий target сохранён в previousTargetSlot)
     this.store.replaceSlot(request.target, {
       meta: request.meta,
       queue: {
@@ -304,18 +312,36 @@ export class SessionSwitchCoordinator {
       },
     })
 
-    // Физическая очередь: import без legacy write (importSessionState detaches).
+    // 3) Live queue → target
     const importResult = this.queue.importSessionState(
       sessionQueueToPlaybackQueueState(request.targetQueue),
     )
     if (!importResult.ok) {
-      return this.rollbackAfterFailedCommit(pending, sourceQueue, {
-        reason: 'commit_failed',
-        message: 'live queue import failed',
+      return this.rollbackAfterFailedCommit(pending, {
+        durableSourceQueue,
+        runtimeCapture,
+        runtimeAnchor,
+        failure: {
+          reason: 'commit_failed',
+          message: 'live queue import failed',
+        },
       })
     }
 
-    // Не bump switchEpoch до успеха физического play — иначе stale-логика сломается.
+    // После мутаций — снова свежесть перед физическим commit
+    if (!this.isFresh(token.playRequestId, token.switchEpoch)) {
+      return this.rollbackAfterFailedCommit(pending, {
+        durableSourceQueue,
+        runtimeCapture,
+        runtimeAnchor,
+        failure: {
+          reason: 'stale',
+          message: 'superseded before physical commit',
+        },
+        skipPhysicalRollback: true,
+      })
+    }
+
     const commitResult = await this.player.commitPlay({
       trackId: prepared.trackId,
       preparedRef: prepared.preparedRef,
@@ -323,8 +349,8 @@ export class SessionSwitchCoordinator {
       playerGenerationAtPrepare,
     })
 
+    // После await commitPlay
     if (!this.isFresh(token.playRequestId, token.switchEpoch)) {
-      // Более новый Play уже идёт — не откатываем его успех.
       this.pending = null
       this.phase = 'idle'
       return {
@@ -332,21 +358,58 @@ export class SessionSwitchCoordinator {
         reason: 'stale',
         playRequestId: token.playRequestId,
         activeSessionId: this.store.getActiveSessionId(),
-        message: 'skip rollback: newer play is in flight',
+        message: 'skip rollback: newer play owns the player',
       }
     }
 
     if (!commitResult.ok) {
+      if (
+        commitResult.reason === 'stale' ||
+        commitResult.reason === 'cancelled'
+      ) {
+        this.pending = null
+        this.phase = 'idle'
+        return {
+          ok: false,
+          reason: 'stale',
+          playRequestId: token.playRequestId,
+          activeSessionId: this.store.getActiveSessionId(),
+          message: commitResult.message ?? commitResult.reason,
+        }
+      }
       if (commitResult.reason === 'user_gesture_required') {
-        return this.rollbackAfterFailedCommit(pending, sourceQueue, {
-          reason: 'user_gesture_required',
-          message: commitResult.message,
+        return this.rollbackAfterFailedCommit(pending, {
+          durableSourceQueue,
+          runtimeCapture,
+          runtimeAnchor,
+          failure: {
+            reason: 'user_gesture_required',
+            message: commitResult.message,
+          },
         })
       }
-      return this.rollbackAfterFailedCommit(pending, sourceQueue, {
-        reason: 'commit_failed',
-        message: commitResult.message ?? commitResult.reason,
+      return this.rollbackAfterFailedCommit(pending, {
+        durableSourceQueue,
+        runtimeCapture,
+        runtimeAnchor,
+        failure: {
+          reason: 'commit_failed',
+          message: commitResult.message ?? commitResult.reason,
+        },
       })
+    }
+
+    // Успех: ещё раз свежесть перед finalize
+    if (!this.isFresh(token.playRequestId, token.switchEpoch)) {
+      this.pending = null
+      this.phase = 'idle'
+      return {
+        ok: false,
+        reason: 'stale',
+        playRequestId: token.playRequestId,
+        activeSessionId: this.store.getActiveSessionId(),
+        message: 'superseded after physical commit; leaving newer owner intact',
+      }
     }
 
     this.phase = 'finalizing'
@@ -365,7 +428,7 @@ export class SessionSwitchCoordinator {
           sourceSessionId,
         })
       } catch {
-        // best-effort; нет общей транзакции 5 ключей
+        // best-effort
       }
     }
 
@@ -380,18 +443,32 @@ export class SessionSwitchCoordinator {
 
   private async rollbackAfterFailedCommit(
     pending: PendingSwitch,
-    sourceQueueSnapshot: SessionQueueSnapshot,
-    failure: {
-      reason:
-        | 'commit_failed'
-        | 'user_gesture_required'
-        | 'rollback_partial'
-        | 'prepare_failed'
-      message?: string
+    args: {
+      durableSourceQueue: SessionQueueSnapshot
+      runtimeCapture: LiveRuntimeCapture
+      runtimeAnchor: RuntimePlaybackAnchor
+      failure: {
+        reason:
+          | 'commit_failed'
+          | 'user_gesture_required'
+          | 'rollback_partial'
+          | 'prepare_failed'
+          | 'stale'
+        message?: string
+      }
+      skipPhysicalRollback?: boolean
     },
   ): Promise<SwitchResult> {
     this.phase = 'rolling_back'
-    const { token, sourceSessionId, playerGenerationAtPrepare } = pending
+    const { token, sourceSessionId, previousTargetSlot, playerGenerationAtPrepare } =
+      pending
+    const {
+      durableSourceQueue,
+      runtimeCapture,
+      runtimeAnchor,
+      failure,
+      skipPhysicalRollback,
+    } = args
 
     if (!this.isFresh(token.playRequestId, token.switchEpoch)) {
       this.pending = null
@@ -405,47 +482,84 @@ export class SessionSwitchCoordinator {
       }
     }
 
-    // Восстановить live queue из снимка источника (логическое состояние).
+    // Транзакционный откат целевого слота (не потерять прежний SEARCH и т.п.)
+    if (previousTargetSlot) {
+      this.store.replaceSlot(previousTargetSlot.id, {
+        meta: previousTargetSlot.meta,
+        queue: previousTargetSlot.queue,
+      })
+    }
+
+    // Восстановить active + live runtime (с pending ghosts)
     if (sourceSessionId) {
       this.store.setActiveSessionId(sourceSessionId)
-      // source slot уже записан актуальным снимком перед commit
-      this.queue.importSessionState(
-        sessionQueueToPlaybackQueueState(sourceQueueSnapshot),
+      // durable slot уже записан актуальным durableSourceQueue
+      void durableSourceQueue
+      this.queue.importRuntimeSessionState(
+        runtimeCapture.state,
+        runtimeCapture.pendingRemovalIds,
       )
     }
 
-    const rollback = await this.player.rollbackPlay({
-      trackId:
-        sourceQueueSnapshot.currentIndex >= 0
-          ? (sourceQueueSnapshot.items[sourceQueueSnapshot.currentIndex]?.id ??
-            null)
-          : null,
-      positionSeconds: sourceQueueSnapshot.positionSeconds,
-      playRequestId: token.playRequestId,
-      playerGenerationAtPrepare,
-    })
-
-    this.pending = null
-    this.phase = 'idle'
-
-    if (!rollback.ok && rollback.reason === 'user_gesture_required') {
-      return {
-        ok: false,
-        reason: 'user_gesture_required',
+    if (!skipPhysicalRollback) {
+      const rollback = await this.player.rollbackPlay({
+        trackId: runtimeAnchor.trackId,
+        positionSeconds: runtimeAnchor.positionSeconds,
         playRequestId: token.playRequestId,
-        activeSessionId: this.store.getActiveSessionId(),
-        phase: 'user_gesture_required',
-        message: rollback.message,
+        playerGenerationAtPrepare,
+      })
+
+      // После await rollback
+      if (!this.isFresh(token.playRequestId, token.switchEpoch)) {
+        this.pending = null
+        this.phase = 'idle'
+        return {
+          ok: false,
+          reason: 'stale',
+          playRequestId: token.playRequestId,
+          activeSessionId: this.store.getActiveSessionId(),
+          message: 'skip completing rollback: superseded',
+        }
       }
+
+      this.pending = null
+      this.phase = 'idle'
+
+      if (!rollback.ok && rollback.reason === 'user_gesture_required') {
+        return {
+          ok: false,
+          reason: 'user_gesture_required',
+          playRequestId: token.playRequestId,
+          activeSessionId: this.store.getActiveSessionId(),
+          phase: 'user_gesture_required',
+          message: rollback.message,
+        }
+      }
+
+      if (
+        !rollback.ok &&
+        (rollback.reason === 'unavailable' || rollback.reason === 'error')
+      ) {
+        return {
+          ok: false,
+          reason: 'rollback_partial',
+          playRequestId: token.playRequestId,
+          activeSessionId: this.store.getActiveSessionId(),
+          message: failure.message ?? 'physical restore unavailable',
+        }
+      }
+    } else {
+      this.pending = null
+      this.phase = 'idle'
     }
 
-    if (!rollback.ok && rollback.reason === 'unavailable') {
+    if (failure.reason === 'stale') {
       return {
         ok: false,
-        reason: 'rollback_partial',
+        reason: 'stale',
         playRequestId: token.playRequestId,
         activeSessionId: this.store.getActiveSessionId(),
-        message: failure.message ?? 'physical restore unavailable',
+        message: failure.message,
       }
     }
 
@@ -468,7 +582,6 @@ export class SessionSwitchCoordinator {
     if (this.store.getPlayRequestId() !== playRequestId) {
       return false
     }
-    // switchEpoch bump only after successful commit; during in-flight must match start
     if (this.store.getSwitchEpoch() !== switchEpochAtStart) {
       return false
     }

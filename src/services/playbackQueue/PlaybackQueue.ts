@@ -600,6 +600,53 @@ export class PlaybackQueue {
   }
 
   /**
+   * Runtime-снимок для отката mid-play (DEV-04A).
+   * Включает pending-removal «призраков» — в отличие от exportSessionState().
+   */
+  exportRuntimeSessionState(): {
+    state: PlaybackQueueSessionState
+    pendingRemovalIds: string[]
+  } {
+    return {
+      state: {
+        items: this.items.map(stripPreview),
+        currentIndex: this.currentIndex,
+        playOrder: [...this.playOrder],
+        playOrderIndex: this.playOrderIndex,
+        repeatMode: this.repeatMode,
+        shuffleMode: this.shuffleMode,
+        history: [...this.history],
+        historyIndex: this.historyIndex,
+        context: this.context,
+        sessionTailIds: [...this.sessionTailIds],
+      },
+      pendingRemovalIds: [...this.pendingRemovalIds],
+    }
+  }
+
+  /**
+   * Восстановление runtime-снимка после неудачного Commit (включая pending).
+   * Не пишет в legacy (как importSessionState).
+   */
+  importRuntimeSessionState(
+    state: PlaybackQueueSessionState,
+    pendingRemovalIds: readonly string[] = [],
+  ): ImportSessionStateResult {
+    const result = this.importSessionState(state)
+    if (!result.ok) {
+      return result
+    }
+    this.pendingRemovalIds.clear()
+    const known = new Set(this.items.map((track) => track.id))
+    for (const id of pendingRemovalIds) {
+      if (typeof id === 'string' && known.has(id)) {
+        this.pendingRemovalIds.add(id)
+      }
+    }
+    return { ok: true, state: this.exportSessionState() }
+  }
+
+  /**
    * Атомарное восстановление полного состояния без setQueue().
    * Валидация до мутации: при ошибке очередь не меняется.
    * Один emit() подписчикам. Не запускает / не останавливает AudioPlayer.

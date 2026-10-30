@@ -1,5 +1,5 @@
 /**
- * Порты SessionSwitchCoordinator (PLAYBACK-DEV-04).
+ * Порты SessionSwitchCoordinator (PLAYBACK-DEV-04 / 04A).
  * Реальные AudioPlayer / Intent подключаются в DEV-05; здесь — контракты.
  */
 import type {
@@ -31,12 +31,25 @@ export type TrackPreparePort = {
   prepareTrack(request: TrackPrepareRequest): Promise<PreparedTrackHandle>
 }
 
+export type LiveRuntimeCapture = {
+  state: PlaybackQueueSessionState
+  pendingRemovalIds: string[]
+}
+
 export type LiveQueuePort = {
   exportSessionState(): PlaybackQueueSessionState
+  /** Runtime snapshot including pending-removal ghosts (for rollback). */
+  exportRuntimeSessionState(): LiveRuntimeCapture
   importSessionState(raw: unknown): ImportSessionStateResult
+  importRuntimeSessionState(
+    state: PlaybackQueueSessionState,
+    pendingRemovalIds?: readonly string[],
+  ): ImportSessionStateResult
   getPendingRemovalIds(): readonly string[]
   getPersistenceMode(): PlaybackQueuePersistenceMode
   detachLegacyPersistence(): void
+  /** Discard in-memory queue without deleting legacy key. */
+  clear?(): void
 }
 
 export type CommitPlayInput = {
@@ -51,7 +64,7 @@ export type CommitPlayResult =
   | { ok: true; playerGeneration: number }
   | {
       ok: false
-      reason: 'stale' | 'load_failed' | 'user_gesture_required' | 'error'
+      reason: 'stale' | 'load_failed' | 'user_gesture_required' | 'error' | 'cancelled'
       message?: string
     }
 
@@ -60,19 +73,30 @@ export type RollbackPlayInput = {
   positionSeconds: number
   playRequestId: number
   playerGenerationAtPrepare: number
+  /**
+   * Claim generation, выданный при входе в commitPlay этого же запроса
+   * (если commit успел claim'нуть до failure).
+   */
+  commitClaimGeneration?: number
 }
 
 export type RollbackPlayResult =
   | { ok: true; restored: boolean }
   | {
       ok: false
-      reason: 'stale' | 'user_gesture_required' | 'unavailable' | 'error'
+      reason: 'stale' | 'user_gesture_required' | 'unavailable' | 'error' | 'cancelled'
       message?: string
     }
 
 /**
  * Физический плеер. Commit/Rollback только после Validate.
  * Prepare НЕ вызывает эти методы.
+ *
+ * Контракт commitPlay (DEV-04A):
+ * 1. Сразу claim: bump generation (commitClaimGeneration) ДО любого await.
+ * 2. После каждого await: если getGeneration() !== commitClaimGeneration →
+ *    `cancelled`, НЕ pause/stop и НЕ перезаписывать более новый playback.
+ * 3. Координатор дополнительно проверяет playRequestId/switchEpoch после await.
  */
 export type PhysicalPlayerPort = {
   getGeneration(): number
@@ -105,4 +129,11 @@ export type SwitchPlayRequest = {
   targetQueue: SessionQueueSnapshot
   /** Трек, с которого начать (должен быть в targetQueue.items). */
   startTrackId: string
+}
+
+/** Runtime anchor для физического rollback (может быть pending ghost). */
+export type RuntimePlaybackAnchor = {
+  trackId: string | null
+  positionSeconds: number
+  isPendingRemoval: boolean
 }
