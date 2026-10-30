@@ -158,6 +158,31 @@ export async function playUserCatalog(
     let needsUserPlayGesture = false
     let startedEarly = false
     const preferredId = input.startCanonicalTrackId ?? null
+    /** Canonical id раннего старта (выбранный трек или первая доступная). */
+    let earlyStartCanonicalId: string | null = preferredId
+
+    const playEarlyTrack = async (entry: CatalogQueueEntry): Promise<'ok' | 'error'> => {
+      const playSelection =
+        deps.playSelection ??
+        (await import('../playbackIntent/PlaybackIntent.ts')).playLibrarySelection
+      try {
+        await playSelection({
+          tracks: [entry.track],
+          startIndex: 0,
+          context,
+        })
+      } catch (error) {
+        if (isAutoplayBlockedError(error)) {
+          needsUserPlayGesture = true
+        } else {
+          return 'error'
+        }
+      }
+      startedEarly = true
+      earlyStartCanonicalId = entry.canonicalTrackId
+      applyCatalogLoopRepeatIfOwned(input.catalog.id)
+      return 'ok'
+    }
 
     if (preferredId) {
       const preferredItem = input.items.find(
@@ -186,24 +211,9 @@ export async function playUserCatalog(
         }
       }
 
-      const playSelection =
-        deps.playSelection ??
-        (await import('../playbackIntent/PlaybackIntent.ts')).playLibrarySelection
-      try {
-        await playSelection({
-          tracks: [preferredResolution.entry.track],
-          startIndex: 0,
-          context,
-        })
-      } catch (error) {
-        if (isAutoplayBlockedError(error)) {
-          needsUserPlayGesture = true
-        } else {
-          return { status: 'error', message: CATALOG_PLAYBACK_MESSAGE.FAILED }
-        }
+      if ((await playEarlyTrack(preferredResolution.entry)) === 'error') {
+        return { status: 'error', message: CATALOG_PLAYBACK_MESSAGE.FAILED }
       }
-      startedEarly = true
-      applyCatalogLoopRepeatIfOwned(input.catalog.id)
 
       if (!isCurrent(generation)) {
         return {
@@ -213,6 +223,48 @@ export async function playUserCatalog(
           queue: [preferredResolution.entry],
           needsUserPlayGesture,
         }
+      }
+    } else {
+      // «Слушать каталог»: старт с первой доступной, без ожидания всего списка.
+      for (const item of input.items) {
+        if (!isCurrent(generation)) {
+          return { status: 'busy', message: CATALOG_PLAYBACK_MESSAGE.BUSY }
+        }
+        const resolution = await resolveCatalogItemPlayback(item, resolveOpts)
+        if (!isCurrent(generation)) {
+          return { status: 'busy', message: CATALOG_PLAYBACK_MESSAGE.BUSY }
+        }
+        preResolved.set(item.canonicalTrack.id, resolution)
+        if (resolution.status !== 'ready') {
+          continue
+        }
+        if ((await playEarlyTrack(resolution.entry)) === 'error') {
+          return { status: 'error', message: CATALOG_PLAYBACK_MESSAGE.FAILED }
+        }
+        break
+      }
+
+      if (!startedEarly) {
+        return {
+          status: 'empty',
+          message: CATALOG_PLAYBACK_MESSAGE.NO_PLAYABLE,
+        }
+      }
+
+      if (!isCurrent(generation)) {
+        const early = earlyStartCanonicalId
+          ? preResolved.get(earlyStartCanonicalId)
+          : null
+        if (early?.status === 'ready') {
+          return {
+            status: 'played',
+            tracks: [early.entry.track],
+            startIndex: 0,
+            queue: [early.entry],
+            needsUserPlayGesture,
+          }
+        }
+        return { status: 'busy', message: CATALOG_PLAYBACK_MESSAGE.BUSY }
       }
     }
 
@@ -226,7 +278,7 @@ export async function playUserCatalog(
         isCancelled: () => !isCurrent(generation),
         onInFlight: deps.onInFlight,
         preResolved,
-        prioritizeCanonicalTrackId: preferredId,
+        prioritizeCanonicalTrackId: earlyStartCanonicalId,
       })
       queue = built.queue
       resolutions = built.resolutions
@@ -249,14 +301,14 @@ export async function playUserCatalog(
     }
 
     if (!isCurrent(generation)) {
-      if (startedEarly && preferredId) {
-        const preferred = preResolved.get(preferredId)
-        if (preferred?.status === 'ready') {
+      if (startedEarly && earlyStartCanonicalId) {
+        const early = preResolved.get(earlyStartCanonicalId)
+        if (early?.status === 'ready') {
           return {
             status: 'played',
-            tracks: [preferred.entry.track],
+            tracks: [early.entry.track],
             startIndex: 0,
-            queue: [preferred.entry],
+            queue: [early.entry],
             needsUserPlayGesture,
           }
         }
@@ -290,18 +342,19 @@ export async function playUserCatalog(
 
     const tracks = queue.map((entry) => entry.track)
     let startIndex = 0
-    if (preferredId) {
+    if (earlyStartCanonicalId) {
       const index = queue.findIndex(
-        (entry) => entry.canonicalTrackId === preferredId,
+        (entry) => entry.canonicalTrackId === earlyStartCanonicalId,
       )
       startIndex = index >= 0 ? index : 0
     }
 
+    // Ранний старт всегда (preferred или первая доступная) — только expand, без повторного play.
     if (startedEarly) {
       const replaceQueue =
         deps.replaceQueue ??
         (async (options) => {
-          const { getPlaybackQueue } = await import('../playbackQueue/index.ts')
+          const { getPlaybackQueue } = await import('../playbackQueue/PlaybackQueue.ts')
           return getPlaybackQueue().replacePlaylistItemsPreservingPlayback(
             options.tracks,
             { type: 'playlist', id: options.context.id },
@@ -311,7 +364,7 @@ export async function playUserCatalog(
       if (isCurrent(generation)) {
         await replaceQueue({ tracks, startIndex, context })
       }
-      // Не возвращаем ALL, если пользователь уже ушёл в search/wave/другой каталог.
+      // Не навязываем ALL, если владелец сменился или пользователь сменил Repeat.
       applyCatalogLoopRepeatIfOwned(input.catalog.id)
       return {
         status: 'played',
@@ -322,6 +375,7 @@ export async function playUserCatalog(
       }
     }
 
+    // На случай если early-path не сработал (не должно при штатном потоке).
     try {
       const playSelection =
         deps.playSelection ??

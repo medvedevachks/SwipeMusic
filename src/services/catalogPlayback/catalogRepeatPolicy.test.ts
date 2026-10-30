@@ -5,6 +5,7 @@ import {
   applyCatalogLoopRepeat,
   applyCatalogLoopRepeatIfOwned,
   ensureCatalogRepeatPolicyWatcher,
+  noteUserRepeatModeChange,
   resetCatalogRepeatPolicyForTests,
   syncCatalogRepeatPolicy,
 } from './catalogRepeatPolicy.ts'
@@ -35,21 +36,72 @@ function track(id: string) {
   }
 }
 
-test('catalog loop forces Repeat ALL and restores previous on context switch', () => {
+function withCatalog(catalogId: string, mode: 'OFF' | 'ONE' | 'ALL') {
   installMemoryLocalStorage()
   resetCatalogRepeatPolicyForTests()
   const queue = getPlaybackQueue()
   queue.clear()
-  queue.setRepeatMode('OFF')
+  queue.setRepeatMode(mode)
   queue.setQueue([track('a'), track('b')], 0, {
     type: 'playlist',
-    id: 'cat_party',
-    title: 'Вечеринка',
+    id: catalogId,
+    title: 'Cat',
   })
   ensureCatalogRepeatPolicyWatcher()
-  applyCatalogLoopRepeat('cat_party')
+  applyCatalogLoopRepeat(catalogId)
   assert.equal(queue.getRepeatMode(), 'ALL')
+  return queue
+}
 
+test('Repeat OFF → catalog → search restores OFF', () => {
+  const queue = withCatalog('cat_off', 'OFF')
+  queue.setQueue([track('hit')], 0, {
+    type: 'search-seed',
+    query: 'q',
+    seedTrackId: 'hit',
+  })
+  assert.equal(queue.getRepeatMode(), 'OFF')
+})
+
+test('Repeat ONE → catalog → search restores ONE', () => {
+  const queue = withCatalog('cat_one_prev', 'ONE')
+  queue.setQueue([track('hit')], 0, {
+    type: 'search-seed',
+    query: 'q',
+    seedTrackId: 'hit',
+  })
+  assert.equal(queue.getRepeatMode(), 'ONE')
+})
+
+test('Repeat ALL → catalog → search restores ALL', () => {
+  const queue = withCatalog('cat_all_prev', 'ALL')
+  queue.setQueue([track('hit')], 0, {
+    type: 'search-seed',
+    query: 'q',
+    seedTrackId: 'hit',
+  })
+  assert.equal(queue.getRepeatMode(), 'ALL')
+})
+
+test('manual Repeat during catalog is kept on leave and blocks late ALL', () => {
+  const queue = withCatalog('cat_manual', 'OFF')
+  noteUserRepeatModeChange('ONE')
+  queue.setRepeatMode('ONE')
+  assert.equal(applyCatalogLoopRepeatIfOwned('cat_manual'), false)
+  assert.equal(queue.getRepeatMode(), 'ONE')
+
+  syncCatalogRepeatPolicy({
+    type: 'search-seed',
+    query: 'q',
+    seedTrackId: 'a',
+  })
+  assert.equal(queue.getRepeatMode(), 'ONE')
+})
+
+test('queue.setRepeatMode away from ALL is treated as user override', () => {
+  const queue = withCatalog('cat_watch', 'OFF')
+  queue.setRepeatMode('OFF')
+  assert.equal(applyCatalogLoopRepeatIfOwned('cat_watch'), false)
   queue.setQueue([track('w')], 0, {
     type: 'radio',
     id: 'my-wave',
@@ -57,27 +109,6 @@ test('catalog loop forces Repeat ALL and restores previous on context switch', (
     origin: 'recommendations',
   })
   assert.equal(queue.getRepeatMode(), 'OFF')
-})
-
-test('manual Repeat change is not overwritten when leaving catalog', () => {
-  installMemoryLocalStorage()
-  resetCatalogRepeatPolicyForTests()
-  const queue = getPlaybackQueue()
-  queue.clear()
-  queue.setRepeatMode('OFF')
-  queue.setQueue([track('a')], 0, {
-    type: 'playlist',
-    id: 'cat_x',
-    title: 'X',
-  })
-  applyCatalogLoopRepeat('cat_x')
-  queue.setRepeatMode('ONE')
-  syncCatalogRepeatPolicy({
-    type: 'search-seed',
-    query: 'q',
-    seedTrackId: 'a',
-  })
-  assert.equal(queue.getRepeatMode(), 'ONE')
 })
 
 test('single-track catalog with Repeat ALL cycles via next fromEnded', () => {
@@ -98,29 +129,14 @@ test('single-track catalog with Repeat ALL cycles via next fromEnded', () => {
 })
 
 test('late applyCatalogLoopRepeatIfOwned skips when context already left catalog', () => {
-  installMemoryLocalStorage()
-  resetCatalogRepeatPolicyForTests()
-  const queue = getPlaybackQueue()
-  queue.clear()
-  queue.setRepeatMode('OFF')
-  queue.setQueue([track('a')], 0, {
-    type: 'playlist',
-    id: 'cat_late',
-    title: 'Late',
-  })
-  applyCatalogLoopRepeat('cat_late')
-  assert.equal(queue.getRepeatMode(), 'ALL')
-
+  const queue = withCatalog('cat_late', 'OFF')
   queue.setQueue([track('hit')], 0, {
     type: 'search-seed',
     query: 'hit',
     seedTrackId: 'hit',
   })
   assert.equal(queue.getRepeatMode(), 'OFF')
-
-  const applied = applyCatalogLoopRepeatIfOwned('cat_late')
-  assert.equal(applied, false)
-  assert.equal(queue.getRepeatMode(), 'OFF')
+  assert.equal(applyCatalogLoopRepeatIfOwned('cat_late'), false)
   assert.equal(queue.getSnapshot().context.type, 'search-seed')
 })
 

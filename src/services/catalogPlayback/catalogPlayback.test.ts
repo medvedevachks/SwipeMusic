@@ -29,6 +29,7 @@ import { CATALOG_PLAYBACK_MESSAGE } from './messages.ts'
 import {
   applyCatalogLoopRepeat,
   applyCatalogLoopRepeatIfOwned,
+  noteUserRepeatModeChange,
   resetCatalogRepeatPolicyForTests,
 } from './catalogRepeatPolicy.ts'
 import {
@@ -666,6 +667,134 @@ test('100+ items keep catalog order and never exceed prepare concurrency', async
   assert.ok(maxInFlight >= 2)
 })
 
+test('listen catalog starts on first available before the rest of 100+ finish', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const items = Array.from({ length: 120 }, (_, index) => {
+    const copy = copyOf(`can_f_${index}`, 'local-folder', `f${index}.mp3`, `F${index}`)
+    return itemOf(`can_f_${index}`, [copy], `F${index}`)
+  })
+  const tracks = items.map((item) => trackFor(item.copies[0]!))
+  const events: string[] = []
+  let releaseRest!: () => void
+  const holdRest = new Promise<void>((resolve) => {
+    releaseRest = resolve
+  })
+  let earlyStarted!: () => void
+  const earlyGate = new Promise<void>((resolve) => {
+    earlyStarted = resolve
+  })
+
+  const pending = playUserCatalog(
+    { catalog: CATALOG, items },
+    {
+      now: 33_500,
+      concurrency: 4,
+      port: portFor({
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(track) {
+            if (track.externalId !== 'f0.mp3') {
+              await holdRest
+            }
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap(tracks),
+      playSelection: async (options) => {
+        events.push(`play:${options.tracks.map((track) => track.externalId).join(',')}`)
+        earlyStarted()
+      },
+      replaceQueue: async (options) => {
+        events.push(`expand:${options.tracks.length}:${options.startIndex}`)
+      },
+    },
+  )
+
+  await earlyGate
+  assert.deepEqual(events, ['play:f0.mp3'])
+  releaseRest()
+  const result = await pending
+  assert.equal(result.status, 'played')
+  if (result.status !== 'played') return
+  assert.equal(result.startIndex, 0)
+  assert.equal(result.tracks.length, 120)
+  assert.ok(events.includes('expand:120:0'))
+})
+
+test('listen catalog skips unavailable head and starts the first PLAYABLE', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const bad = copyOf('can_bad_head', 'yandex-music', 'bad_head', 'Bad')
+  const ok = copyOf('can_ok_head', 'local-folder', 'ok_head.mp3', 'Ok')
+  const tail = copyOf('can_tail', 'local-folder', 'tail.mp3', 'Tail')
+  const items = [
+    itemOf('can_bad_head', [bad], 'Bad'),
+    itemOf('can_ok_head', [ok], 'Ok'),
+    itemOf('can_tail', [tail], 'Tail'),
+  ]
+  const events: string[] = []
+  let releaseTail!: () => void
+  const holdTail = new Promise<void>((resolve) => {
+    releaseTail = resolve
+  })
+  let earlyStarted!: () => void
+  const earlyGate = new Promise<void>((resolve) => {
+    earlyStarted = resolve
+  })
+
+  const pending = playUserCatalog(
+    { catalog: CATALOG, items },
+    {
+      now: 33_600,
+      concurrency: 4,
+      port: portFor({
+        'yandex-music': probeAdapter(
+          'yandex-music',
+          PLAYBACK_AVAILABILITY_STATUS.UNAVAILABLE,
+        ),
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(track) {
+            if (track.externalId === 'tail.mp3') {
+              await holdTail
+            }
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap([trackFor(bad), trackFor(ok), trackFor(tail)]),
+      playSelection: async (options) => {
+        events.push(`play:${options.tracks.map((track) => track.id).join(',')}`)
+        earlyStarted()
+      },
+      replaceQueue: async (options) => {
+        events.push(`expand:${options.tracks.map((track) => track.id).join(',')}`)
+      },
+    },
+  )
+
+  await earlyGate
+  assert.deepEqual(events, [`play:${ok.sourceTrackKey}`])
+  releaseTail()
+  const result = await pending
+  assert.equal(result.status, 'played')
+  if (result.status !== 'played') return
+  assert.equal(result.startIndex, 0)
+  assert.deepEqual(
+    result.tracks.map((track) => track.id),
+    [ok.sourceTrackKey, tail.sourceTrackKey],
+  )
+  assert.ok(events.some((event) => event.startsWith('expand:')))
+})
+
 test('selected track starts before the rest of a large catalog finishes', async () => {
   resetPlaybackAvailability()
   resetCatalogPlaybackGate()
@@ -1031,6 +1160,76 @@ test('late catalog prepare does not force Repeat ALL after leaving to search', a
   assert.equal(applyCatalogLoopRepeatIfOwned(CATALOG.id), false)
   assert.equal(queue.getRepeatMode(), 'OFF')
   assert.equal(queue.getSnapshot().context.type, 'search-seed')
+})
+
+test('user Repeat change during prepare is kept after late expand', async () => {
+  installMemoryLocalStorage()
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  resetCatalogRepeatPolicyForTests()
+  const copies = [
+    copyOf('can_m0', 'local-folder', 'm0.mp3', 'M0'),
+    copyOf('can_m1', 'local-folder', 'm1.mp3', 'M1'),
+    copyOf('can_m2', 'local-folder', 'm2.mp3', 'M2'),
+  ]
+  const items = copies.map((copy, index) =>
+    itemOf(copy.canonicalTrackId, [copy], `M${index}`),
+  )
+  const tracks = copies.map((copy) => trackFor(copy))
+  const queue = getPlaybackQueue()
+  queue.clear()
+  queue.setRepeatMode('OFF')
+  let releaseRest!: () => void
+  const holdRest = new Promise<void>((resolve) => {
+    releaseRest = resolve
+  })
+  let earlyStarted!: () => void
+  const earlyGate = new Promise<void>((resolve) => {
+    earlyStarted = resolve
+  })
+
+  const pending = playUserCatalog(
+    { catalog: CATALOG, items, startCanonicalTrackId: 'can_m0' },
+    {
+      now: 36_700,
+      concurrency: 2,
+      port: portFor({
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(track) {
+            if (track.externalId !== 'm0.mp3') {
+              await holdRest
+            }
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap(tracks),
+      playSelection: async (options) => {
+        queue.setQueue(options.tracks, options.startIndex, options.context)
+        applyCatalogLoopRepeat(options.context.id)
+        earlyStarted()
+      },
+      replaceQueue: async (options) =>
+        queue.replacePlaylistItemsPreservingPlayback(options.tracks, {
+          type: 'playlist',
+          id: options.context.id,
+        }),
+    },
+  )
+
+  await earlyGate
+  assert.equal(queue.getRepeatMode(), 'ALL')
+  noteUserRepeatModeChange('ONE')
+  queue.setRepeatMode('ONE')
+  releaseRest()
+  await pending
+  assert.equal(queue.getRepeatMode(), 'ONE')
+  assert.equal(queue.getSnapshot().items.length, 3)
+  assert.equal(queue.current()?.id, tracks[0]!.id)
 })
 
 test('late catalog expand does not overwrite search-seed queue', async () => {

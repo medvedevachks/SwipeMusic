@@ -10,6 +10,7 @@ export {
   applyCatalogLoopRepeat,
   applyCatalogLoopRepeatIfOwned,
   ensureCatalogRepeatPolicyWatcher,
+  noteUserRepeatModeChange,
   resetCatalogRepeatPolicyForTests,
   syncCatalogRepeatPolicy,
 } from './catalogRepeatPolicy.ts'

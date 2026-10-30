@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { getAudioPlayer } from '../services/audioPlayer'
 import { attachPlaybackAnalytics } from '../services/playbackAnalytics/attach.ts'
+import { noteUserRepeatModeChange } from '../services/catalogPlayback/catalogRepeatPolicy'
 import {
   getPlaybackQueue,
   type RepeatMode,
@@ -108,12 +109,16 @@ export const usePlayerStore = create<PlayerStore>((set, get) => {
     removeFromQueue: (trackId) => playbackQueue.remove(trackId),
     moveInQueue: (from, to) => playbackQueue.move(from, to),
     clearQueue: () => playbackQueue.clear(),
-    setRepeatMode: (mode) => playbackQueue.setRepeatMode(mode),
+    setRepeatMode: (mode) => {
+      noteUserRepeatModeChange(mode)
+      playbackQueue.setRepeatMode(mode)
+    },
     setShuffleMode: (mode) => playbackQueue.setShuffleMode(mode),
     cycleRepeatMode: () => {
       const current = get().repeatMode
       const index = REPEAT_CYCLE.indexOf(current)
       const next = REPEAT_CYCLE[(index + 1) % REPEAT_CYCLE.length] ?? 'OFF'
+      noteUserRepeatModeChange(next)
       playbackQueue.setRepeatMode(next)
     },
     toggleShuffle: () => {
