@@ -3,14 +3,26 @@
  * Не скачивает аудио и не резолвит stream URL — только Track metadata.
  */
 import type { Track } from '../../types/track.ts'
-import { copyIdentity, titleIdentity } from './identity.ts'
 import { noteContinuousDiag } from './continuousDiag.ts'
+import { CONTINUOUS_LIMITS } from './continuousLimits.ts'
+import { copyIdentity, titleIdentity } from './identity.ts'
 
-export const CONTINUOUS_BUFFER_TARGET = 4
+export const CONTINUOUS_BUFFER_TARGET = CONTINUOUS_LIMITS.bufferTarget
 
 let buffer: Track[] = []
 let generation = 0
 let fillInflight: Promise<void> | null = null
+let refillHandler: ((seed: Track | null) => void) | null = null
+
+export function setContinuousBufferRefillHandler(
+  handler: ((seed: Track | null) => void) | null,
+): void {
+  refillHandler = handler
+}
+
+export function requestContinuousBufferRefill(seed: Track | null = null): void {
+  refillHandler?.(seed)
+}
 
 export function getContinuousBufferSize(): number {
   return buffer.length
@@ -113,4 +125,5 @@ export function getContinuousBufferGeneration(): number {
 export function resetContinuousBufferForTests(): void {
   invalidateContinuousBuffer('test-reset')
   generation = 0
+  refillHandler = null
 }

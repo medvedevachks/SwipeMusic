@@ -10,6 +10,7 @@ import {
   type RecommendationCatalogPort,
   type RecommendationRequest,
 } from './index.ts'
+import { resetContinuousDiscoveryForTests } from './continuousSession.ts'
 
 function track(
   partial: Partial<Track> & Pick<Track, 'sourceId' | 'externalId' | 'title' | 'artist'>,
@@ -450,6 +451,7 @@ test('all candidates unavailable yields all-unavailable', async () => {
 })
 
 test('swipe and wave share continuous-random-v1 strategy', async () => {
+  resetContinuousDiscoveryForTests()
   assert.equal(sameRecommendationStrategy('swipe', 'wave'), true)
   const current = track({
     sourceId: 'yandex-music',
@@ -457,17 +459,24 @@ test('swipe and wave share continuous-random-v1 strategy', async () => {
     title: 'S',
     artist: 'Artist',
   })
-  const hit = track({
+  const hitA = track({
     sourceId: 'yandex-music',
-    externalId: 'h',
-    title: 'H',
+    externalId: 'h-a',
+    title: 'H A',
+    artist: 'Artist',
+  })
+  const hitB = track({
+    sourceId: 'yandex-music',
+    externalId: 'h-b',
+    title: 'H B',
     artist: 'Artist',
   })
   const makePort = (): RecommendationCatalogPort => ({
     sources: [{ id: 'yandex-music' }],
-    search: async () => [hit],
-    fetchFeed: async () => [hit],
-    isPlayable: async (candidate) => candidate.id === hit.id,
+    search: async () => [hitA, hitB],
+    fetchFeed: async () => [hitA, hitB],
+    isPlayable: async (candidate) =>
+      candidate.id === hitA.id || candidate.id === hitB.id,
   })
   const swipe = await recommendNext(
     baseRequest({ mode: 'swipe', current, port: makePort() }),
@@ -482,6 +491,7 @@ test('swipe and wave share continuous-random-v1 strategy', async () => {
     assert.equal(wave.reason, 'continuous-random')
     assert.equal(swipe.mode, 'swipe')
     assert.equal(wave.mode, 'wave')
+    assert.notEqual(swipe.track.id, wave.track.id)
   }
 })
 
@@ -510,6 +520,7 @@ test('legacy no-seed cold start without likes is controlled', async () => {
 })
 
 test('continuous-random cold start without likes still works', async () => {
+  resetContinuousDiscoveryForTests()
   const hit = track({
     sourceId: 'yandex-music',
     externalId: 'hit',

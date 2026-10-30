@@ -15,6 +15,10 @@ import { isSearchFlowHarnessEnabled } from '../continuation/searchFlowHarnessFla
 import { getPlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
 import { loadSessionTasteProfile } from '../taste/loadSessionTasteProfile.ts'
 import { invalidateContinuousBuffer } from './continuousBuffer.ts'
+import {
+  clearContinuousDiscoveryRuntime,
+  ensureContinuousDiscoverySession,
+} from './continuousSession.ts'
 import { recommendNext } from './engine.ts'
 import {
   getRecommendationAdvanceEpoch,
@@ -65,6 +69,7 @@ export function activateRecommendationSession(
 ): void {
   clearRecommendationExhausted()
   setActiveRecommendationMode(mode)
+  ensureContinuousDiscoverySession(toEngineMode(mode))
   if (isSearchFlowHarnessEnabled() && !options?.forceProvider) {
     providerInstalled = true
     noteSearchFlowEvent({
@@ -99,6 +104,7 @@ export function clearRecommendationSession(): void {
   // Inbox/Catalog поверх Wave/Search: inflight Next/ended не должен stop()/playTrack.
   invalidateRecommendationAdvance()
   invalidateContinuousBuffer('clear-session')
+  clearContinuousDiscoveryRuntime('clear-session')
 }
 
 export function resetRecommendationSessionRuntimeForTests(): void {
@@ -148,6 +154,7 @@ export function commitRecommendationSeed(input: {
   // Новый seed (wave/swipe) отменяет inflight advance предыдущей сессии.
   invalidateRecommendationAdvance()
   invalidateContinuousBuffer(`seed:${input.mode}`)
+  ensureContinuousDiscoverySession(input.mode, { resetLanes: true })
   activateRecommendationSession(input.mode, { forceProvider: true })
   const queue = getPlaybackQueue()
   if (input.mode === 'wave') {

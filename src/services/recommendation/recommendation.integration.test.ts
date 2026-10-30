@@ -6,6 +6,24 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+
+if (typeof globalThis.localStorage === 'undefined') {
+  const memory = new Map<string, string>()
+  globalThis.localStorage = {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      memory.set(key, String(value))
+    },
+    removeItem: (key: string) => {
+      memory.delete(key)
+    },
+    clear: () => memory.clear(),
+    key: (index: number) => [...memory.keys()][index] ?? null,
+    get length() {
+      return memory.size
+    },
+  }
+}
 import { PlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
 import type { ContinuationLibraryTrack } from '../continuation/libraryContinuation.ts'
 import {
@@ -38,6 +56,7 @@ import {
   resetRecommendationSessionRuntimeForTests,
 } from './sessionRuntime.ts'
 import { resetContinuousBufferForTests } from './continuousBuffer.ts'
+import { resetContinuousDiscoveryForTests } from './continuousSession.ts'
 import { sameRecommendationStrategy } from './engine.ts'
 import type { RecommendationCatalogPort } from './types.ts'
 
@@ -163,6 +182,7 @@ function resetAll() {
   resetContinuationSessionForTests()
   resetRecommendationSessionRuntimeForTests()
   resetContinuousBufferForTests()
+  resetContinuousDiscoveryForTests()
   setSearchSeedPlaybackEnabled(true)
 }
 

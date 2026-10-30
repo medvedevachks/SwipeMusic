@@ -25,6 +25,7 @@ import {
   resolveHomeDeckFocusId,
   resolveHomeDeckTracks,
 } from '../services/recommendation/homeDeck.ts'
+import { ensureContinuousDiscoverySession } from '../services/recommendation/continuousSession.ts'
 import {
   clearRecommendationExhausted,
   isRecommendationExhausted,
@@ -445,6 +446,11 @@ export default function Home() {
 
   const retryContinuousPick = () => {
     clearRecommendationExhausted()
+    const mode =
+      homeTab === 'wave' ? 'wave' : homeTab === 'sorting' ? 'swipe' : null
+    if (mode === 'swipe' || mode === 'wave') {
+      ensureContinuousDiscoverySession(mode, { resetLanes: true })
+    }
     void getAudioPlayer().next()
   }
 

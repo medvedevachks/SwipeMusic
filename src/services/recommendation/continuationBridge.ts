@@ -1,6 +1,6 @@
 /**
- * Мост Recommendation Engine → ContinuationProvider (search-seed runtime).
- * continuous-random-v1 + prefetch buffer.
+ * Мост Recommendation Engine → ContinuationProvider.
+ * continuous-random-v1 + session pool + prefetch buffer.
  */
 import type { Track } from '../../types/track.ts'
 import type {
@@ -16,10 +16,16 @@ import {
   getContinuousBufferGeneration,
   getContinuousBufferSize,
   pushContinuousBufferedTracks,
+  setContinuousBufferRefillHandler,
   takeContinuousBufferedTrack,
 } from './continuousBuffer.ts'
 import { noteContinuousDiag } from './continuousDiag.ts'
 import { collectContinuousPlayableBatch, pickContinuousRandom } from './continuousRandomV1.ts'
+import {
+  ensureContinuousDiscoverySession,
+  getContinuousSeed,
+  noteContinuousSeed,
+} from './continuousSession.ts'
 import { noteRecommendationMiss } from './sessionState.ts'
 import type { RecommendationCatalogPort, RecommendationMode } from './types.ts'
 
@@ -82,6 +88,7 @@ function scheduleBufferRefill(
     if (generation !== getContinuousBufferGeneration()) {
       return
     }
+    // Один discovery batch на весь buffer — не N× полный поиск.
     const batch = await collectContinuousPlayableBatch(
       {
         mode: deps.mode ?? 'swipe',
@@ -93,6 +100,9 @@ function scheduleBufferRefill(
       },
       need,
     )
+    if (generation !== getContinuousBufferGeneration()) {
+      return
+    }
     pushContinuousBufferedTracks(batch, {
       generation,
       excludeIds: new Set([seed.id, ...baseExcluded.map((item) => item.id).filter(Boolean)]),
@@ -103,6 +113,19 @@ function scheduleBufferRefill(
 export function createRecommendationContinuationProvider(
   deps: RecommendationContinuationDeps,
 ): ContinuationProvider {
+  ensureContinuousDiscoverySession(deps.mode ?? 'swipe')
+
+  setContinuousBufferRefillHandler((seed) => {
+    const current = seed ?? getContinuousSeed()
+    if (!current) {
+      return
+    }
+    const excludedBase = deps.excludedTracks?.() ?? [
+      { id: current.id, title: current.title, artist: current.artist },
+    ]
+    scheduleBufferRefill(deps, current, excludedBase)
+  })
+
   return {
     async prepareContinuation(
       current: Track,
@@ -113,6 +136,9 @@ export function createRecommendationContinuationProvider(
         return null
       }
 
+      ensureContinuousDiscoverySession(deps.mode ?? 'swipe')
+      noteContinuousSeed(current)
+
       const excludedBase = deps.excludedTracks?.() ?? [
         { id: current.id, title: current.title, artist: current.artist },
       ]
@@ -122,6 +148,7 @@ export function createRecommendationContinuationProvider(
 
       const buffered = takeContinuousBufferedTrack(excludeIds)
       if (buffered) {
+        noteContinuousSeed(buffered)
         scheduleBufferRefill(deps, buffered, [
           ...excludedBase,
           {
@@ -145,37 +172,75 @@ export function createRecommendationContinuationProvider(
         if (signal.aborted) {
           return null
         }
-        const result = await pickContinuousRandom({
-          mode: deps.mode ?? 'swipe',
-          current,
-          taste: profile,
-          excluded: excludedBase,
-          library,
-          port,
-          signal: gate.signal,
-        })
-        if (!result.ok) {
-          noteRecommendationMiss(result.emptyReason, result.message)
-          noteContinuousDiag({
+        // Берём сразу несколько playable; первый — сейчас, остальные в buffer.
+        const batch = await collectContinuousPlayableBatch(
+          {
             mode: deps.mode ?? 'swipe',
-            phase: result.emptyReason === 'timeout' || result.emptyReason === 'error'
-              ? 'soft-miss'
-              : 'hard-miss',
-            reason: result.emptyReason,
+            current,
+            taste: profile,
+            excluded: excludedBase,
+            library,
+            port,
+            signal: gate.signal,
+          },
+          CONTINUOUS_BUFFER_TARGET,
+        )
+        if (batch.length === 0) {
+          const result = await pickContinuousRandom({
+            mode: deps.mode ?? 'swipe',
+            current,
+            taste: profile,
+            excluded: excludedBase,
+            library,
+            port,
+            signal: gate.signal,
           })
-          return null
+          if (!result.ok) {
+            noteRecommendationMiss(result.emptyReason, result.message)
+            noteContinuousDiag({
+              mode: deps.mode ?? 'swipe',
+              phase:
+                result.emptyReason === 'timeout' || result.emptyReason === 'error'
+                  ? 'soft-miss'
+                  : 'hard-miss',
+              reason: result.emptyReason,
+            })
+            return null
+          }
+          scheduleBufferRefill(deps, result.track, [
+            ...excludedBase,
+            {
+              id: result.track.id,
+              title: result.track.title,
+              artist: result.track.artist,
+              sourceId: result.track.sourceId,
+              externalId: result.track.externalId,
+            },
+          ])
+          return { track: result.track }
         }
-        scheduleBufferRefill(deps, result.track, [
+
+        const [first, ...rest] = batch
+        noteContinuousSeed(first!)
+        pushContinuousBufferedTracks(rest, {
+          generation: getContinuousBufferGeneration(),
+          excludeIds: new Set([
+            current.id,
+            first!.id,
+            ...excludedBase.map((item) => item.id).filter(Boolean),
+          ]),
+        })
+        scheduleBufferRefill(deps, first!, [
           ...excludedBase,
           {
-            id: result.track.id,
-            title: result.track.title,
-            artist: result.track.artist,
-            sourceId: result.track.sourceId,
-            externalId: result.track.externalId,
+            id: first!.id,
+            title: first!.title,
+            artist: first!.artist,
+            sourceId: first!.sourceId,
+            externalId: first!.externalId,
           },
         ])
-        return { track: result.track }
+        return { track: first! }
       } catch {
         noteRecommendationMiss('error', 'Ошибка подбора. Можно повторить.')
         return null

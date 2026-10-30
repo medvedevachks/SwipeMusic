@@ -25,13 +25,35 @@ export type RecommendationEmptyReason =
   | 'timeout'
   | 'error'
 
-/** Порт каталога: search + опциональный feed / availability probe. */
+/** Одна страница discovery (cursor сохраняется в continuous session). */
+export type RecommendationDiscoveryPage = {
+  tracks: Track[]
+  nextCursor: string | null
+}
+
+/** Порт каталога: search + опциональный feed / paginated discovery. */
 export type RecommendationCatalogPort = {
   sources: readonly { id: string }[]
   search: (sourceId: string, query: string, signal: AbortSignal) => Promise<Track[]>
   isPlayable: (track: Track, signal: AbortSignal) => Promise<boolean>
   /** Browse/library лента без поискового запроса (если адаптер умеет). */
   fetchFeed?: (sourceId: string, signal: AbortSignal) => Promise<Track[]>
+  /**
+   * Пагинированный search. Если нет — continuous engine использует search как одну страницу.
+   * Не имитировать cursor, если адаптер его не поддерживает.
+   */
+  searchPage?: (
+    sourceId: string,
+    query: string,
+    options: { cursor?: string | null; limit?: number; signal: AbortSignal },
+  ) => Promise<RecommendationDiscoveryPage>
+  /**
+   * Пагинированный feed/library. Для Yandex fetchTracks — библиотека пользователя, не весь каталог.
+   */
+  fetchFeedPage?: (
+    sourceId: string,
+    options: { cursor?: string | null; limit?: number; signal: AbortSignal },
+  ) => Promise<RecommendationDiscoveryPage>
 }
 
 export type RecommendationExcludedTrack = {
@@ -78,6 +100,7 @@ export type RecommendationResult = RecommendationHit | RecommendationMiss
 export const RECOMMENDATION_LIMITS = {
   maxArtists: 6,
   maxPerSearch: 8,
+  /** Legacy taste path only — continuous-random использует CONTINUOUS_LIMITS. */
   maxCatalogCandidates: 24,
   maxLibraryProbes: 8,
   searchTimeoutMs: 4_000,

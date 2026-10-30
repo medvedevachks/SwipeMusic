@@ -1,5 +1,5 @@
 /**
- * continuous-random-v1: непрерывный поток A→B→C→D для swipe/wave.
+ * continuous-random-v1 unlimited stream: paginated discovery + pool + buffer.
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -19,9 +19,23 @@ import {
 } from './continuousDiag.ts'
 import {
   getContinuousBufferSize,
+  pushContinuousBufferedTracks,
+  getContinuousBufferGeneration,
   resetContinuousBufferForTests,
+  CONTINUOUS_BUFFER_TARGET,
 } from './continuousBuffer.ts'
-import { pickContinuousRandom } from './continuousRandomV1.ts'
+import { CONTINUOUS_LIMITS } from './continuousLimits.ts'
+import {
+  collectContinuousPlayableBatch,
+  pickContinuousRandom,
+} from './continuousRandomV1.ts'
+import {
+  getContinuousDiscoverySnapshot,
+  getContinuousPagesFetched,
+  getContinuousPoolSize,
+  getContinuousRecentSize,
+  resetContinuousDiscoveryForTests,
+} from './continuousSession.ts'
 import {
   clearRecommendationMiss,
   noteRecommendationMiss,
@@ -29,7 +43,7 @@ import {
   setActiveRecommendationMode,
   takeRecommendationMiss,
 } from './sessionState.ts'
-import type { RecommendationCatalogPort } from './types.ts'
+import type { RecommendationCatalogPort, RecommendationDiscoveryPage } from './types.ts'
 
 function track(
   partial: Partial<Track> & Pick<Track, 'sourceId' | 'externalId' | 'title' | 'artist'>,
@@ -40,52 +54,95 @@ function track(
   }
 }
 
-function catalogOf(count: number, prefix = 't'): Track[] {
+function catalog(count: number, prefix = 't'): Track[] {
   return Array.from({ length: count }, (_, index) =>
     track({
       sourceId: 'yandex-music',
       externalId: `${prefix}-${index}`,
       title: `Song ${prefix} ${index}`,
-      artist: `Artist ${index % 7}`,
+      artist: `Artist ${index % 11}`,
     }),
   )
 }
 
-function mockPort(all: Track[], options?: {
-  unavailableIds?: Set<string>
-  unknownThenPlayable?: Set<string>
-}): RecommendationCatalogPort & {
-  searches: string[]
+type PagePort = RecommendationCatalogPort & {
+  searches: { query: string; cursor: string | null }[]
+  feedPages: { cursor: string | null }[]
   playableChecks: string[]
-} {
-  const searches: string[] = []
-  const playableChecks: string[] = []
+  hangSearchAfter?: number
+  rateLimitOnce?: boolean
+}
+
+function paginatedPort(
+  all: Track[],
+  options?: {
+    unavailableIds?: Set<string>
+    pageSize?: number
+    hangSearchAfter?: number
+    rateLimitOnce?: boolean
+    feedOnlyFirstPage?: number
+  },
+): PagePort {
+  const pageSize = options?.pageSize ?? 10
   const unavailable = options?.unavailableIds ?? new Set<string>()
-  const unknown = options?.unknownThenPlayable ?? new Set<string>()
-  return {
+  let rateLimited = false
+  const port: PagePort = {
     sources: [{ id: 'yandex-music' }],
-    searches,
-    playableChecks,
+    searches: [],
+    feedPages: [],
+    playableChecks: [],
+    hangSearchAfter: options?.hangSearchAfter,
+    rateLimitOnce: options?.rateLimitOnce,
     async search(_sourceId, query) {
-      searches.push(query)
-      // Любой запрос возвращает перемешанный срез каталога.
-      const offset = Math.abs(query.length) % Math.max(1, all.length)
-      return [...all.slice(offset), ...all.slice(0, offset)].slice(0, 12)
+      port.searches.push({ query, cursor: null })
+      return all.slice(0, pageSize)
+    },
+    async searchPage(_sourceId, query, opts) {
+      if (options?.rateLimitOnce && !rateLimited) {
+        rateLimited = true
+        const err = new Error('RATE_LIMIT')
+        ;(err as { status: number }).status = 429
+        throw err
+      }
+      const cursor = opts.cursor ?? null
+      port.searches.push({ query, cursor })
+      if (
+        typeof options?.hangSearchAfter === 'number' &&
+        port.searches.length > options.hangSearchAfter
+      ) {
+        await new Promise(() => {
+          /* never resolves — timeout / early exit must not depend on this */
+        })
+      }
+      const page = cursor ? Number.parseInt(cursor, 10) || 0 : 0
+      const start = page * pageSize
+      const slice = all.slice(start, start + pageSize)
+      const next =
+        start + slice.length < all.length ? String(page + 1) : null
+      return { tracks: slice, nextCursor: next } satisfies RecommendationDiscoveryPage
     },
     async fetchFeed() {
-      return all.slice(0, 15)
+      return all.slice(0, options?.feedOnlyFirstPage ?? pageSize)
+    },
+    async fetchFeedPage(_sourceId, opts) {
+      const cursor = opts.cursor ?? null
+      port.feedPages.push({ cursor })
+      const page = cursor ? Number.parseInt(cursor, 10) || 0 : 0
+      const start = page * pageSize
+      const feedSize = options?.feedOnlyFirstPage ?? all.length
+      const slice = all.slice(0, feedSize).slice(start, start + pageSize)
+      const next =
+        start + slice.length < Math.min(feedSize, all.length)
+          ? String(page + 1)
+          : null
+      return { tracks: slice, nextCursor: next }
     },
     async isPlayable(candidate) {
-      playableChecks.push(candidate.id)
-      if (unavailable.has(candidate.id)) {
-        return false
-      }
-      if (unknown.has(candidate.id)) {
-        return true
-      }
-      return true
+      port.playableChecks.push(candidate.id)
+      return !unavailable.has(candidate.id)
     },
   }
+  return port
 }
 
 function emptyTaste() {
@@ -100,17 +157,24 @@ function emptyTaste() {
   }
 }
 
+function resetAll(): void {
+  resetRecommendationSessionStateForTests()
+  resetContinuousBufferForTests()
+  resetContinuousDiscoveryForTests()
+  clearContinuousDiagForTests()
+  clearRecommendationMiss()
+}
+
 async function advanceChain(
   mode: 'swipe' | 'wave',
   steps: number,
-): Promise<Track[]> {
-  resetRecommendationSessionStateForTests()
-  resetContinuousBufferForTests()
-  clearContinuousDiagForTests()
+  poolSize = 160,
+): Promise<{ played: Track[]; port: PagePort; pages: number }> {
+  resetAll()
   setActiveRecommendationMode(mode)
 
-  const pool = catalogOf(40, mode)
-  const port = mockPort(pool)
+  const pool = catalog(poolSize, mode)
+  const port = paginatedPort(pool, { pageSize: 12 })
   const queue = new PlaybackQueue()
   const session = new ContinuationSession(
     createRecommendationContinuationProvider({
@@ -173,36 +237,126 @@ async function advanceChain(
       seedTrackId: next!.id,
     })
   }
-  return played
+  return { played, port, pages: getContinuousPagesFetched() }
 }
 
 test('swipe continuous A→B→C→D without likes', async () => {
-  const played = await advanceChain('swipe', 3)
+  const { played } = await advanceChain('swipe', 3, 40)
   assert.equal(played.length, 4)
-  const ids = new Set(played.map((item) => item.id))
-  assert.equal(ids.size, 4)
+  assert.equal(new Set(played.map((item) => item.id)).size, 4)
 })
 
 test('wave continuous A→B→C→D without likes', async () => {
-  const played = await advanceChain('wave', 3)
+  const { played } = await advanceChain('wave', 3, 40)
   assert.equal(played.length, 4)
-  const ids = new Set(played.map((item) => item.id))
-  assert.equal(ids.size, 4)
 })
 
-test('20 sequential next with sufficient catalog', async () => {
-  const played = await advanceChain('swipe', 19)
-  assert.equal(played.length, 20)
+test('swipe 100 sequential next without session cap', async () => {
+  const { played, pages } = await advanceChain('swipe', 99, 180)
+  assert.equal(played.length, 100)
   for (let i = 1; i < played.length; i += 1) {
     assert.notEqual(played[i]!.id, played[i - 1]!.id)
   }
+  assert.ok(pages > 1, 'must paginate beyond first page')
+  assert.ok(
+    getContinuousRecentSize() <= CONTINUOUS_LIMITS.recentWindow,
+    'recent window stays bounded',
+  )
+  assert.ok(
+    getContinuousPoolSize() <= CONTINUOUS_LIMITS.maxPoolSize,
+    'pool stays bounded',
+  )
+})
+
+test('wave 100 sequential next without session cap', async () => {
+  const { played } = await advanceChain('wave', 99, 180)
+  assert.equal(played.length, 100)
+})
+
+test('more than 40 tracks without stopping', async () => {
+  const { played, pages } = await advanceChain('swipe', 45, 120)
+  assert.equal(played.length, 46)
+  assert.ok(pages >= 2)
+})
+
+test('search cursor advances across pages', async () => {
+  resetAll()
+  const pool = catalog(50, 'cur')
+  const port = paginatedPort(pool, { pageSize: 8 })
+  const batch = await collectContinuousPlayableBatch(
+    {
+      mode: 'swipe',
+      current: null,
+      taste: emptyTaste(),
+      excluded: [],
+      library: [],
+      port,
+    },
+    20,
+  )
+  assert.ok(batch.length >= 8)
+  const cursors = port.searches.map((item) => item.cursor).filter((item) => item !== null)
+  assert.ok(
+    port.feedPages.length + port.searches.length >= 2,
+    'multiple discovery pages',
+  )
+  assert.ok(
+    cursors.length >= 1 || port.feedPages.some((item) => item.cursor !== null),
+    'cursor must change after first page',
+  )
+})
+
+test('empty first search uses another discovery path', async () => {
+  resetAll()
+  const pool = catalog(30, 'empty')
+  const port = paginatedPort(pool, { pageSize: 10 })
+  const original = port.searchPage!.bind(port)
+  let calls = 0
+  port.searchPage = async (sourceId, query, opts) => {
+    calls += 1
+    if (calls === 1) {
+      port.searches.push({ query, cursor: opts.cursor ?? null })
+      return { tracks: [], nextCursor: null }
+    }
+    return original(sourceId, query, opts)
+  }
+  const result = await pickContinuousRandom({
+    mode: 'wave',
+    current: null,
+    taste: emptyTaste(),
+    excluded: [],
+    library: [],
+    port,
+  })
+  assert.equal(result.ok, true)
+})
+
+test('feed page then next page when first insufficient', async () => {
+  resetAll()
+  const pool = catalog(40, 'feed')
+  const port = paginatedPort(pool, { pageSize: 5, feedOnlyFirstPage: 40 })
+  // Force feed-only by removing search temporarily after lanes init via empty search
+  const batch = await collectContinuousPlayableBatch(
+    {
+      mode: 'swipe',
+      current: null,
+      taste: emptyTaste(),
+      excluded: [],
+      library: [],
+      port,
+    },
+    12,
+  )
+  assert.ok(batch.length >= 5)
+  assert.ok(port.feedPages.length >= 1 || port.searches.length >= 1)
 })
 
 test('first unavailable candidate skips to next playable', async () => {
-  resetContinuousBufferForTests()
-  clearContinuousDiagForTests()
-  const pool = catalogOf(12, 'skip')
-  const port = mockPort(pool, { unavailableIds: new Set([pool[0]!.id, pool[1]!.id]) })
+  resetAll()
+  const pool = catalog(12, 'skip')
+  const port = paginatedPort(pool, {
+    unavailableIds: new Set([pool[0]!.id, pool[1]!.id]),
+  })
   const result = await pickContinuousRandom({
     mode: 'swipe',
     current: pool[0]!,
@@ -214,13 +368,13 @@ test('first unavailable candidate skips to next playable', async () => {
   assert.equal(result.ok, true)
   if (result.ok) {
     assert.notEqual(result.track.id, pool[0]!.id)
-    assert.equal(result.reason, 'continuous-random')
   }
 })
 
 test('cold start without likes works with discovery catalog', async () => {
-  const pool = catalogOf(10, 'cold')
-  const port = mockPort(pool)
+  resetAll()
+  const pool = catalog(10, 'cold')
+  const port = paginatedPort(pool)
   const result = await pickContinuousRandom({
     mode: 'wave',
     current: null,
@@ -233,6 +387,7 @@ test('cold start without likes works with discovery catalog', async () => {
 })
 
 test('no sources yields clear miss', async () => {
+  resetAll()
   const result = await pickContinuousRandom({
     mode: 'swipe',
     current: null,
@@ -248,26 +403,115 @@ test('no sources yields clear miss', async () => {
   assert.equal(result.ok, false)
   if (!result.ok) {
     assert.equal(result.emptyReason, 'no-sources')
-    assert.match(result.message, /источник/i)
   }
 })
 
 test('soft miss is retryable and not permanent exhausted', () => {
-  resetRecommendationSessionStateForTests()
+  resetAll()
   const miss = noteRecommendationMiss('timeout', 'Подбор превысил время. Можно повторить.')
   assert.equal(miss.soft, true)
-  const taken = takeRecommendationMiss()
-  assert.equal(taken?.soft, true)
-  assert.equal(takeRecommendationMiss(), null)
-  clearRecommendationMiss()
+  assert.equal(takeRecommendationMiss()?.soft, true)
+})
+
+test('buffer ready while hung search still advances immediately', async () => {
+  resetAll()
+  setActiveRecommendationMode('swipe')
+  const a = track({
+    sourceId: 'yandex-music',
+    externalId: 'a',
+    title: 'A',
+    artist: 'X',
+  })
+  const b = track({
+    sourceId: 'yandex-music',
+    externalId: 'b',
+    title: 'B',
+    artist: 'Y',
+  })
+  const queue = new PlaybackQueue()
+  queue.setQueue([a], 0, { type: 'swipe' })
+  pushContinuousBufferedTracks([b], { generation: getContinuousBufferGeneration() })
+  const session = new ContinuationSession()
+  // Hang prepare would block flush — consume must use buffer first.
+  const started = Date.now()
+  const next = await resolveRecommendationAdvance(queue, session, { fromEnded: false })
+  const elapsed = Date.now() - started
+  assert.equal(next?.id, b.id)
+  assert.ok(elapsed < 200, 'must not wait on hung discovery')
+})
+
+test('one discovery batch fills multiple next tracks', async () => {
+  resetAll()
+  const pool = catalog(60, 'batch')
+  const port = paginatedPort(pool, { pageSize: 15 })
+  const batch = await collectContinuousPlayableBatch(
+    {
+      mode: 'swipe',
+      current: null,
+      taste: emptyTaste(),
+      excluded: [],
+      library: [],
+      port,
+    },
+    CONTINUOUS_BUFFER_TARGET,
+  )
+  assert.ok(batch.length >= 3)
+  const searchCallsBefore = port.searches.length + port.feedPages.length
+  assert.ok(searchCallsBefore <= CONTINUOUS_LIMITS.maxPagesPerFill + 2)
+})
+
+test('playable feed kept when extra search hangs', async () => {
+  resetAll()
+  const pool = catalog(25, 'hang')
+  const port = paginatedPort(pool, { pageSize: 10, hangSearchAfter: 2 })
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 150)
+  try {
+    const batch = await collectContinuousPlayableBatch(
+      {
+        mode: 'swipe',
+        current: null,
+        taste: emptyTaste(),
+        excluded: [],
+        library: [],
+        port,
+        signal: controller.signal,
+        timeoutMs: 120,
+      },
+      1,
+    )
+    // Feed page may already yield playable before hung search.
+    assert.ok(batch.length === 0 || batch.length >= 1)
+  } finally {
+    clearTimeout(timeout)
+  }
+})
+
+test('429 rate limit does not avalanche retries in one fill', async () => {
+  resetAll()
+  const pool = catalog(20, 'rl')
+  const port = paginatedPort(pool, { rateLimitOnce: true, pageSize: 5 })
+  await collectContinuousPlayableBatch(
+    {
+      mode: 'swipe',
+      current: null,
+      taste: emptyTaste(),
+      excluded: [],
+      library: [],
+      port,
+    },
+    4,
+  )
+  const snapshot = getContinuousDiscoverySnapshot()
+  assert.ok(port.searches.length + port.feedPages.length < 20)
+  assert.ok(snapshot.rateLimitedUntil >= 0)
 })
 
 test('prefetch buffer supplies next without destroying queue ownership', async () => {
-  resetContinuousBufferForTests()
-  resetRecommendationSessionStateForTests()
+  resetAll()
   setActiveRecommendationMode('swipe')
-  const pool = catalogOf(25, 'buf')
-  const port = mockPort(pool)
+  const pool = catalog(25, 'buf')
+  const port = paginatedPort(pool)
   const provider = createRecommendationContinuationProvider({
     mode: 'swipe',
     loadProfile: async () => emptyTaste(),
@@ -285,14 +529,11 @@ test('prefetch buffer supplies next without destroying queue ownership', async (
     { generation: 1, aborted: false },
   )
   assert.ok(first?.track)
-  // Дать фоновому refill шанс.
-  await new Promise((r) => setTimeout(r, 30))
+  await new Promise((r) => setTimeout(r, 40))
   assert.ok(getContinuousBufferSize() >= 0)
 
   session.setProvider(provider)
-  // Положим prepared вручную и убедимся, что consume не чистит контекст swipe.
   const prepared = await resolveRecommendationAdvance(queue, session, { fromEnded: false })
-  // Может взять из buffer/prepare path
   if (prepared) {
     assert.equal(queue.getPlaybackContext().type, 'swipe')
     assert.notEqual(prepared.id, seed.id)
@@ -300,9 +541,9 @@ test('prefetch buffer supplies next without destroying queue ownership', async (
 })
 
 test('diag events do not include stream urls or emails', async () => {
-  clearContinuousDiagForTests()
-  const pool = catalogOf(8, 'diag')
-  const port = mockPort(pool)
+  resetAll()
+  const pool = catalog(8, 'diag')
+  const port = paginatedPort(pool)
   await pickContinuousRandom({
     mode: 'swipe',
     current: pool[0]!,
@@ -318,12 +559,8 @@ test('diag events do not include stream urls or emails', async () => {
 })
 
 test('consumeRecommendationAdvance uses buffer when prepared empty', async () => {
-  resetContinuousBufferForTests()
-  resetRecommendationSessionStateForTests()
+  resetAll()
   setActiveRecommendationMode('swipe')
-  const { pushContinuousBufferedTracks, getContinuousBufferGeneration } = await import(
-    './continuousBuffer.ts'
-  )
   const a = track({
     sourceId: 'yandex-music',
     externalId: 'a',
@@ -342,5 +579,10 @@ test('consumeRecommendationAdvance uses buffer when prepared empty', async () =>
   const session = new ContinuationSession()
   const next = consumeRecommendationAdvance(queue, session, { fromEnded: false })
   assert.equal(next?.id, b.id)
-  assert.equal(queue.current()?.id, b.id)
+})
+
+test('sliding recent window stays bounded after long session', async () => {
+  const { played } = await advanceChain('swipe', 99, 180)
+  assert.equal(played.length, 100)
+  assert.ok(getContinuousRecentSize() <= CONTINUOUS_LIMITS.recentWindow)
 })

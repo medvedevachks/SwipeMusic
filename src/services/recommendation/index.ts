@@ -6,15 +6,25 @@ export {
 } from './engine.ts'
 export {
   pickContinuousRandom,
+  collectContinuousPlayableBatch,
   CONTINUOUS_RANDOM_STRATEGY,
   CONTINUOUS_DISCOVERY_QUERIES,
 } from './continuousRandomV1.ts'
+export { CONTINUOUS_LIMITS } from './continuousLimits.ts'
 export {
   invalidateContinuousBuffer,
   resetContinuousBufferForTests,
   getContinuousBufferSize,
   CONTINUOUS_BUFFER_TARGET,
+  requestContinuousBufferRefill,
 } from './continuousBuffer.ts'
+export {
+  clearContinuousDiscoveryRuntime,
+  getContinuousDiscoverySnapshot,
+  getContinuousPoolSize,
+  getContinuousPagesFetched,
+  resetContinuousDiscoveryForTests,
+} from './continuousSession.ts'
 export { createRecommendationContinuationProvider } from './continuationBridge.ts'
 export type { RecommendationContinuationDeps } from './continuationBridge.ts'
 export {

@@ -8,7 +8,7 @@
 | Дата снимка | 2026-10-30 (Continuous Music Engine V1) |
 | Канонический репозиторий | https://github.com/medvedevachks/SwipeMusic |
 | Ветка снимка | `feature/continuous-music-engine-v1` → PR в `feature/deploy-windows-01` |
-| Проверенный HEAD | continuous-random-v1 для swipe/wave (prefetch buffer, soft miss retry). Baseline UX-10: `ed53b08`. S1 deploy не выполнялся. |
+| Проверенный HEAD | continuous-random-v1 unlimited stream: paginated discovery + session pool + buffer 8. Baseline UX-10: `ed53b08`. S1 deploy не выполнялся. |
 | Исторический upstream | https://github.com/r-sh-galimov/SwipeMusic |
 
 **Легенда источников фактов**
@@ -233,7 +233,7 @@ Last.fm и MusicBrainz для рекомендаций **не** подключа
 
 | Приоритет | Задача | Суть |
 |---|---|---|
-| **1** | Continuous Music Engine V1 — device acceptance | Код на `feature/continuous-music-engine-v1` (gates PASS). После merge в deploy-windows + frontend-only S1 hotfix: реальный Swipe/Wave UP A→B→C и Yandex audio. Merge/deploy не выполнять без задачи. |
+| **1** | Continuous Music Engine V1 — device acceptance | PR #3 unlimited stream (paginated discovery). После merge + frontend-only S1 hotfix: реальный Swipe/Wave 100× UP и Yandex audio. Merge/deploy не выполнять без задачи. |
 | **2** | UX-10 device acceptance | UX-10 уже в baseline `ed53b08`. Device smoke + deploy по отдельному разрешению. |
 | **2** | LIBRARY-UX / S1 deploy | Inbox + compact `/library` на ветке; production deploy только после PASS review. **S1 не трогать** без задачи. |
 | **3** | RELEASE / S1 sync | Frontend deploy на S1 только с Server. **Без** restart backend/Caddy/AD без задачи. |

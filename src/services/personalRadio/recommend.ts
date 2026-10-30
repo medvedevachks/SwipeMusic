@@ -51,6 +51,15 @@ export type RadioSearchPort = {
   isPlayable: (track: Track, signal: AbortSignal) => Promise<boolean>
   /** Browse/library лента для continuous-random-v1 (опционально). */
   fetchFeed?: (sourceId: string, signal: AbortSignal) => Promise<Track[]>
+  searchPage?: (
+    sourceId: string,
+    query: string,
+    options: { cursor?: string | null; limit?: number; signal: AbortSignal },
+  ) => Promise<{ tracks: Track[]; nextCursor: string | null }>
+  fetchFeedPage?: (
+    sourceId: string,
+    options: { cursor?: string | null; limit?: number; signal: AbortSignal },
+  ) => Promise<{ tracks: Track[]; nextCursor: string | null }>
 }
 
 export type RadioPlan = {

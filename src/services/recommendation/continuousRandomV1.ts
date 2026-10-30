@@ -1,11 +1,30 @@
 /**
  * continuous-random-v1 — непрерывный поток для swipe / wave.
- * Персонализация не критерий выбора; лайки не обязательны для холодного старта.
+ * Персонализация не критерий; лайки не обязательны.
+ * Пагинированный discovery + session candidate pool (без лимита треков за сессию).
  */
 import { isDemoSourceId } from '../../sources/demoSource.ts'
 import type { Track } from '../../types/track.ts'
 import type { ContinuationLibraryTrack } from '../continuation/libraryContinuation.ts'
 import { noteContinuousDiag } from './continuousDiag.ts'
+import { CONTINUOUS_LIMITS } from './continuousLimits.ts'
+import {
+  allDiscoveryLanesExhausted,
+  ensureContinuousDiscoverySession,
+  ensureDiscoveryLanes,
+  getContinuousPoolSize,
+  isDiscoveryRateLimited,
+  markLaneError,
+  markLanePageResult,
+  noteContinuousRecent,
+  noteContinuousSeed,
+  pickNextDiscoveryLane,
+  pushCandidatesToPool,
+  setDiscoveryQueryOrder,
+  takeFromCandidatePool,
+  withSourceConcurrency,
+  type DiscoveryLane,
+} from './continuousSession.ts'
 import {
   buildExclusionSets,
   copyIdentity,
@@ -14,21 +33,17 @@ import {
 } from './identity.ts'
 import {
   type RecommendationCatalogPort,
+  type RecommendationDiscoveryPage,
   type RecommendationEmptyReason,
   type RecommendationRequest,
   type RecommendationResult,
-  RECOMMENDATION_LIMITS,
 } from './types.ts'
 
 export const CONTINUOUS_RANDOM_STRATEGY = 'continuous-random-v1' as const
 
-/** Окно недавних композиций, которые не предлагаем снова. */
-export const CONTINUOUS_RECENT_WINDOW = 40
+/** @deprecated используйте CONTINUOUS_LIMITS.recentWindow */
+export const CONTINUOUS_RECENT_WINDOW = CONTINUOUS_LIMITS.recentWindow
 
-/**
- * Разнообразные discovery-запросы (не вкус пользователя).
- * Для источников без random-feed — bounded search.
- */
 export const CONTINUOUS_DISCOVERY_QUERIES = [
   'хиты',
   'популярное',
@@ -59,12 +74,7 @@ export type ContinuousAvailabilityStatus =
   | 'ERROR'
 
 export type ContinuousDiscoveryPort = RecommendationCatalogPort & {
-  /** Опциональный browse/library feed без поискового запроса. */
   fetchFeed?: (sourceId: string, signal: AbortSignal) => Promise<Track[]>
-  /**
-   * Расширенная availability. Если нет — используется isPlayable.
-   * UNKNOWN ≠ UNAVAILABLE: допускается дополнительная проверка через isPlayable.
-   */
   probeAvailability?: (
     track: Track,
     signal: AbortSignal,
@@ -142,125 +152,224 @@ function buildDiscoveryQueries(current: Track | null): string[] {
   if (current?.title?.trim()) {
     queries.push(current.title.trim())
   }
-  return shuffleInPlace(queries).slice(0, 10)
+  return shuffleInPlace(queries)
 }
 
-async function collectCandidates(input: {
+function excludeSetFromRequest(request: RecommendationRequest): Set<string> {
+  const sets = buildExclusionSets([
+    ...request.excluded,
+    ...(request.current
+      ? [
+          {
+            id: request.current.id,
+            title: request.current.title,
+            artist: request.current.artist,
+            sourceId: request.current.sourceId,
+            externalId: request.current.externalId,
+          },
+        ]
+      : []),
+  ])
+  return new Set([...sets.ids, ...sets.copies, ...sets.titles])
+}
+
+function isRateLimitError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const status =
+    (error as { status?: number }).status ??
+    (error as { statusCode?: number }).statusCode
+  if (status === 429) {
+    return true
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  return /RATE_LIMIT|\b429\b|rate.?limit/i.test(message)
+}
+
+async function raceWithAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) {
+    throw new DOMException('Aborted', 'AbortError')
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
+}
+
+async function fetchLanePage(
+  lane: DiscoveryLane,
+  port: ContinuousDiscoveryPort,
+  signal: AbortSignal,
+): Promise<RecommendationDiscoveryPage> {
+  const limit = CONTINUOUS_LIMITS.apiPageSize
+  const pageGate = mergeAbortSignals(signal, CONTINUOUS_LIMITS.pageTimeoutMs)
+  try {
+    return await withSourceConcurrency(lane.sourceId, async () => {
+      if (lane.kind === 'feed') {
+        if (port.fetchFeedPage) {
+          return raceWithAbort(
+            port.fetchFeedPage(lane.sourceId, {
+              cursor: lane.cursor,
+              limit,
+              signal: pageGate.signal,
+            }),
+            pageGate.signal,
+          )
+        }
+        if (!port.fetchFeed || lane.cursor) {
+          // Без пагинации feed — одна страница; повтор с cursor не имитируем.
+          return { tracks: [], nextCursor: null }
+        }
+        const tracks = await raceWithAbort(
+          port.fetchFeed(lane.sourceId, pageGate.signal),
+          pageGate.signal,
+        )
+        return { tracks, nextCursor: null }
+      }
+
+      const query = lane.query ?? ''
+      if (port.searchPage) {
+        return raceWithAbort(
+          port.searchPage(lane.sourceId, query, {
+            cursor: lane.cursor,
+            limit,
+            signal: pageGate.signal,
+          }),
+          pageGate.signal,
+        )
+      }
+      if (lane.cursor) {
+        // Адаптер без searchPage — не крутим «фейковый» cursor.
+        return { tracks: [], nextCursor: null }
+      }
+      const tracks = await raceWithAbort(
+        port.search(lane.sourceId, query, pageGate.signal),
+        pageGate.signal,
+      )
+      return { tracks, nextCursor: null }
+    })
+  } finally {
+    pageGate.dispose()
+  }
+}
+
+async function refillCandidatePool(input: {
   request: RecommendationRequest
   port: ContinuousDiscoveryPort
   signal: AbortSignal
   excluded: ReturnType<typeof buildExclusionSets>
-}): Promise<{
-  candidates: Track[]
-  searchFailed: boolean
-  emptySearchPaths: number
-}> {
-  const candidates: Track[] = []
-  const seen = new Set<string>()
+}): Promise<{ searchFailed: boolean; pages: number; hadPlayableInPool: boolean }> {
   let searchFailed = false
-  let emptySearchPaths = 0
+  let pages = 0
+  const sourceIds = input.port.sources.map((item) => item.id)
 
-  const push = (track: Track) => {
-    if (isExcludedTrack(track, input.excluded)) {
-      return
-    }
-    const key = copyIdentity(track)
-    const title = titleIdentity(track.artist, track.title)
-    if (seen.has(key) || seen.has(title) || seen.has(track.id)) {
-      return
-    }
-    seen.add(key)
-    seen.add(title)
-    seen.add(track.id)
-    candidates.push(track)
-  }
-
-  // 1) Browse/library feeds (если порт умеет).
-  if (input.port.fetchFeed) {
-    for (const source of input.port.sources) {
-      if (input.signal.aborted) {
-        break
-      }
-      try {
-        const feed = await input.port.fetchFeed(source.id, input.signal)
-        noteContinuousDiag({
-          mode: input.request.mode,
-          phase: 'discovery-query',
-          source: source.id,
-          query: 'feed',
-          found: feed.length,
-        })
-        if (feed.length === 0) {
-          emptySearchPaths += 1
-        }
-        for (const track of feed.slice(0, RECOMMENDATION_LIMITS.maxPerSearch * 2)) {
-          push(track)
-        }
-      } catch {
-        searchFailed = true
-      }
-    }
-  }
-
-  // 2) Разнообразный search (не только liked artists).
-  if (input.port.sources.length > 0) {
-    const queries = buildDiscoveryQueries(input.request.current)
-    for (const query of queries) {
-      if (input.signal.aborted) {
-        break
-      }
-      if (candidates.length >= RECOMMENDATION_LIMITS.maxCatalogCandidates) {
-        break
-      }
-      for (const source of input.port.sources) {
-        if (input.signal.aborted) {
-          break
-        }
-        noteContinuousDiag({
-          mode: input.request.mode,
-          phase: 'discovery-query',
-          source: source.id,
-          query,
-        })
-        let found: Track[] = []
-        try {
-          found = await input.port.search(source.id, query, input.signal)
-        } catch {
-          searchFailed = true
-          continue
-        }
-        if (found.length === 0) {
-          emptySearchPaths += 1
-        }
-        for (const track of found.slice(0, RECOMMENDATION_LIMITS.maxPerSearch)) {
-          push(track)
-        }
-      }
-    }
-  }
-
-  // 3) Резерв: известная библиотека (не только лайки).
-  const libraryPool = [...input.request.library]
-    .filter(
-      (item) =>
-        item.externalId &&
-        !item.disliked &&
-        !item.hidden &&
-        !isDemoSourceId(item.sourceId),
-    )
-    .sort((left, right) => {
-      // Лёгкий shuffle-bias: liked чуть раньше, но не обязательны.
-      const likeDelta = Number(right.liked) - Number(left.liked)
-      if (likeDelta !== 0) {
-        return likeDelta
-      }
-      return (right.lastPlayed ?? '').localeCompare(left.lastPlayed ?? '')
+  // Исчерпанные lanes прошлой попытки не должны блокировать Retry / новый fill.
+  if (allDiscoveryLanesExhausted() && getContinuousPoolSize() === 0) {
+    ensureContinuousDiscoverySession(input.request.mode, { resetLanes: true })
+    setDiscoveryQueryOrder(buildDiscoveryQueries(input.request.current), {
+      force: true,
     })
-  for (const item of shuffleInPlace(libraryPool).slice(0, RECOMMENDATION_LIMITS.maxLibraryProbes * 2)) {
-    push(libraryToTrack(item))
+  } else {
+    setDiscoveryQueryOrder(buildDiscoveryQueries(input.request.current))
+  }
+  ensureDiscoveryLanes(sourceIds)
+
+  // Резерв библиотеки один раз, если pool пуст.
+  if (getContinuousPoolSize() === 0 && input.request.library.length > 0) {
+    const libraryPool = [...input.request.library]
+      .filter(
+        (item) =>
+          item.externalId &&
+          !item.disliked &&
+          !item.hidden &&
+          !isDemoSourceId(item.sourceId),
+      )
+      .map(libraryToTrack)
+    pushCandidatesToPool(shuffleInPlace(libraryPool).slice(0, CONTINUOUS_LIMITS.apiPageSize))
   }
 
-  return { candidates, searchFailed, emptySearchPaths }
+  while (
+    pages < CONTINUOUS_LIMITS.maxPagesPerFill &&
+    getContinuousPoolSize() < CONTINUOUS_LIMITS.maxPoolSize / 2 &&
+    !input.signal.aborted
+  ) {
+    if (isDiscoveryRateLimited()) {
+      break
+    }
+    const lane = pickNextDiscoveryLane()
+    if (!lane) {
+      break
+    }
+    noteContinuousDiag({
+      mode: input.request.mode,
+      phase: 'discovery-query',
+      source: lane.sourceId,
+      query: lane.kind === 'feed' ? 'feed' : lane.query ?? '',
+      reason: lane.cursor ? `cursor:${lane.cursor}` : 'page-0',
+    })
+    try {
+      const page = await fetchLanePage(lane, input.port, input.signal)
+      pages += 1
+      const filtered = page.tracks.filter(
+        (track) => !isExcludedTrack(track, input.excluded),
+      )
+      const added = pushCandidatesToPool(filtered)
+      markLanePageResult(lane, {
+        tracks: filtered.length,
+        nextCursor: page.nextCursor,
+      })
+      noteContinuousDiag({
+        mode: input.request.mode,
+        phase: 'candidates',
+        source: lane.sourceId,
+        found: filtered.length,
+        bufferSize: getContinuousPoolSize(),
+        reason: added > 0 ? 'pool-grow' : 'pool-skip-dupes',
+      })
+      // Уже есть кандидаты — не гоняем лишние query в этом refill.
+      if (getContinuousPoolSize() >= CONTINUOUS_LIMITS.batchPlayableTarget) {
+        break
+      }
+      if (
+        pages >= CONTINUOUS_LIMITS.maxQueriesPerFill &&
+        getContinuousPoolSize() > 0
+      ) {
+        break
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        // page/operation timeout — сохраняем уже найденный pool.
+        break
+      }
+      searchFailed = true
+      markLaneError(lane, isRateLimitError(error))
+      if (isRateLimitError(error)) {
+        break
+      }
+    }
+  }
+
+  return {
+    searchFailed,
+    pages,
+    hadPlayableInPool: getContinuousPoolSize() > 0,
+  }
 }
 
 async function classifyPlayability(
@@ -283,38 +392,39 @@ async function classifyPlayability(
   }
 }
 
-async function firstPlayableRandom(
-  candidates: readonly Track[],
+async function selectPlayableFromPool(
   port: ContinuousDiscoveryPort,
   signal: AbortSignal,
   mode: RecommendationRequest['mode'],
-): Promise<{ track: Track } | null> {
+  extraExclude: ReadonlySet<string>,
+  limit: number,
+): Promise<Track[]> {
+  const selected: Track[] = []
+  let checks = 0
   let playable = 0
   let unknown = 0
   let unavailable = 0
   let rejected = 0
 
-  for (const track of candidates) {
-    if (signal.aborted) {
-      return null
+  while (
+    selected.length < limit &&
+    checks < CONTINUOUS_LIMITS.maxPlayableChecksPerFill &&
+    !signal.aborted
+  ) {
+    const batch = takeFromCandidatePool(1, extraExclude)
+    if (batch.length === 0) {
+      break
     }
+    const track = batch[0]!
+    checks += 1
     const status = await classifyPlayability(track, port, signal)
     if (status === 'PLAYABLE') {
       playable += 1
-      noteContinuousDiag({
-        mode,
-        phase: 'select',
-        trackId: track.id,
-        playable,
-        unknown,
-        unavailable,
-        rejected,
-      })
-      return { track }
+      selected.push(track)
+      continue
     }
     if (status === 'UNKNOWN') {
       unknown += 1
-      // UNKNOWN: повторная проверка через isPlayable (resolver/candidates внутри порта).
       let ok = false
       try {
         ok = await port.isPlayable(track, signal)
@@ -323,28 +433,23 @@ async function firstPlayableRandom(
       }
       if (ok) {
         playable += 1
+        selected.push(track)
         noteContinuousDiag({
           mode,
           phase: 'select',
           trackId: track.id,
           reason: 'unknown-resolved-playable',
-          playable,
-          unknown,
-          unavailable,
-          rejected,
         })
-        return { track }
+        continue
       }
       rejected += 1
-      noteContinuousDiag({
-        mode,
-        phase: 'reject',
-        trackId: track.id,
-        reason: 'unknown-unresolved',
-      })
       continue
     }
-    if (status === 'ERROR' || status === 'AUTH_REQUIRED' || status === 'SUBSCRIPTION_REQUIRED') {
+    if (
+      status === 'ERROR' ||
+      status === 'AUTH_REQUIRED' ||
+      status === 'SUBSCRIPTION_REQUIRED'
+    ) {
       rejected += 1
       noteContinuousDiag({
         mode,
@@ -352,29 +457,120 @@ async function firstPlayableRandom(
         trackId: track.id,
         reason: status.toLowerCase(),
       })
-      // AUTH/SUBSCRIPTION на одном треке не останавливает весь поток.
       continue
     }
     unavailable += 1
     rejected += 1
-    noteContinuousDiag({
-      mode,
-      phase: 'reject',
-      trackId: track.id,
-      reason: 'unavailable',
-    })
   }
 
   noteContinuousDiag({
     mode,
-    phase: 'candidates',
-    found: candidates.length,
+    phase: 'select',
+    found: selected.length,
     playable,
     unknown,
     unavailable,
     rejected,
   })
-  return null
+  return selected
+}
+
+/**
+ * Пополнить pool и вернуть до `limit` playable треков одним discovery-проходом.
+ * Не запускает полный discovery отдельно на каждый трек.
+ */
+export async function collectContinuousPlayableBatch(
+  request: RecommendationRequest,
+  limit: number,
+): Promise<Track[]> {
+  const parent = request.signal ?? new AbortController().signal
+  if (parent.aborted || limit <= 0) {
+    return []
+  }
+
+  ensureContinuousDiscoverySession(request.mode)
+  const port = request.port as ContinuousDiscoveryPort
+  const timeoutMs = request.timeoutMs ?? CONTINUOUS_LIMITS.operationTimeoutMs
+  const gate = mergeAbortSignals(parent, timeoutMs)
+  const extraExclude = excludeSetFromRequest(request)
+  const excluded = buildExclusionSets([
+    ...request.excluded,
+    ...(request.current
+      ? [
+          {
+            id: request.current.id,
+            title: request.current.title,
+            artist: request.current.artist,
+            sourceId: request.current.sourceId,
+            externalId: request.current.externalId,
+          },
+        ]
+      : []),
+  ])
+
+  try {
+    const selected: Track[] = []
+    // Сначала забираем уже готовый pool (быстрый UP).
+    selected.push(
+      ...(await selectPlayableFromPool(
+        port,
+        gate.signal,
+        request.mode,
+        extraExclude,
+        limit,
+      )),
+    )
+
+    while (selected.length < limit && !gate.signal.aborted) {
+      if (allDiscoveryLanesExhausted() && getContinuousPoolSize() === 0) {
+        break
+      }
+      const before = getContinuousPoolSize()
+      await refillCandidatePool({
+        request,
+        port,
+        signal: gate.signal,
+        excluded,
+      })
+      // Уже есть playable — не ждём timeout дополнительных страниц.
+      const more = await selectPlayableFromPool(
+        port,
+        gate.signal,
+        request.mode,
+        new Set([
+          ...extraExclude,
+          ...selected.flatMap((track) => [
+            track.id,
+            copyIdentity(track),
+            titleIdentity(track.artist, track.title),
+          ]),
+        ]),
+        limit - selected.length,
+      )
+      selected.push(...more)
+      if (more.length === 0 && getContinuousPoolSize() === before) {
+        // Нет прогресса (exhausted / rate limit / timeout).
+        break
+      }
+      // Достаточно для buffer — выходим, даже если gate ещё жив.
+      if (selected.length >= limit) {
+        break
+      }
+      if (gate.timedOut() && selected.length > 0) {
+        break
+      }
+    }
+
+    for (const track of selected) {
+      noteContinuousRecent(track)
+    }
+    if (selected[0]) {
+      noteContinuousSeed(selected[0])
+    }
+    return selected
+  } finally {
+    gate.dispose()
+  }
 }
 
 /**
@@ -397,136 +593,51 @@ export async function pickContinuousRandom(
     )
   }
 
+  ensureContinuousDiscoverySession(request.mode)
   noteContinuousDiag({
     mode: request.mode,
     phase: 'discovery-start',
     source: port.sources.map((item) => item.id).join(',') || 'library-only',
   })
 
-  const timeoutMs = request.timeoutMs ?? RECOMMENDATION_LIMITS.searchTimeoutMs
-  const gate = mergeAbortSignals(parent, timeoutMs)
-
   try {
-    const excluded = buildExclusionSets([
-      ...request.excluded,
-      ...(request.current
-        ? [
-            {
-              id: request.current.id,
-              title: request.current.title,
-              artist: request.current.artist,
-              sourceId: request.current.sourceId,
-              externalId: request.current.externalId,
-            },
-          ]
-        : []),
-    ])
-
-    const collected = await collectCandidates({
-      request,
-      port,
-      signal: gate.signal,
-      excluded,
-    })
-
-    if (gate.signal.aborted && gate.timedOut()) {
+    if (isDiscoveryRateLimited()) {
       return miss(
         request,
-        'timeout',
-        'Подбор превысил время ожидания. Можно повторить.',
+        'error',
+        'Источник временно ограничил запросы. Можно повторить чуть позже.',
       )
     }
-    if (gate.signal.aborted || parent.aborted) {
-      return miss(request, 'aborted', 'Подбор отменён.')
+
+    const batch = await collectContinuousPlayableBatch(request, 1)
+    if (batch[0]) {
+      return {
+        ok: true,
+        track: batch[0],
+        reason: 'continuous-random',
+        mode: request.mode,
+      }
     }
 
-    if (collected.candidates.length === 0) {
-      if (collected.searchFailed) {
-        return miss(
-          request,
-          'error',
-          'Не удалось опросить источники. Можно повторить подбор.',
-        )
-      }
+    if (parent.aborted) {
+      return miss(request, 'aborted', 'Подбор отменён.')
+    }
+    if (allDiscoveryLanesExhausted()) {
       return miss(
         request,
         'no-candidates',
-        'Пока нет подходящих композиций. Можно повторить подбор.',
+        'Подключённые источники не дали новых воспроизводимых композиций. Можно повторить подбор.',
       )
     }
-
-    const shuffled = shuffleInPlace([...collected.candidates])
-    noteContinuousDiag({
-      mode: request.mode,
-      phase: 'candidates',
-      found: shuffled.length,
-    })
-
-    const picked = await firstPlayableRandom(shuffled, port, gate.signal, request.mode)
-    if (gate.signal.aborted && gate.timedOut()) {
-      return miss(
-        request,
-        'timeout',
-        'Проверка доступности превысила время. Можно повторить.',
-      )
-    }
-    if (gate.signal.aborted || parent.aborted) {
+    return miss(
+      request,
+      'no-candidates',
+      'Пока нет подходящих композиций. Можно повторить подбор.',
+    )
+  } catch {
+    if (parent.aborted) {
       return miss(request, 'aborted', 'Подбор отменён.')
     }
-    if (!picked) {
-      return miss(
-        request,
-        'all-unavailable',
-        'Кандидаты найдены, но ни один сейчас недоступен. Можно повторить.',
-      )
-    }
-
-    return {
-      ok: true,
-      track: picked.track,
-      reason: 'continuous-random',
-      mode: request.mode,
-    }
-  } catch {
-    if (parent.aborted || gate.signal.aborted) {
-      return miss(
-        request,
-        gate.timedOut() ? 'timeout' : 'aborted',
-        gate.timedOut()
-          ? 'Подбор превысил время ожидания. Можно повторить.'
-          : 'Подбор отменён.',
-      )
-    }
     return miss(request, 'error', 'Ошибка подбора. Можно повторить.')
-  } finally {
-    gate.dispose()
   }
-}
-
-/** Несколько playable кандидатов для prefetch-буфера (без повторного полного discovery при возможности). */
-export async function collectContinuousPlayableBatch(
-  request: RecommendationRequest,
-  limit: number,
-): Promise<Track[]> {
-  const result: Track[] = []
-  const excluded = [...request.excluded]
-  for (let i = 0; i < limit; i += 1) {
-    const pick = await pickContinuousRandom({
-      ...request,
-      excluded,
-      current: request.current ?? result[result.length - 1] ?? null,
-    })
-    if (!pick.ok) {
-      break
-    }
-    result.push(pick.track)
-    excluded.push({
-      id: pick.track.id,
-      title: pick.track.title,
-      artist: pick.track.artist,
-      sourceId: pick.track.sourceId,
-      externalId: pick.track.externalId,
-    })
-  }
-  return result
 }

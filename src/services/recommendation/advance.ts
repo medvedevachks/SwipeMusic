@@ -7,7 +7,11 @@ import { noteSearchPlaybackEvent } from '../continuation/searchPlaybackDebug.ts'
 import { isContinuationCandidateAvailable } from '../continuation/types.ts'
 import type { PlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
 import type { RecommendationMode } from './types.ts'
-import { takeContinuousBufferedTrack } from './continuousBuffer.ts'
+import {
+  requestContinuousBufferRefill,
+  takeContinuousBufferedTrack,
+} from './continuousBuffer.ts'
+import { noteContinuousSeed } from './continuousSession.ts'
 import { getActiveRecommendationMode } from './sessionState.ts'
 
 /** Контексты, где Next/ended/жест идут через Recommendation Engine. */
@@ -115,7 +119,7 @@ export function consumeRecommendationAdvance(
     session.takePrepared()
   }
 
-  // Prefetch buffer continuous-random-v1 (metadata only).
+  // Prefetch buffer continuous-random-v1 (metadata only) — до ожидания discovery.
   const currentId = queue.current()?.id ?? null
   const buffered = takeContinuousBufferedTrack(
     new Set(
@@ -130,8 +134,10 @@ export function consumeRecommendationAdvance(
     currentId &&
     isContinuationCandidateAvailable(buffered, currentId, queue.getItems())
   ) {
+    noteContinuousSeed(buffered)
     queue.insertNext(buffered)
     const track = queue.next(fromEnded ? { fromEnded: true } : undefined)
+    requestContinuousBufferRefill(buffered)
     noteSearchFlowEvent({
       source: 'consumeRecommendationAdvance',
       contextBefore: context.type,
@@ -170,8 +176,14 @@ export async function resolveRecommendationAdvance(
   session: ContinuationSession,
   options: { fromEnded: boolean },
 ): Promise<Track | null> {
-  await session.flush()
+  // Готовый buffer/queue — без ожидания session.flush() / медленного discovery.
   let track = consumeRecommendationAdvance(queue, session, options)
+  if (track) {
+    return track
+  }
+
+  await session.flush()
+  track = consumeRecommendationAdvance(queue, session, options)
   if (track) {
     return track
   }

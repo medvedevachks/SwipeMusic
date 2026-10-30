@@ -63,6 +63,19 @@ export async function probeTrackPlayable(track: Track, signal: AbortSignal): Pro
   return resolveCandidatesPlayable(adapter, track)
 }
 
+function isRateLimitError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const status = (error as { status?: number; statusCode?: number }).status
+    ?? (error as { statusCode?: number }).statusCode
+  if (status === 429) {
+    return true
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  return /\b429\b|rate.?limit|too many requests/i.test(message)
+}
+
 export async function createLiveRadioPort(): Promise<RadioSearchPort> {
   const sources: MusicSourceAdapter[] = []
   for (const config of sourceManager.listEnabledSources()) {
@@ -102,10 +115,64 @@ export async function createLiveRadioPort(): Promise<RadioSearchPort> {
         return []
       }
       try {
+        // Одна страница библиотеки/browse — не весь каталог и не «рандом Яндекса».
         const page = await adapter.fetchTracks({ limit: 40, signal })
         return page.tracks
       } catch {
         return []
+      }
+    },
+    searchPage: async (sourceId, query, options) => {
+      const adapter = sources.find((item) => item.id === sourceId)
+      if (!adapter) {
+        return { tracks: [], nextCursor: null }
+      }
+      const canSearch = adapter.supportsSearch || adapter.capabilities.includes('search')
+      if (!canSearch) {
+        return { tracks: [], nextCursor: null }
+      }
+      try {
+        const page = await adapter.search(query, {
+          limit: options.limit ?? RADIO_LIMITS.maxPerSearch,
+          cursor: options.cursor ?? null,
+          signal: options.signal,
+        })
+        return {
+          tracks: page.tracks,
+          nextCursor: page.nextCursor ?? null,
+        }
+      } catch (error) {
+        if (isRateLimitError(error)) {
+          const rateError = new Error('RATE_LIMIT')
+          ;(rateError as { status?: number }).status = 429
+          throw rateError
+        }
+        throw error
+      }
+    },
+    fetchFeedPage: async (sourceId, options) => {
+      const adapter = sources.find((item) => item.id === sourceId)
+      if (!adapter) {
+        return { tracks: [], nextCursor: null }
+      }
+      try {
+        // Yandex fetchTracks = synced user library with offset cursor, не общий каталог.
+        const page = await adapter.fetchTracks({
+          limit: options.limit ?? 40,
+          cursor: options.cursor ?? null,
+          signal: options.signal,
+        })
+        return {
+          tracks: page.tracks,
+          nextCursor: page.nextCursor ?? null,
+        }
+      } catch (error) {
+        if (isRateLimitError(error)) {
+          const rateError = new Error('RATE_LIMIT')
+          ;(rateError as { status?: number }).status = 429
+          throw rateError
+        }
+        throw error
       }
     },
     isPlayable: probeTrackPlayable,

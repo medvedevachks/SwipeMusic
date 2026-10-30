@@ -103,7 +103,11 @@ async function seedSession(input: {
   const { resetContinuousBufferForTests } = await import(
     '../recommendation/continuousBuffer.ts'
   )
+  const { resetContinuousDiscoveryForTests } = await import(
+    '../recommendation/continuousSession.ts'
+  )
   resetContinuousBufferForTests()
+  resetContinuousDiscoveryForTests()
   const queue = new PlaybackQueue()
   const session = new ContinuationSession(
     createSearchRecommendationProvider({
