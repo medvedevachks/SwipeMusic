@@ -232,6 +232,19 @@ function enableDeterministicShuffle(queue: PlaybackQueue): void {
   }
 }
 
+function assertPlayOrderInvariant(queue: PlaybackQueue): void {
+  const snap = queue.getSnapshot()
+  const n = snap.items.length
+  assert.equal(snap.playOrder.length, n)
+  assert.deepEqual(
+    [...snap.playOrder].sort((a, b) => a - b),
+    Array.from({ length: n }, (_, index) => index),
+  )
+  assert.ok(snap.currentIndex >= 0 && snap.currentIndex < n)
+  assert.equal(snap.playOrder.includes(snap.currentIndex), true)
+  assert.equal(snap.playOrder[snap.playOrderIndex], snap.currentIndex)
+}
+
 test('Shuffle ON expand keeps planned Next (A→C→B + D → Next stays C)', () => {
   const queue = new PlaybackQueue()
   // items в порядке A,C,B → identity shuffle сохраняет A→C→B.
@@ -417,9 +430,73 @@ test('Shuffle ON expand appends 100+ new tracks after planned tail', () => {
     }),
     true,
   )
+  assertPlayOrderInvariant(queue)
   assert.equal(queue.current()?.id, 'a')
   assert.equal(queue.next()?.id, 'c')
   assert.equal(queue.next()?.id, 'b')
   assert.equal(queue.next()?.id, 'n0')
   assert.equal(queue.getSnapshot().items.length, 123)
+})
+
+test('Shuffle ON expand with duplicate Track.id keeps playOrder permutation', () => {
+  const queue = new PlaybackQueue()
+  // items=[A,B,B] — до фикса playOrder терял один индекс B.
+  queue.setQueue([track('A'), track('B'), track('B')], 0, PLAYLIST)
+  enableDeterministicShuffle(queue)
+  assertPlayOrderInvariant(queue)
+  assert.equal(queue.current()?.id, 'A')
+  assert.equal(queue.peekNext()?.id, 'B')
+
+  assert.equal(
+    queue.replacePlaylistItemsPreservingPlayback(
+      [track('A'), track('B'), track('B'), track('D')],
+      { type: 'playlist', id: PLAYLIST.id },
+    ),
+    true,
+  )
+  assertPlayOrderInvariant(queue)
+  assert.equal(queue.current()?.id, 'A')
+  assert.equal(queue.peekNext()?.id, 'B')
+  assert.equal(queue.next()?.id, 'B')
+  assert.equal(queue.next()?.id, 'B')
+  assert.equal(queue.next()?.id, 'D')
+  assert.equal(queue.previous()?.id, 'B')
+  assertPlayOrderInvariant(queue)
+})
+
+test('Shuffle ON expand anchors duplicate current by occurrence rank', () => {
+  const queue = new PlaybackQueue()
+  queue.setQueue([track('A'), track('B'), track('B')], 0, PLAYLIST)
+  enableDeterministicShuffle(queue)
+  assert.equal(queue.next()?.id, 'B')
+  assert.equal(queue.next()?.id, 'B')
+  // current = второе B (index 2)
+  assert.equal(queue.getSnapshot().currentIndex, 2)
+  assert.equal(
+    queue.replacePlaylistItemsPreservingPlayback(
+      [track('A'), track('B'), track('B'), track('D')],
+      { type: 'playlist', id: PLAYLIST.id },
+    ),
+    true,
+  )
+  assertPlayOrderInvariant(queue)
+  assert.equal(queue.current()?.id, 'B')
+  assert.equal(queue.getSnapshot().currentIndex, 2)
+  assert.equal(queue.peekNext()?.id, 'D')
+})
+
+test('unique-id Shuffle expand still preserves planned Next after duplicate fix', () => {
+  const queue = new PlaybackQueue()
+  queue.setQueue([track('a'), track('c'), track('b')], 0, PLAYLIST)
+  enableDeterministicShuffle(queue)
+  assert.equal(
+    queue.replacePlaylistItemsPreservingPlayback(
+      [track('a'), track('b'), track('c'), track('d')],
+      { type: 'playlist', id: PLAYLIST.id },
+    ),
+    true,
+  )
+  assertPlayOrderInvariant(queue)
+  assert.equal(queue.current()?.id, 'a')
+  assert.equal(queue.peekNext()?.id, 'c')
 })

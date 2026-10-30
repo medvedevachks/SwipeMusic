@@ -56,6 +56,53 @@ function stripPreview(track: Track): Track {
   return { ...track, previewUrl: null }
 }
 
+/** Сколько таких же id стоит строго левее index (0 = первое вхождение). */
+function occurrenceRank(items: readonly Track[], index: number): number {
+  if (index < 0 || index >= items.length) {
+    return 0
+  }
+  const id = items[index]?.id
+  if (!id) {
+    return 0
+  }
+  let rank = 0
+  for (let i = 0; i < index; i += 1) {
+    if (items[i]?.id === id) {
+      rank += 1
+    }
+  }
+  return rank
+}
+
+/** Индекс k-го вхождения id; -1 если такого нет. */
+function indexOfOccurrence(
+  items: readonly Track[],
+  id: string,
+  rank: number,
+): number {
+  let seen = 0
+  for (let i = 0; i < items.length; i += 1) {
+    if (items[i]?.id !== id) {
+      continue
+    }
+    if (seen === rank) {
+      return i
+    }
+    seen += 1
+  }
+  // Меньше вхождений, чем раньше — якорь на последнее оставшееся.
+  if (seen > 0 && rank >= seen) {
+    let last = -1
+    for (let i = 0; i < items.length; i += 1) {
+      if (items[i]?.id === id) {
+        last = i
+      }
+    }
+    return last
+  }
+  return -1
+}
+
 function buildIdentityOrder(length: number): number[] {
   return Array.from({ length }, (_, index) => index)
 }
@@ -268,7 +315,9 @@ export class PlaybackQueue {
       return false
     }
 
-    const nextIndex = nextTracks.findIndex((track) => track.id === playingId)
+    // При дубликатах id якорим на то же вхождение (rank), не на findIndex → [0].
+    const playingRank = occurrenceRank(this.items, this.currentIndex)
+    const nextIndex = indexOfOccurrence(nextTracks, playingId, playingRank)
     if (nextIndex < 0) {
       return false
     }
@@ -281,7 +330,7 @@ export class PlaybackQueue {
       [...this.pendingRemovalIds].filter((id) => knownIds.has(id)),
     )
     // Shuffle ON: не вызывать rebuildPlayOrder — иначе Next переиграется.
-    this.rebindPlayOrderAfterItemReplace(nextTracks, playingId)
+    this.rebindPlayOrderAfterItemReplace(nextTracks, nextIndex)
     // history / historyIndex / repeat / shuffle / context не сбрасываем.
     this.emit()
     return true
@@ -290,15 +339,19 @@ export class PlaybackQueue {
   /**
    * После replace items: перепривязать playOrder к новым индексам.
    * Shuffle OFF — identity как раньше.
-   * Shuffle ON — сохранить уже запланированный порядок (вкл. Next),
-   * новые id добавить после непрослушанного хвоста (или после current).
+   * Shuffle ON — сохранить уже запланированный порядок (вкл. Next) по
+   * вхождениям (id + occurrence rank); новые индексы — после хвоста.
+   * Инвариант: playOrder — перестановка 0..n-1 без дыр и дублей индексов.
    */
   private rebindPlayOrderAfterItemReplace(
     nextTracks: Track[],
-    playingId: string,
+    nextIndex: number,
   ): void {
-    const nextIndex = nextTracks.findIndex((track) => track.id === playingId)
-    if (nextIndex < 0) {
+    if (
+      nextIndex < 0 ||
+      nextIndex >= nextTracks.length ||
+      nextTracks.length === 0
+    ) {
       this.items = nextTracks
       this.rebuildPlayOrder(0)
       return
@@ -310,38 +363,38 @@ export class PlaybackQueue {
       return
     }
 
-    const idToNewIndex = new Map(
-      nextTracks.map((track, index) => [track.id, index] as const),
-    )
-    const seen = new Set<string>()
-    const preservedIds: string[] = []
-    for (const orderIndex of this.playOrder) {
-      const id = this.items[orderIndex]?.id
-      if (!id || !idToNewIndex.has(id) || seen.has(id)) {
+    const used = new Set<number>()
+    const preserved: number[] = []
+    for (const oldIndex of this.playOrder) {
+      const id = this.items[oldIndex]?.id
+      if (!id) {
         continue
       }
-      seen.add(id)
-      preservedIds.push(id)
-    }
-
-    if (!seen.has(playingId)) {
-      preservedIds.unshift(playingId)
-      seen.add(playingId)
-    }
-
-    // Новые — в порядке nextTracks, после всего сохранённого хвоста.
-    const appendedIds: string[] = []
-    for (const track of nextTracks) {
-      if (seen.has(track.id)) {
+      const rank = occurrenceRank(this.items, oldIndex)
+      const mapped = indexOfOccurrence(nextTracks, id, rank)
+      if (mapped < 0 || used.has(mapped)) {
         continue
       }
-      seen.add(track.id)
-      appendedIds.push(track.id)
+      used.add(mapped)
+      preserved.push(mapped)
     }
 
-    const nextOrderIds = [...preservedIds, ...appendedIds]
+    if (!used.has(nextIndex)) {
+      preserved.unshift(nextIndex)
+      used.add(nextIndex)
+    }
+
+    const appended: number[] = []
+    for (let index = 0; index < nextTracks.length; index += 1) {
+      if (used.has(index)) {
+        continue
+      }
+      used.add(index)
+      appended.push(index)
+    }
+
     this.items = nextTracks
-    this.playOrder = nextOrderIds.map((id) => idToNewIndex.get(id)!)
+    this.playOrder = [...preserved, ...appended]
     this.currentIndex = nextIndex
     const orderPos = this.playOrder.indexOf(nextIndex)
     this.playOrderIndex = orderPos >= 0 ? orderPos : 0
