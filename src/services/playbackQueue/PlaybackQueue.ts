@@ -10,6 +10,7 @@ import {
 } from '../continuation/searchFlowDiag.ts'
 import {
   buildDurableSessionState,
+  normalizeHistoryRanks,
   validatePlaybackQueueSessionState,
   type PlaybackQueueSessionState,
   type SessionStateIssue,
@@ -53,6 +54,11 @@ export type PlaybackQueueSnapshot = {
   shuffleMode: ShuffleMode
   /** История фактически запущенных track id (единая для плеера и карточек). */
   history: string[]
+  /**
+   * Occurrence rank каждого history id в items на момент записи.
+   * Нужен при повторяющихся track ID (PLAYBACK-BUG-01).
+   */
+  historyRanks: number[]
   /**
    * Курсор в history: Previous/Next ходят по нему, не уничтожая «вперёд».
    * -1 = пусто. Persist для reload.
@@ -162,6 +168,8 @@ export class PlaybackQueue {
   private repeatMode: RepeatMode = 'OFF'
   private shuffleMode: ShuffleMode = 'OFF'
   private history: string[] = []
+  /** Parallel to history: occurrence rank в items на момент pushHistory. */
+  private historyRanks: number[] = []
   /** Курсор в history; не pop при Previous — иначе Next зовёт engine вместо replay. */
   private historyIndex = -1
   private context: PlaybackContext = NONE_PLAYBACK_CONTEXT
@@ -226,6 +234,7 @@ export class PlaybackQueue {
       repeatMode: this.repeatMode,
       shuffleMode: this.shuffleMode,
       history: [...this.history],
+      historyRanks: [...this.historyRanks],
       historyIndex: this.historyIndex,
       context: this.context,
     }
@@ -290,6 +299,7 @@ export class PlaybackQueue {
       this.playOrder = []
       this.playOrderIndex = -1
       this.history = []
+      this.historyRanks = []
       this.historyIndex = -1
       noteSearchFlowEvent({
         source: 'PlaybackQueue.setQueue',
@@ -308,6 +318,7 @@ export class PlaybackQueue {
     this.currentIndex = index
     this.rebuildPlayOrder(index)
     this.history = []
+    this.historyRanks = []
     this.historyIndex = -1
     this.pushHistory(cleaned[index]!.id)
     noteSearchFlowEvent({
@@ -592,6 +603,7 @@ export class PlaybackQueue {
       repeatMode: this.repeatMode,
       shuffleMode: this.shuffleMode,
       history: this.history,
+      historyRanks: this.historyRanks,
       historyIndex: this.historyIndex,
       context: this.context,
       sessionTailIds: this.sessionTailIds,
@@ -616,6 +628,7 @@ export class PlaybackQueue {
         repeatMode: this.repeatMode,
         shuffleMode: this.shuffleMode,
         history: [...this.history],
+        historyRanks: [...this.historyRanks],
         historyIndex: this.historyIndex,
         context: this.context,
         sessionTailIds: [...this.sessionTailIds],
@@ -675,6 +688,7 @@ export class PlaybackQueue {
     this.repeatMode = next.repeatMode
     this.shuffleMode = next.shuffleMode
     this.history = [...next.history]
+    this.historyRanks = [...next.historyRanks]
     this.historyIndex = next.historyIndex
     this.context = next.context
     this.sessionTailIds = new Set(next.sessionTailIds)
@@ -727,6 +741,7 @@ export class PlaybackQueue {
     this.playOrder = []
     this.playOrderIndex = -1
     this.history = []
+    this.historyRanks = []
     this.historyIndex = -1
     this.sessionTailIds.clear()
     this.pendingRemovalIds.clear()
@@ -812,8 +827,7 @@ export class PlaybackQueue {
 
     if (this.historyIndex > 0) {
       this.historyIndex -= 1
-      const prevId = this.history[this.historyIndex]
-      const prevIndex = this.items.findIndex((track) => track.id === prevId)
+      const prevIndex = this.resolveHistoryEntryIndex(this.historyIndex)
       if (prevIndex >= 0) {
         this.currentIndex = prevIndex
         this.playOrderIndex = Math.max(0, this.playOrder.indexOf(prevIndex))
@@ -853,8 +867,8 @@ export class PlaybackQueue {
 
   peekPrevious(): Track | null {
     if (this.historyIndex > 0) {
-      const prevId = this.history[this.historyIndex - 1]
-      return this.items.find((track) => track.id === prevId) ?? null
+      const prevIndex = this.resolveHistoryEntryIndex(this.historyIndex - 1)
+      return prevIndex >= 0 ? (this.items[prevIndex] ?? null) : null
     }
     const prev = this.peekPreviousIndex()
     if (prev == null) {
@@ -930,14 +944,35 @@ export class PlaybackQueue {
   }
 
   private stripTrackFromHistory(trackId: string): void {
-    const removedHistoryAt = this.history.lastIndexOf(trackId)
-    this.history = this.history.filter((id) => id !== trackId)
-    if (removedHistoryAt >= 0 && this.historyIndex >= removedHistoryAt) {
-      this.historyIndex = Math.max(-1, this.historyIndex - 1)
+    const nextHistory: string[] = []
+    const nextRanks: number[] = []
+    let removedBeforeOrAtCursor = 0
+    for (let i = 0; i < this.history.length; i += 1) {
+      if (this.history[i] === trackId) {
+        if (i <= this.historyIndex) {
+          removedBeforeOrAtCursor += 1
+        }
+        continue
+      }
+      nextHistory.push(this.history[i]!)
+      nextRanks.push(this.historyRanks[i] ?? 0)
     }
+    this.history = nextHistory
+    this.historyRanks = nextRanks
+    this.historyIndex = Math.max(-1, this.historyIndex - removedBeforeOrAtCursor)
     if (this.historyIndex >= this.history.length) {
       this.historyIndex = this.history.length - 1
     }
+  }
+
+  /** Индекс items для слота history (id + occurrence rank). */
+  private resolveHistoryEntryIndex(historyPos: number): number {
+    const id = this.history[historyPos]
+    if (!id) {
+      return -1
+    }
+    const rank = this.historyRanks[historyPos] ?? 0
+    return indexOfOccurrence(this.items, id, rank)
   }
 
   /**
@@ -1040,14 +1075,23 @@ export class PlaybackQueue {
   }
 
   private pushHistory(trackId: string): void {
-    if (this.historyIndex >= 0 && this.history[this.historyIndex] === trackId) {
+    const rank =
+      this.currentIndex >= 0 && this.items[this.currentIndex]?.id === trackId
+        ? occurrenceRank(this.items, this.currentIndex)
+        : 0
+    if (
+      this.historyIndex >= 0 &&
+      this.history[this.historyIndex] === trackId &&
+      (this.historyRanks[this.historyIndex] ?? 0) === rank
+    ) {
       return
     }
     // Replay уже известного следующего слота истории (после Previous).
     if (
       this.historyIndex >= 0 &&
       this.historyIndex < this.history.length - 1 &&
-      this.history[this.historyIndex + 1] === trackId
+      this.history[this.historyIndex + 1] === trackId &&
+      (this.historyRanks[this.historyIndex + 1] ?? 0) === rank
     ) {
       this.historyIndex += 1
       return
@@ -1055,12 +1099,15 @@ export class PlaybackQueue {
     // Новая ветка: обрезаем «вперёд» от курсора, затем append.
     if (this.historyIndex >= 0 && this.historyIndex < this.history.length - 1) {
       this.history = this.history.slice(0, this.historyIndex + 1)
+      this.historyRanks = this.historyRanks.slice(0, this.historyIndex + 1)
     }
     this.history.push(trackId)
+    this.historyRanks.push(rank)
     this.historyIndex = this.history.length - 1
     if (this.history.length > 200) {
       const overflow = this.history.length - 200
       this.history = this.history.slice(-200)
+      this.historyRanks = this.historyRanks.slice(-200)
       this.historyIndex = Math.max(0, this.historyIndex - overflow)
     }
   }
@@ -1129,6 +1176,12 @@ export class PlaybackQueue {
       this.repeatMode = data.repeatMode ?? 'OFF'
       this.shuffleMode = data.shuffleMode ?? 'OFF'
       this.history = Array.isArray(data.history) ? data.history : []
+      this.historyRanks = normalizeHistoryRanks(
+        this.history,
+        Array.isArray((data as { historyRanks?: unknown }).historyRanks)
+          ? ((data as { historyRanks: unknown[] }).historyRanks as number[])
+          : undefined,
+      )
       const rawHistoryIndex =
         typeof data.historyIndex === 'number' ? data.historyIndex : -1
       if (this.history.length === 0) {

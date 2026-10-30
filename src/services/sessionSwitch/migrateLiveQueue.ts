@@ -37,8 +37,8 @@ export function prepareExistingLiveQueueForSessionMode(
 }
 
 /**
- * Зафиксированный дефект Previous при повторяющихся track ID.
- * Не смешивать с DEV-04; отдельная задача.
+ * PLAYBACK-BUG-01 (исправлен в DEV-09): history хранит occurrence rank,
+ * previous/peekPrevious резолвят через indexOfOccurrence, не findIndex.
  */
 export const PLAYBACK_BUG_01 =
-  'PLAYBACK-BUG-01: previous() resolves history id via findIndex → first occurrence, not occurrence rank'
+  'PLAYBACK-BUG-01: FIXED — historyRanks + occurrence rank for duplicate track ids'

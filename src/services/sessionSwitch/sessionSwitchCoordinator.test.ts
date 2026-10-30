@@ -462,8 +462,9 @@ describe('SessionSwitchCoordinator DEV-04', () => {
     assert.equal(live.current()?.id, 'x')
   })
 
-  it('фиксирует PLAYBACK-BUG-01 как отдельный дефект', () => {
+  it('PLAYBACK-BUG-01 помечен как исправленный', () => {
     assert.ok(PLAYBACK_BUG_01.includes('PLAYBACK-BUG-01'))
+    assert.ok(PLAYBACK_BUG_01.includes('FIXED'))
   })
 })
 

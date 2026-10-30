@@ -59,6 +59,11 @@ export type SessionQueueSnapshot = {
   repeatMode: RepeatMode
   shuffleMode: ShuffleMode
   history: string[]
+  /**
+   * Occurrence ranks parallel to history (PLAYBACK-BUG-01).
+   * Optional for older durable snapshots — normalize to zeros on load.
+   */
+  historyRanks?: number[]
   historyIndex: number
   context: PlaybackContext
   /** Provenance insertNext / continuation tail. */

@@ -51,6 +51,7 @@ export function cloneSessionQueueSnapshot(
     repeatMode: queue.repeatMode,
     shuffleMode: queue.shuffleMode,
     history: [...queue.history],
+    historyRanks: queue.historyRanks ? [...queue.historyRanks] : undefined,
     historyIndex: queue.historyIndex,
     context: clonePlaybackContext(queue.context),
     sessionTailIds: [...queue.sessionTailIds],

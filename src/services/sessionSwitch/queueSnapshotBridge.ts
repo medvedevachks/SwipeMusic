@@ -1,4 +1,5 @@
 import type { PlaybackQueueSessionState } from '../playbackQueue/PlaybackQueue.ts'
+import { normalizeHistoryRanks } from '../playbackQueue/playbackQueueSessionState.ts'
 import { toSessionTrack } from '../playbackSession/sanitizeTrack.ts'
 import type {
   SessionPlaybackPhase,
@@ -9,6 +10,7 @@ import type { RuntimePlaybackAnchor } from './ports.ts'
 export function sessionQueueToPlaybackQueueState(
   queue: SessionQueueSnapshot,
 ): PlaybackQueueSessionState {
+  const history = [...queue.history]
   return {
     items: queue.items.map((item) => ({ ...item, previewUrl: null })),
     currentIndex: queue.currentIndex,
@@ -16,7 +18,8 @@ export function sessionQueueToPlaybackQueueState(
     playOrderIndex: queue.playOrderIndex,
     repeatMode: queue.repeatMode,
     shuffleMode: queue.shuffleMode,
-    history: [...queue.history],
+    history,
+    historyRanks: normalizeHistoryRanks(history, queue.historyRanks),
     historyIndex: queue.historyIndex,
     context: queue.context,
     sessionTailIds: [...queue.sessionTailIds],
@@ -65,6 +68,10 @@ export function playbackExportToSessionQueue(
     repeatMode: exported.repeatMode,
     shuffleMode: exported.shuffleMode,
     history: [...exported.history],
+    historyRanks: normalizeHistoryRanks(
+      exported.history,
+      exported.historyRanks,
+    ),
     historyIndex: exported.historyIndex,
     context: exported.context,
     sessionTailIds: [...exported.sessionTailIds],

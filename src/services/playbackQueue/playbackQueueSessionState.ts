@@ -21,10 +21,30 @@ export type PlaybackQueueSessionState = {
   repeatMode: RepeatMode
   shuffleMode: ShuffleMode
   history: string[]
+  /**
+   * Occurrence rank parallel to history (PLAYBACK-BUG-01).
+   * Legacy snapshots without the field normalize to zeros.
+   */
+  historyRanks: number[]
   historyIndex: number
   context: PlaybackContext
   /** Provenance insertNext / continuation. Обязательное поле (не legacy-optional). */
   sessionTailIds: string[]
+}
+
+/** Выровнять ranks по длине history; legacy → нули. */
+export function normalizeHistoryRanks(
+  history: readonly string[],
+  ranks: readonly number[] | undefined,
+): number[] {
+  const out: number[] = []
+  for (let i = 0; i < history.length; i += 1) {
+    const raw = ranks?.[i]
+    out.push(
+      typeof raw === 'number' && Number.isInteger(raw) && raw >= 0 ? raw : 0,
+    )
+  }
+  return out
 }
 
 export type SessionStateIssue = {
@@ -209,6 +229,14 @@ export function validatePlaybackQueueSessionState(
     }
   }
 
+  // Optional legacy field — нормализуем без hard-fail.
+  const historyRanks = normalizeHistoryRanks(
+    history,
+    Array.isArray(raw.historyRanks)
+      ? (raw.historyRanks as number[])
+      : undefined,
+  )
+
   let historyIndex =
     typeof raw.historyIndex === 'number' && Number.isInteger(raw.historyIndex)
       ? raw.historyIndex
@@ -271,6 +299,7 @@ export function validatePlaybackQueueSessionState(
       repeatMode: raw.repeatMode as RepeatMode,
       shuffleMode: raw.shuffleMode as ShuffleMode,
       history,
+      historyRanks,
       historyIndex,
       context: context ?? NONE_PLAYBACK_CONTEXT,
       sessionTailIds,
@@ -295,6 +324,7 @@ export function buildDurableSessionState(input: {
   repeatMode: RepeatMode
   shuffleMode: ShuffleMode
   history: readonly string[]
+  historyRanks?: readonly number[]
   historyIndex: number
   context: PlaybackContext
   sessionTailIds: ReadonlySet<string> | readonly string[]
@@ -304,6 +334,7 @@ export function buildDurableSessionState(input: {
     [...input.pendingRemovalIds].filter((id) => typeof id === 'string' && id),
   )
   const tailSource = [...input.sessionTailIds]
+  const ranks = normalizeHistoryRanks(input.history, input.historyRanks)
 
   if (pending.size === 0) {
     const items = input.items.map(stripPreview)
@@ -316,6 +347,7 @@ export function buildDurableSessionState(input: {
       repeatMode: input.repeatMode,
       shuffleMode: input.shuffleMode,
       history: [...input.history],
+      historyRanks: ranks,
       historyIndex: input.historyIndex,
       context: input.context,
       sessionTailIds: tailSource.filter((id) => known.has(id)),
@@ -342,6 +374,7 @@ export function buildDurableSessionState(input: {
       repeatMode: input.repeatMode,
       shuffleMode: input.shuffleMode,
       history: [],
+      historyRanks: [],
       historyIndex: -1,
       context: input.context,
       sessionTailIds: [],
@@ -403,9 +436,12 @@ export function buildDurableSessionState(input: {
   }
 
   const history: string[] = []
-  for (const id of input.history) {
+  const historyRanks: number[] = []
+  for (let i = 0; i < input.history.length; i += 1) {
+    const id = input.history[i]!
     if (!pending.has(id) && items.some((t) => t.id === id)) {
       history.push(id)
+      historyRanks.push(ranks[i] ?? 0)
     }
   }
   let historyIndex = input.historyIndex
@@ -413,9 +449,13 @@ export function buildDurableSessionState(input: {
     historyIndex = -1
   } else {
     // Сжимаем курсор: сколько элементов history до старого курсора сохранилось.
-    const keptBefore = input.history
-      .slice(0, Math.max(0, input.historyIndex + 1))
-      .filter((id) => !pending.has(id) && items.some((t) => t.id === id)).length
+    let keptBefore = 0
+    for (let i = 0; i < Math.max(0, input.historyIndex + 1); i += 1) {
+      const id = input.history[i]!
+      if (!pending.has(id) && items.some((t) => t.id === id)) {
+        keptBefore += 1
+      }
+    }
     historyIndex = Math.max(-1, keptBefore - 1)
     if (historyIndex >= history.length) {
       historyIndex = history.length - 1
@@ -431,6 +471,7 @@ export function buildDurableSessionState(input: {
     repeatMode: input.repeatMode,
     shuffleMode: input.shuffleMode,
     history,
+    historyRanks,
     historyIndex,
     context: input.context,
     sessionTailIds: tailSource.filter((id) => known.has(id) && !pending.has(id)),

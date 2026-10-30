@@ -214,6 +214,19 @@ export function validateSessionQueueSnapshot(
   }
 
   const history = validateStringIdArray(raw.history, `${path}.history`, issues)
+  const historyRanks: number[] = []
+  for (let i = 0; i < history.length; i += 1) {
+    const rawRank = Array.isArray(raw.historyRanks)
+      ? raw.historyRanks[i]
+      : undefined
+    historyRanks.push(
+      typeof rawRank === 'number' &&
+        Number.isInteger(rawRank) &&
+        rawRank >= 0
+        ? rawRank
+        : 0,
+    )
+  }
   let historyIndex =
     typeof raw.historyIndex === 'number' && Number.isInteger(raw.historyIndex)
       ? raw.historyIndex
@@ -275,6 +288,7 @@ export function validateSessionQueueSnapshot(
       repeatMode: raw.repeatMode as SessionQueueSnapshot['repeatMode'],
       shuffleMode: raw.shuffleMode as SessionQueueSnapshot['shuffleMode'],
       history,
+      historyRanks,
       historyIndex,
       context,
       sessionTailIds,

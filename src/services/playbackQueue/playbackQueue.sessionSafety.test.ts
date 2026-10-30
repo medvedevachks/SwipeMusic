@@ -235,7 +235,7 @@ describe('PLAYBACK-DEV-03A pending removal export consistency', () => {
 })
 
 describe('PLAYBACK-DEV-03A duplicate track id Previous/Next semantics', () => {
-  it('KNOWN DEFECT: previous() якорится на первое вхождение id, не на occurrence rank', () => {
+  it('previous() resolves history via occurrence rank (PLAYBACK-BUG-01 fixed)', () => {
     installMemoryLocalStorage()
     const queue = new PlaybackQueue({ persistenceMode: 'session' })
     const same = t('same')
@@ -243,20 +243,35 @@ describe('PLAYBACK-DEV-03A duplicate track id Previous/Next semantics', () => {
     // [same#0, mid, same#1] — два вхождения одного id
     queue.setQueue([same, mid, { ...same }], 0)
     queue.focusTrack('yandex-music:same') // первое
-    // Перейти на третье вхождение вручную через next дважды при OFF shuffle
     queue.next() // mid
     queue.next() // same#1 (index 2)
     assert.equal(queue.getSnapshot().currentIndex, 2)
+    assert.deepEqual(queue.getSnapshot().historyRanks, [0, 0, 1])
 
     queue.previous() // history → mid
     assert.equal(queue.current()?.id, 'yandex-music:mid')
-    queue.previous() // history → same, но findIndex → index 0, не 2
+    queue.previous() // history → same#0
     assert.equal(queue.current()?.id, 'yandex-music:same')
-    // Фактическая семантика (дефект): возвращаемся к первому вхождению.
+    assert.equal(queue.getSnapshot().currentIndex, 0)
+
+    queue.next()
+    queue.next()
+    assert.equal(queue.getSnapshot().currentIndex, 2)
+  })
+
+  it('consecutive duplicate ids: Previous returns to second occurrence', () => {
+    installMemoryLocalStorage()
+    const queue = new PlaybackQueue({ persistenceMode: 'session' })
+    const same = t('same')
+    queue.setQueue([same, { ...same }, t('mid')], 0)
+    queue.next()
+    assert.equal(queue.getSnapshot().currentIndex, 1)
+    queue.next()
+    queue.previous()
     assert.equal(
       queue.getSnapshot().currentIndex,
-      0,
-      'BUG: history id resolves via findIndex → first occurrence (needs PLAYBACK-BUG-dup-history-anchor)',
+      1,
+      'must land on same#1, not findIndex → same#0',
     )
   })
 })
