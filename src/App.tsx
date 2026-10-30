@@ -9,6 +9,7 @@ import MainLayout from './layouts/MainLayout'
 import CatalogDetail from './pages/CatalogDetail'
 import Home from './pages/Home'
 import Library from './pages/Library'
+import LibraryBrowse from './pages/LibraryBrowse'
 import LibraryFolder from './pages/LibraryFolder'
 import Login from './pages/Login'
 import Profile from './pages/Profile'
@@ -35,6 +36,7 @@ function App() {
             <Route index element={<Home />} />
             <Route path="search" element={<Search />} />
             <Route path="library" element={<Library />} />
+            <Route path="library/browse" element={<LibraryBrowse />} />
             <Route path="library/swipes" element={<LibraryFolder folderId="swipes" />} />
             <Route
               path="library/favorites"
