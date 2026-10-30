@@ -6,20 +6,31 @@ import { useCollectionEngineStore } from '../../store/collectionEngineStore.ts'
 import { useCollectionStore } from '../../store/collectionStore.ts'
 import type { SwipeAction } from '../../types/swipe'
 import type { Track } from '../../types/track'
+import {
+  beginPendingSwipeLike,
+  endPendingSwipeLike,
+  hasPendingSwipeLike,
+} from './pendingSwipeLike.ts'
 
 export type ClassifySwipeResult =
   | { kind: 'applied'; action: SwipeAction; saved?: Promise<boolean> }
   | { kind: 'needsCategory'; action: 'categorize' }
 
+export type ClassifySwipeDeps = {
+  /** Подмена сохранения лайка (тесты: управляемый pending Promise). */
+  commitLike?: (track: Track) => Promise<boolean>
+}
+
 /**
  * Единый semantic handler классификации свайпа.
  * Не трогает playback / queue / context.
  * like → liked + sys_swipes (накопитель). skip → skipped, без inbox.
- * UP после лайка: только навигация — без markSkipped / history-skip / повторного like.
+ * UP после лайка / pending-like: только навигация — без markSkipped / history-skip.
  */
 export function classifySwipeTrack(
   track: Track,
   action: SwipeAction,
+  deps: ClassifySwipeDeps = {},
 ): ClassifySwipeResult {
   const collection = useCollectionStore.getState()
   const engine = useCollectionEngineStore.getState()
@@ -27,17 +38,25 @@ export function classifySwipeTrack(
   collection.pushViewedTrack(track.id)
 
   switch (action) {
-    case 'like':
-      // Один liked + membership sys_swipes. Не markSkipped.
-      return { kind: 'applied', action, saved: commitSwipeLikeWithInbox(track) }
+    case 'like': {
+      const key = sourceTrackKeyOf(track)
+      // Intent до await: быстрый UP не должен писать skip.
+      beginPendingSwipeLike(key)
+      const commit = deps.commitLike ?? commitSwipeLikeWithInbox
+      const saved = commit(track).finally(() => {
+        endPendingSwipeLike(key)
+      })
+      return { kind: 'applied', action, saved }
+    }
 
     case 'skip': {
+      const key = sourceTrackKeyOf(track)
       const alreadyLiked = isSourceCopyLiked(
         useCanonicalLibraryStore.getState(),
-        sourceTrackKeyOf(track),
+        key,
       )
-      if (alreadyLiked) {
-        // Понравившаяся композиция: UP = «следующая», не негативный skip.
+      if (alreadyLiked || hasPendingSwipeLike(key)) {
+        // Понравившаяся / только что лайкнутая: UP = «следующая», не негативный skip.
         return { kind: 'applied', action }
       }
       // Не лайкнута: согласованная семантика пропуска. В sys_swipes НЕ добавляем.
