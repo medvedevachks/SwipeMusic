@@ -58,11 +58,13 @@ export function getContinuousDiscoveryGeneration(): number {
   return discoveryGeneration
 }
 
-export function beginContinuousDiscoveryOperation(): {
+export type ContinuousDiscoveryOperationToken = {
   generation: number
   mode: RecommendationMode | null
   auth: AuthSessionSnapshot
-} {
+}
+
+export function beginContinuousDiscoveryOperation(): ContinuousDiscoveryOperationToken {
   return {
     generation: discoveryGeneration,
     mode,
@@ -70,11 +72,9 @@ export function beginContinuousDiscoveryOperation(): {
   }
 }
 
-export function isContinuousDiscoveryOperationCurrent(token: {
-  generation: number
-  mode: RecommendationMode | null
-  auth: AuthSessionSnapshot
-}): boolean {
+export function isContinuousDiscoveryOperationCurrent(
+  token: ContinuousDiscoveryOperationToken,
+): boolean {
   if (token.generation !== discoveryGeneration) {
     return false
   }

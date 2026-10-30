@@ -36,6 +36,8 @@ import {
   getContinuousPagesFetched,
   getContinuousPoolSize,
   getContinuousRecentSize,
+  peekCandidatePoolIds,
+  pushCandidatesToPool,
   resetContinuousDiscoveryForTests,
 } from './continuousSession.ts'
 import {
@@ -719,6 +721,137 @@ test('Wave→Swipe invalidates in-flight wave discovery writes', async () => {
     'swipe',
   )
   assert.equal(getContinuousPoolSize(), 0)
+})
+
+test('stale availability after login B does not drain B pool', async () => {
+  resetAll()
+  const { bindAuthSessionEpoch } = await import('../auth/sessionEpoch.ts')
+  bindAuthSessionEpoch('user-a')
+  ensureContinuousDiscoverySession('swipe')
+
+  const trackA = track({
+    sourceId: 'yandex-music',
+    externalId: 'own-a',
+    title: 'Own A',
+    artist: 'A',
+  })
+  pushCandidatesToPool([trackA])
+
+  let releasePlayable!: (value: boolean) => void
+  const playableGate = new Promise<boolean>((resolve) => {
+    releasePlayable = resolve
+  })
+  const port: RecommendationCatalogPort = {
+    sources: [{ id: 'yandex-music' }],
+    search: async () => [],
+    fetchFeed: async () => [],
+    searchPage: async () => ({ tracks: [], nextCursor: null }),
+    fetchFeedPage: async () => ({ tracks: [], nextCursor: null }),
+    isPlayable: async () => playableGate,
+  }
+
+  const pending = collectContinuousPlayableBatch(
+    {
+      mode: 'swipe',
+      current: null,
+      taste: emptyTaste(),
+      excluded: [],
+      library: [],
+      port,
+    },
+    3,
+  )
+  await new Promise((r) => setTimeout(r, 15))
+
+  bindAuthSessionEpoch('user-b')
+  clearContinuousDiscoveryRuntime('auth-change')
+  ensureContinuousDiscoverySession('swipe')
+  const trackB1 = track({
+    sourceId: 'yandex-music',
+    externalId: 'b-1',
+    title: 'B One',
+    artist: 'B',
+  })
+  const trackB2 = track({
+    sourceId: 'yandex-music',
+    externalId: 'b-2',
+    title: 'B Two',
+    artist: 'B',
+  })
+  pushCandidatesToPool([trackB1, trackB2])
+  assert.deepEqual(peekCandidatePoolIds().sort(), [trackB1.id, trackB2.id].sort())
+
+  releasePlayable(true)
+  const batch = await pending
+  assert.equal(batch.length, 0)
+  assert.deepEqual(
+    peekCandidatePoolIds().sort(),
+    [trackB1.id, trackB2.id].sort(),
+    'B pool must remain intact after stale A availability',
+  )
+})
+
+test('stale availability after Wave→Swipe does not drain swipe pool', async () => {
+  resetAll()
+  ensureContinuousDiscoverySession('wave')
+  const waveTrack = track({
+    sourceId: 'yandex-music',
+    externalId: 'wave-own',
+    title: 'Wave Own',
+    artist: 'W',
+  })
+  pushCandidatesToPool([waveTrack])
+
+  let releasePlayable!: (value: boolean) => void
+  const playableGate = new Promise<boolean>((resolve) => {
+    releasePlayable = resolve
+  })
+  const port: RecommendationCatalogPort = {
+    sources: [{ id: 'yandex-music' }],
+    search: async () => [],
+    fetchFeed: async () => [],
+    searchPage: async () => ({ tracks: [], nextCursor: null }),
+    fetchFeedPage: async () => ({ tracks: [], nextCursor: null }),
+    isPlayable: async () => playableGate,
+  }
+
+  const pending = collectContinuousPlayableBatch(
+    {
+      mode: 'wave',
+      current: null,
+      taste: emptyTaste(),
+      excluded: [],
+      library: [],
+      port,
+    },
+    3,
+  )
+  await new Promise((r) => setTimeout(r, 15))
+
+  ensureContinuousDiscoverySession('swipe', { resetLanes: true })
+  const swipe1 = track({
+    sourceId: 'yandex-music',
+    externalId: 'swipe-1',
+    title: 'Swipe One',
+    artist: 'S',
+  })
+  const swipe2 = track({
+    sourceId: 'yandex-music',
+    externalId: 'swipe-2',
+    title: 'Swipe Two',
+    artist: 'S',
+  })
+  pushCandidatesToPool([swipe1, swipe2])
+  assert.deepEqual(peekCandidatePoolIds().sort(), [swipe1.id, swipe2.id].sort())
+
+  releasePlayable(true)
+  const batch = await pending
+  assert.equal(batch.length, 0)
+  assert.deepEqual(
+    peekCandidatePoolIds().sort(),
+    [swipe1.id, swipe2.id].sort(),
+    'Swipe pool must remain intact after stale Wave availability',
+  )
 })
 
 test('ready buffer wins over slow refill without waiting', async () => {

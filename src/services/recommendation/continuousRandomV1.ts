@@ -25,6 +25,7 @@ import {
   setDiscoveryQueryOrder,
   takeFromCandidatePool,
   withSourceConcurrency,
+  type ContinuousDiscoveryOperationToken,
   type DiscoveryLane,
 } from './continuousSession.ts'
 import {
@@ -431,6 +432,7 @@ async function selectPlayableFromPool(
   mode: RecommendationRequest['mode'],
   extraExclude: ReadonlySet<string>,
   limit: number,
+  op: ContinuousDiscoveryOperationToken,
 ): Promise<Track[]> {
   const selected: Track[] = []
   let checks = 0
@@ -444,6 +446,10 @@ async function selectPlayableFromPool(
     checks < CONTINUOUS_LIMITS.maxPlayableChecksPerFill &&
     !signal.aborted
   ) {
+    // Не брать из pool новой сессии после logout / mode switch.
+    if (!isContinuousDiscoveryOperationCurrent(op)) {
+      break
+    }
     const batch = takeFromCandidatePool(1, extraExclude)
     if (batch.length === 0) {
       break
@@ -451,6 +457,10 @@ async function selectPlayableFromPool(
     const track = batch[0]!
     checks += 1
     const status = await classifyPlayability(track, port, signal)
+    if (!isContinuousDiscoveryOperationCurrent(op)) {
+      // Трек уже снят со старого pool; новый pool не трогаем.
+      break
+    }
     if (status === 'PLAYABLE') {
       playable += 1
       selected.push(track)
@@ -463,6 +473,9 @@ async function selectPlayableFromPool(
         ok = await port.isPlayable(track, signal)
       } catch {
         ok = false
+      }
+      if (!isContinuousDiscoveryOperationCurrent(op)) {
+        break
       }
       if (ok) {
         playable += 1
@@ -496,15 +509,17 @@ async function selectPlayableFromPool(
     rejected += 1
   }
 
-  noteContinuousDiag({
-    mode,
-    phase: 'select',
-    found: selected.length,
-    playable,
-    unknown,
-    unavailable,
-    rejected,
-  })
+  if (isContinuousDiscoveryOperationCurrent(op)) {
+    noteContinuousDiag({
+      mode,
+      phase: 'select',
+      found: selected.length,
+      playable,
+      unknown,
+      unavailable,
+      rejected,
+    })
+  }
   return selected
 }
 
@@ -552,6 +567,7 @@ export async function collectContinuousPlayableBatch(
         request.mode,
         extraExclude,
         limit,
+        op,
       )),
     )
 
@@ -587,7 +603,11 @@ export async function collectContinuousPlayableBatch(
           ]),
         ]),
         limit - selected.length,
+        op,
       )
+      if (!isContinuousDiscoveryOperationCurrent(op)) {
+        break
+      }
       selected.push(...more)
       if (more.length === 0 && getContinuousPoolSize() === before) {
         // Нет прогресса (exhausted / rate limit / timeout).
