@@ -21,8 +21,9 @@ import type { ContinuationProvider } from './types.ts'
 let installed = false
 
 export type SearchRecommendationRuntimeDeps = {
-  /** Режим ядра: swipe и wave пока с одинаковой стратегией. */
+  /** Режим ядра: swipe и wave — continuous; search continuation — legacy. */
   mode?: 'swipe' | 'wave'
+  strategy?: 'continuous-random' | 'legacy'
   loadProfile?: () => Promise<UserTasteProfile | null>
   loadLibrary?: (profile: UserTasteProfile | null) => Promise<readonly ContinuationLibraryTrack[]>
   createPort?: () => Promise<RecommendationCatalogPort>
@@ -78,6 +79,7 @@ export function createSearchRecommendationProvider(
 ): ContinuationProvider {
   const inner = createRecommendationContinuationProvider({
     mode: deps.mode ?? 'swipe',
+    strategy: deps.strategy,
     loadProfile: deps.loadProfile ?? (() => loadSessionTasteProfile()),
     loadLibrary:
       deps.loadLibrary ??
@@ -128,7 +130,12 @@ export function ensureSearchRecommendation(options?: {
     return
   }
   installed = true
-  getContinuationSession().setProvider(createSearchRecommendationProvider(options?.deps))
+  getContinuationSession().setProvider(
+    createSearchRecommendationProvider({
+      strategy: 'legacy',
+      ...options?.deps,
+    }),
+  )
 }
 
 /** @deprecated имя для совместимости с PlaybackIntent; ставит Recommendation Engine. */

@@ -3,8 +3,16 @@ import { authClient } from '../services/auth/authClient.ts'
 import { bindAuthSessionEpoch } from '../services/auth/sessionEpoch.ts'
 import type { AuthUser } from '../services/auth/types'
 import { getContinuationSession } from '../services/continuation/ContinuationSession.ts'
+import { clearContinuousDiscoveryRuntime } from '../services/recommendation/continuousSession.ts'
+import { invalidateContinuousBuffer } from '../services/recommendation/continuousBuffer.ts'
 import { bindSessionTasteUser } from '../services/taste/loadSessionTasteProfile.ts'
 import { tasteProfileCache } from '../services/taste/profileCache.ts'
+
+function clearContinuousRuntimeOnAuthChange(): void {
+  getContinuationSession().cancel()
+  invalidateContinuousBuffer('auth-change')
+  clearContinuousDiscoveryRuntime('auth-change')
+}
 
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
 
@@ -39,6 +47,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           tasteProfileCache.invalidate()
           bindSessionTasteUser(user?.id ?? null)
           bindAuthSessionEpoch(user?.id ?? null)
+          clearContinuousRuntimeOnAuthChange()
           set({
             user,
             status: user ? 'authenticated' : 'anonymous',
@@ -48,7 +57,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           tasteProfileCache.invalidate()
           bindSessionTasteUser(null)
           bindAuthSessionEpoch(null)
-          getContinuationSession().cancel()
+          clearContinuousRuntimeOnAuthChange()
           set({ user: null, status: 'anonymous' })
         })
         .finally(() => {
@@ -63,7 +72,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     tasteProfileCache.invalidate()
     bindSessionTasteUser(user.id)
     bindAuthSessionEpoch(user.id)
-    getContinuationSession().cancel()
+    clearContinuousRuntimeOnAuthChange()
     set({ user, status: 'authenticated' })
   },
 
@@ -72,7 +81,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     tasteProfileCache.invalidate()
     bindSessionTasteUser(user.id)
     bindAuthSessionEpoch(user.id)
-    getContinuationSession().cancel()
+    clearContinuousRuntimeOnAuthChange()
     set({ user, status: 'authenticated' })
   },
 
@@ -81,7 +90,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     tasteProfileCache.invalidate()
     bindSessionTasteUser(null)
     bindAuthSessionEpoch(null)
-    getContinuationSession().cancel()
+    clearContinuousRuntimeOnAuthChange()
     set({ user: null, status: 'anonymous' })
   },
 }))

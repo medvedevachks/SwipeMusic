@@ -15,7 +15,10 @@ import {
   type RecommendationReason,
   type RecommendationRequest,
   type RecommendationResult,
+  type RecommendationStrategy,
 } from './types.ts'
+import { pickContinuousRandom } from './continuousRandomV1.ts'
+import { getActiveRecommendationMode } from './sessionState.ts'
 
 type RankedCandidate = {
   track: Track
@@ -368,12 +371,36 @@ async function firstPlayable(
   return null
 }
 
+function resolveRecommendationStrategy(
+  request: RecommendationRequest,
+): RecommendationStrategy {
+  if (request.strategy) {
+    return request.strategy
+  }
+  // Search continuation: legacy taste/artist + hard exclusions выдачи.
+  if (getActiveRecommendationMode() === 'search') {
+    return 'legacy'
+  }
+  return 'continuous-random'
+}
+
 /**
  * Единый Recommendation Engine.
- * Search UI results сюда не передаются и не читаются.
- * mode (swipe|wave) пока не меняет правила — только маркирует вызов.
+ * Swipe/Wave: continuous-random-v1.
+ * Search continuation: legacy (не случайный каталог).
+ * Search UI dump сюда не передаётся и не читается.
  */
 export async function recommendNext(
+  request: RecommendationRequest,
+): Promise<RecommendationResult> {
+  if (resolveRecommendationStrategy(request) === 'legacy') {
+    return recommendNextLegacy(request)
+  }
+  return pickContinuousRandom(request)
+}
+
+/** Legacy taste/liked path — Search continuation и регрессионные тесты. */
+export async function recommendNextLegacy(
   request: RecommendationRequest,
 ): Promise<RecommendationResult> {
   const parent = request.signal ?? new AbortController().signal
@@ -533,9 +560,9 @@ export async function recommendNext(
   }
 }
 
-/** Сравнивает стратегию режимов: пока правила идентичны. */
+/** Сравнивает стратегию режимов: continuous-random-v1 одинакова для swipe/wave. */
 export function recommendationStrategyFingerprint(mode: RecommendationRequest['mode']): string {
-  return `unified-v1:${mode}:same-rules`
+  return `continuous-random-v1:${mode}:same-rules`
 }
 
 export function sameRecommendationStrategy(

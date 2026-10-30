@@ -25,6 +25,21 @@ async function findByArtist(
   return page.tracks.filter((track) => track.artist.toLowerCase().includes(needle))
 }
 
+async function resolveCandidatesPlayable(
+  adapter: MusicSourceAdapter,
+  track: Track,
+): Promise<boolean> {
+  if (!adapter.getPlaybackCandidates) {
+    return false
+  }
+  try {
+    const candidates = await adapter.getPlaybackCandidates(track)
+    return candidates.some((candidate) => candidate.available && Boolean(candidate.url))
+  } catch {
+    return false
+  }
+}
+
 export async function probeTrackPlayable(track: Track, signal: AbortSignal): Promise<boolean> {
   if (signal.aborted || isDemoSourceId(track.sourceId)) {
     return false
@@ -36,13 +51,29 @@ export async function probeTrackPlayable(track: Track, signal: AbortSignal): Pro
   }
   if (adapter.checkTrackAvailability) {
     const probe = await adapter.checkTrackAvailability(track)
-    return probe.status === PLAYBACK_AVAILABILITY_STATUS.PLAYABLE
-  }
-  if (!adapter.getPlaybackCandidates) {
+    if (probe.status === PLAYBACK_AVAILABILITY_STATUS.PLAYABLE) {
+      return true
+    }
+    // UNKNOWN ≠ UNAVAILABLE: дополнительная проверка через candidates/resolver path.
+    if (probe.status === PLAYBACK_AVAILABILITY_STATUS.UNKNOWN) {
+      return resolveCandidatesPlayable(adapter, track)
+    }
     return false
   }
-  const candidates = await adapter.getPlaybackCandidates(track)
-  return candidates.some((candidate) => candidate.available && Boolean(candidate.url))
+  return resolveCandidatesPlayable(adapter, track)
+}
+
+function isRateLimitError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false
+  }
+  const status = (error as { status?: number; statusCode?: number }).status
+    ?? (error as { statusCode?: number }).statusCode
+  if (status === 429) {
+    return true
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  return /\b429\b|rate.?limit|too many requests/i.test(message)
 }
 
 export async function createLiveRadioPort(): Promise<RadioSearchPort> {
@@ -77,6 +108,72 @@ export async function createLiveRadioPort(): Promise<RadioSearchPort> {
         return Promise.resolve([])
       }
       return findByArtist(adapter, query, signal)
+    },
+    fetchFeed: async (sourceId: string, signal: AbortSignal) => {
+      const adapter = sources.find((item) => item.id === sourceId)
+      if (!adapter) {
+        return []
+      }
+      try {
+        // Одна страница библиотеки/browse — не весь каталог и не «рандом Яндекса».
+        const page = await adapter.fetchTracks({ limit: 40, signal })
+        return page.tracks
+      } catch {
+        return []
+      }
+    },
+    searchPage: async (sourceId, query, options) => {
+      const adapter = sources.find((item) => item.id === sourceId)
+      if (!adapter) {
+        return { tracks: [], nextCursor: null }
+      }
+      const canSearch = adapter.supportsSearch || adapter.capabilities.includes('search')
+      if (!canSearch) {
+        return { tracks: [], nextCursor: null }
+      }
+      try {
+        const page = await adapter.search(query, {
+          limit: options.limit ?? RADIO_LIMITS.maxPerSearch,
+          cursor: options.cursor ?? null,
+          signal: options.signal,
+        })
+        return {
+          tracks: page.tracks,
+          nextCursor: page.nextCursor ?? null,
+        }
+      } catch (error) {
+        if (isRateLimitError(error)) {
+          const rateError = new Error('RATE_LIMIT')
+          ;(rateError as { status?: number }).status = 429
+          throw rateError
+        }
+        throw error
+      }
+    },
+    fetchFeedPage: async (sourceId, options) => {
+      const adapter = sources.find((item) => item.id === sourceId)
+      if (!adapter) {
+        return { tracks: [], nextCursor: null }
+      }
+      try {
+        // Yandex fetchTracks = synced user library with offset cursor, не общий каталог.
+        const page = await adapter.fetchTracks({
+          limit: options.limit ?? 40,
+          cursor: options.cursor ?? null,
+          signal: options.signal,
+        })
+        return {
+          tracks: page.tracks,
+          nextCursor: page.nextCursor ?? null,
+        }
+      } catch (error) {
+        if (isRateLimitError(error)) {
+          const rateError = new Error('RATE_LIMIT')
+          ;(rateError as { status?: number }).status = 429
+          throw rateError
+        }
+        throw error
+      }
     },
     isPlayable: probeTrackPlayable,
   }

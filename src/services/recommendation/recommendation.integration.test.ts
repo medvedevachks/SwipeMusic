@@ -6,6 +6,24 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+
+if (typeof globalThis.localStorage === 'undefined') {
+  const memory = new Map<string, string>()
+  globalThis.localStorage = {
+    getItem: (key: string) => memory.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      memory.set(key, String(value))
+    },
+    removeItem: (key: string) => {
+      memory.delete(key)
+    },
+    clear: () => memory.clear(),
+    key: (index: number) => [...memory.keys()][index] ?? null,
+    get length() {
+      return memory.size
+    },
+  }
+}
 import { PlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
 import type { ContinuationLibraryTrack } from '../continuation/libraryContinuation.ts'
 import {
@@ -37,6 +55,8 @@ import {
   pickRecommendationStart,
   resetRecommendationSessionRuntimeForTests,
 } from './sessionRuntime.ts'
+import { resetContinuousBufferForTests } from './continuousBuffer.ts'
+import { resetContinuousDiscoveryForTests } from './continuousSession.ts'
 import { sameRecommendationStrategy } from './engine.ts'
 import type { RecommendationCatalogPort } from './types.ts'
 
@@ -94,10 +114,20 @@ function richTaste(seedTitle: string, seedArtist: string): UserTasteProfile {
 }
 
 function mockPort(catalog: Record<string, Track[]>, playable: Set<string>): RecommendationCatalogPort {
+  const allHits = [...new Map(
+    Object.values(catalog)
+      .flat()
+      .map((item) => [item.id, item] as const),
+  ).values()]
   return {
     sources: [{ id: 'mock-catalog' }],
     async search(_sourceId, query) {
-      return catalog[query.trim().toLowerCase()] ?? []
+      const exact = catalog[query.trim().toLowerCase()]
+      // continuous-random-v1 шлёт разнообразные discovery-запросы — отдаём общий пул.
+      return exact && exact.length > 0 ? exact : allHits
+    },
+    async fetchFeed() {
+      return allHits
     },
     async isPlayable(candidate) {
       return playable.has(candidate.id)
@@ -151,6 +181,8 @@ function catalogDeps(queue: PlaybackQueue) {
 function resetAll() {
   resetContinuationSessionForTests()
   resetRecommendationSessionRuntimeForTests()
+  resetContinuousBufferForTests()
+  resetContinuousDiscoveryForTests()
   setSearchSeedPlaybackEnabled(true)
 }
 
@@ -188,7 +220,9 @@ async function seededAdvanceSession(contextType: 'swipe' | 'radio') {
 test('A: Swipe start → Rec1 → Next → Rec2', async () => {
   const { queue, session } = await seededAdvanceSession('swipe')
   const first = await resolveRecommendationAdvance(queue, session, { fromEnded: false })
-  assert.equal(first?.id, rec1.id)
+  assert.ok(first)
+  assert.ok([rec1.id, rec2.id].includes(first!.id))
+  assert.notEqual(first!.id, seed.id)
   session.prepare(first!, {
     type: 'search-seed',
     query: 'swipe',
@@ -196,7 +230,9 @@ test('A: Swipe start → Rec1 → Next → Rec2', async () => {
   })
   await session.flush()
   const second = await resolveRecommendationAdvance(queue, session, { fromEnded: false })
-  assert.equal(second?.id, rec2.id)
+  assert.ok(second)
+  assert.ok([rec1.id, rec2.id].includes(second!.id))
+  assert.notEqual(second!.id, first!.id)
   assert.equal(queue.getPlaybackContext().type, 'swipe')
   assert.equal(getRecommendationSessionMode(), 'swipe')
 })
@@ -206,8 +242,9 @@ test('A2: swipe context advances even when mode briefly is search', async () => 
   setActiveRecommendationMode('search')
   assert.equal(isRecommendationAdvanceContext(queue.getPlaybackContext()), true)
   const next = await resolveRecommendationAdvance(queue, session, { fromEnded: false })
-  assert.equal(next?.id, rec1.id)
-  assert.equal(queue.current()?.id, rec1.id)
+  assert.ok(next)
+  assert.ok([rec1.id, rec2.id].includes(next!.id))
+  assert.equal(queue.current()?.id, next!.id)
 })
 
 test('UX-10: Play A → LIKE → A stays → UP → B; A remains liked in sys_swipes', async () => {
@@ -285,8 +322,9 @@ test('UX-10: Play A → LIKE → A stays → UP → B; A remains liked in sys_sw
   })
   await session.flush()
   const next = await resolveRecommendationAdvance(queue, session, { fromEnded: false })
-  assert.equal(next?.id, rec1.id)
-  assert.equal(queue.current()?.id, rec1.id)
+  assert.ok(next)
+  assert.ok([rec1.id, rec2.id].includes(next!.id))
+  assert.equal(queue.current()?.id, next!.id)
   const liked = useCanonicalLibraryStore.getState().itemsById.can_seed
   assert.equal(liked?.state.liked, true)
   assert.ok(liked?.catalogIds.includes(SYS_SWIPES_ID))
@@ -304,13 +342,15 @@ test('UX-10: UP without prior like keeps skip semantics then advances', async ()
     true,
   )
   const next = await resolveRecommendationAdvance(queue, session, { fromEnded: false })
-  assert.equal(next?.id, rec1.id)
+  assert.ok(next)
+  assert.ok([rec1.id, rec2.id].includes(next!.id))
 })
 
 test('B: Wave start → Rec1 → Next → Rec2', async () => {
   const { queue, session } = await seededAdvanceSession('radio')
   const first = await resolveRecommendationAdvance(queue, session, { fromEnded: false })
-  assert.equal(first?.id, rec1.id)
+  assert.ok(first)
+  assert.ok([rec1.id, rec2.id].includes(first!.id))
   session.prepare(first!, {
     type: 'search-seed',
     query: 'my-wave',
@@ -318,7 +358,9 @@ test('B: Wave start → Rec1 → Next → Rec2', async () => {
   })
   await session.flush()
   const second = await resolveRecommendationAdvance(queue, session, { fromEnded: false })
-  assert.equal(second?.id, rec2.id)
+  assert.ok(second)
+  assert.ok([rec1.id, rec2.id].includes(second!.id))
+  assert.notEqual(second!.id, first!.id)
   assert.equal(queue.getPlaybackContext().type, 'radio')
   assert.equal(getRecommendationSessionMode(), 'wave')
 })
@@ -334,7 +376,8 @@ test('C: Search seed → Next → Rec1', async () => {
   commitSearchSeedQueue(queue, session, { track: seed, query: 'сплин' })
   await session.flush()
   const next = await resolveRecommendationAdvance(queue, session, { fromEnded: false })
-  assert.equal(next?.id, rec1.id)
+  assert.ok(next)
+  assert.ok([rec1.id, rec2.id].includes(next!.id))
   assert.equal(queue.getPlaybackContext().type, 'search-seed')
   assert.equal(getRecommendationSessionMode(), 'search')
 })

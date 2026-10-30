@@ -8,12 +8,19 @@ import type { ContinuationLibraryTrack } from '../continuation/libraryContinuati
  */
 export type RecommendationMode = 'swipe' | 'wave'
 
+/**
+ * continuous-random — обычные Swipe / Wave.
+ * legacy — Search continuation (taste/artist + жёсткие исключения выдачи).
+ */
+export type RecommendationStrategy = 'continuous-random' | 'legacy'
+
 export type RecommendationReason =
   | 'catalog-artist-search'
   | 'library-like'
   | 'taste-positive'
   | 'same-artist'
   | 'known-rest'
+  | 'continuous-random'
 
 export type RecommendationEmptyReason =
   | 'no-sources'
@@ -24,11 +31,35 @@ export type RecommendationEmptyReason =
   | 'timeout'
   | 'error'
 
-/** Порт каталога: те же контракты, что у Personal Radio search. */
+/** Одна страница discovery (cursor сохраняется в continuous session). */
+export type RecommendationDiscoveryPage = {
+  tracks: Track[]
+  nextCursor: string | null
+}
+
+/** Порт каталога: search + опциональный feed / paginated discovery. */
 export type RecommendationCatalogPort = {
   sources: readonly { id: string }[]
   search: (sourceId: string, query: string, signal: AbortSignal) => Promise<Track[]>
   isPlayable: (track: Track, signal: AbortSignal) => Promise<boolean>
+  /** Browse/library лента без поискового запроса (если адаптер умеет). */
+  fetchFeed?: (sourceId: string, signal: AbortSignal) => Promise<Track[]>
+  /**
+   * Пагинированный search. Если нет — continuous engine использует search как одну страницу.
+   * Не имитировать cursor, если адаптер его не поддерживает.
+   */
+  searchPage?: (
+    sourceId: string,
+    query: string,
+    options: { cursor?: string | null; limit?: number; signal: AbortSignal },
+  ) => Promise<RecommendationDiscoveryPage>
+  /**
+   * Пагинированный feed/library. Для Yandex fetchTracks — библиотека пользователя, не весь каталог.
+   */
+  fetchFeedPage?: (
+    sourceId: string,
+    options: { cursor?: string | null; limit?: number; signal: AbortSignal },
+  ) => Promise<RecommendationDiscoveryPage>
 }
 
 export type RecommendationExcludedTrack = {
@@ -54,6 +85,8 @@ export type RecommendationRequest = {
   port: RecommendationCatalogPort
   signal?: AbortSignal
   timeoutMs?: number
+  /** Явная стратегия; иначе выбирается по контракту режима. */
+  strategy?: RecommendationStrategy
 }
 
 export type RecommendationHit = {
@@ -75,6 +108,7 @@ export type RecommendationResult = RecommendationHit | RecommendationMiss
 export const RECOMMENDATION_LIMITS = {
   maxArtists: 6,
   maxPerSearch: 8,
+  /** Legacy taste path only — continuous-random использует CONTINUOUS_LIMITS. */
   maxCatalogCandidates: 24,
   maxLibraryProbes: 8,
   searchTimeoutMs: 4_000,
