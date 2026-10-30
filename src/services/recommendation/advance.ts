@@ -13,6 +13,18 @@ import {
 } from './continuousBuffer.ts'
 import { noteContinuousSeed } from './continuousSession.ts'
 import { getActiveRecommendationMode } from './sessionState.ts'
+import { isCmeLiveMutationAllowed } from '../sessionSwitch/integration/cmeSessionOwnership.ts'
+
+function guardLiveInsert(source: string): boolean {
+  if (isCmeLiveMutationAllowed()) {
+    return true
+  }
+  noteSearchFlowEvent({
+    source: 'consumeRecommendationAdvance',
+    detail: `cme-ownership-block:${source}`,
+  })
+  return false
+}
 
 /** Контексты, где Next/ended/жест идут через Recommendation Engine. */
 export function isRecommendationAdvanceContext(context: PlaybackContext): boolean {
@@ -101,6 +113,9 @@ export function consumeRecommendationAdvance(
   if (prepared) {
     const currentId = queue.current()?.id ?? prepared.id
     if (isContinuationCandidateAvailable(prepared, currentId, queue.getItems())) {
+      if (!guardLiveInsert('prepared')) {
+        return null
+      }
       session.takePrepared()
       queue.insertNext(prepared)
       const track = queue.next(fromEnded ? { fromEnded: true } : undefined)
@@ -134,6 +149,9 @@ export function consumeRecommendationAdvance(
     currentId &&
     isContinuationCandidateAvailable(buffered, currentId, queue.getItems())
   ) {
+    if (!guardLiveInsert('buffer')) {
+      return null
+    }
     noteContinuousSeed(buffered)
     queue.insertNext(buffered)
     const track = queue.next(fromEnded ? { fromEnded: true } : undefined)

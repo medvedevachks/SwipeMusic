@@ -262,7 +262,11 @@ export default function Home() {
       if (again.items.length > 0 || isQueueLockedContext(again.context)) {
         return
       }
-      commitRecommendationSeed({ mode: 'swipe', track: picked.track })
+      await commitRecommendationSeed({
+        mode: 'swipe',
+        track: picked.track,
+        autoplay: false,
+      })
     })()
     return () => {
       cancelled = true
@@ -328,7 +332,13 @@ export default function Home() {
               return
             }
             // Каталог: одна стартовая композиция + recommendation session (не dump ленты).
-            commitRecommendationSeed({ mode: 'swipe', track })
+            const seeded = await commitRecommendationSeed({
+              mode: 'swipe',
+              track,
+            })
+            if (!seeded.ok) {
+              return
+            }
             await getAudioPlayer().playTrack(track)
           },
           playRadio: async () => {

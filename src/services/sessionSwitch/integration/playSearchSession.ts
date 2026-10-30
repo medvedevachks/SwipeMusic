@@ -10,6 +10,7 @@ import {
 import { toSessionTrack } from '../../playbackSession/sanitizeTrack.ts'
 import type { SessionQueueSnapshot } from '../../playbackSession/types.ts'
 import { isSessionSwitchIntegrationEnabled } from '../featureFlag.ts'
+import { bindCmeOwnershipFromRuntime } from './cmeSessionOwnership.ts'
 import { getSessionSwitchAppRuntime } from './sessionSwitchAppRuntime.ts'
 
 export type PlaySearchSessionInput = {
@@ -94,6 +95,7 @@ export async function playSearchViaSessionSwitch(
   })
 
   if (result.ok) {
+    bindCmeOwnershipFromRuntime('search')
     return { ok: true }
   }
   if (result.reason === 'user_gesture_required') {

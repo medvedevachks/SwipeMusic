@@ -53,6 +53,8 @@ export {
   expandCatalogSessionQueue,
   playSearchViaSessionSwitch,
   playAlbumViaSessionSwitch,
+  playSwipeViaSessionSwitch,
+  playWaveViaSessionSwitch,
   releaseCatalogSessionForLegacyIntent,
   releaseActiveSessionForLegacyIntent,
   flushActiveSessionToStore,

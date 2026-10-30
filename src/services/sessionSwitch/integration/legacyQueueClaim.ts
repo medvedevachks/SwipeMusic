@@ -6,6 +6,7 @@
  */
 import type { PlaybackSessionId } from '../../playbackSession/types.ts'
 import { isSessionSwitchIntegrationEnabled } from '../featureFlag.ts'
+import { clearCmeSessionOwnership } from './cmeSessionOwnership.ts'
 import {
   bumpFlushRevision,
   flushActiveSessionToStore,
@@ -24,6 +25,8 @@ const MIGRATED_SESSIONS: ReadonlySet<PlaybackSessionId> = new Set([
   'catalog',
   'search',
   'album',
+  'swipes',
+  'wave',
 ])
 
 /**
@@ -57,6 +60,7 @@ export function releaseCatalogSessionForLegacyIntent(
     clearActiveAfter: true,
     playing: false,
   })
+  clearCmeSessionOwnership()
 
   return {
     released: true,

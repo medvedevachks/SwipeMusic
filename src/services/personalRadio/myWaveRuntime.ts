@@ -65,7 +65,19 @@ export async function toggleLiveMyWave(): Promise<RadioPlan> {
     }
   }
 
-  commitRecommendationSeed({ mode: 'wave', track: picked.track })
+  const seeded = await commitRecommendationSeed({
+    mode: 'wave',
+    track: picked.track,
+  })
+  if (!seeded.ok) {
+    return {
+      status: 'error',
+      origin: null,
+      tracks: [],
+      startIndex: 0,
+      message: 'Не удалось начать волну',
+    }
+  }
   try {
     await getAudioPlayer().playTrack(picked.track)
   } catch {

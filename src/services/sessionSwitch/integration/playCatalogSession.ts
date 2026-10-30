@@ -10,6 +10,7 @@ import {
 import type { SessionQueueSnapshot } from '../../playbackSession/types.ts'
 import { isSessionSwitchIntegrationEnabled } from '../featureFlag.ts'
 import { playbackExportToSessionQueue } from '../queueSnapshotBridge.ts'
+import { clearCmeSessionOwnership } from './cmeSessionOwnership.ts'
 import { getSessionSwitchAppRuntime } from './sessionSwitchAppRuntime.ts'
 
 export type PlayCatalogSessionInput = {
@@ -158,6 +159,7 @@ export async function playCatalogViaSessionSwitch(
   })
 
   if (result.ok) {
+    clearCmeSessionOwnership()
     return { ok: true }
   }
   if (result.reason === 'user_gesture_required') {

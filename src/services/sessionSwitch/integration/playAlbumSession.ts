@@ -9,6 +9,7 @@ import {
 import { toSessionTrack } from '../../playbackSession/sanitizeTrack.ts'
 import type { SessionQueueSnapshot } from '../../playbackSession/types.ts'
 import { isSessionSwitchIntegrationEnabled } from '../featureFlag.ts'
+import { clearCmeSessionOwnership } from './cmeSessionOwnership.ts'
 import { getSessionSwitchAppRuntime } from './sessionSwitchAppRuntime.ts'
 
 export type PlayAlbumSessionInput = {
@@ -106,6 +107,7 @@ export async function playAlbumViaSessionSwitch(
   })
 
   if (result.ok) {
+    clearCmeSessionOwnership()
     return { ok: true }
   }
   if (result.reason === 'user_gesture_required') {

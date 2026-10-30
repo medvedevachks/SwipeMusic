@@ -287,6 +287,15 @@ export async function teardownPlaybackSessionsForAuth(
     // partial graph
   }
 
+  try {
+    const { clearCmeSessionOwnership } = await import(
+      './cmeSessionOwnership.ts'
+    )
+    clearCmeSessionOwnership()
+  } catch {
+    // partial graph
+  }
+
   if (runtime) {
     runtime.coordinator.invalidatePending('logout')
     runtime.store.clearForLogout()

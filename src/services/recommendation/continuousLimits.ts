@@ -7,7 +7,11 @@ export const CONTINUOUS_LIMITS = {
   apiPageSize: 20,
   /** Локальный candidate pool (не PlaybackQueue). */
   maxPoolSize: 48,
-  /** Prefetch buffer следующих metadata-кандидатов. */
+  /**
+   * Prefetch buffer следующих metadata-кандидатов.
+   * Product target 10 + low-watermark 5 и mix 70/30 (DEV-08) —
+   * отдельный follow-up; здесь остаётся 8 без рефакторинга continuousRandomV1.
+   */
   bufferTarget: 8,
   /** Скользящее окно недавних (не вечный blacklist). */
   recentWindow: 80,

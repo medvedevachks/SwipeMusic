@@ -52,7 +52,7 @@ UI (pages / BottomPlayer)
 
 **Ограничение:** не создавать второй GlobalPlayer и не заводить конкурирующую очередь.
 
-**Playback sessions v2 (ветка `feature/playback-session-store-v2`, DEV-01…07):** SessionStore + Coordinator; flag `swipe-music-session-switch-integration-v1` **default OFF** (PROD always false). При ON: auth bootstrap + **restore active без autoplay** + `activeSessionDurableSync` (queue debounce / position throttle / pause / pagehide). Play: **CATALOG** (`playCatalogViaSessionSwitch`), **SEARCH** (`playSearchViaSessionSwitch`, один seed + `hardExcludeHits`), **ALBUM** (`playAlbumViaSessionSwitch`). Legacy **SWIPES/WAVE** вызывают `releaseActiveSessionForLegacyIntent` (flush catalog|search|album). Album end → `albumContinuationContract` (stop/no-op; related CME → **DEV-08**). Gate: `npm run test:session-switch-gate`. HTMLAudio harness: `VITE_SESSION_SWITCH_GATE=true`. Production flag не включать.
+**Playback sessions v2 (ветка `feature/playback-session-store-v2`, DEV-01…08):** SessionStore + Coordinator; flag `swipe-music-session-switch-integration-v1` **default OFF** (PROD always false). При ON: пять слотов — CATALOG / SEARCH / ALBUM / **SWIPES** / **WAVE**; durable sync + restore без autoplay; CME live `insertNext` gated by `cmeSessionOwnership` (sessionId+switchEpoch). Cold swipe seed: `autoplay:false`. Buffer target в коде всё ещё **8** (не 10/5); mix **70/30** не реализован — отдельный follow-up. Album related CME — контракт only. Production flag не включать.
 
 ---
 

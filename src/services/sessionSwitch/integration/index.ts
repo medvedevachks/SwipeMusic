@@ -64,6 +64,21 @@ export {
   isAlbumSessionPlaybackActive,
 } from './playAlbumSession.ts'
 export {
+  playSwipeViaSessionSwitch,
+  isSwipeSessionPlaybackActive,
+} from './playSwipeSession.ts'
+export {
+  playWaveViaSessionSwitch,
+  isWaveSessionPlaybackActive,
+} from './playWaveSession.ts'
+export {
+  bindCmeSessionOwnership,
+  clearCmeSessionOwnership,
+  isCmeLiveMutationAllowed,
+  getCmeSessionOwnership,
+  resetCmeSessionOwnershipForTests,
+} from './cmeSessionOwnership.ts'
+export {
   resolveAlbumExhaustedContinuation,
   getAlbumContinuationPort,
   setAlbumContinuationPortForTests,
