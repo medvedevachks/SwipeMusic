@@ -27,6 +27,7 @@ import {
 import { enqueueRecommendationAdvance } from '../recommendation/sessionRuntime.ts'
 import { reportPlayback } from '../playbackAnalytics/report.ts'
 import { getPlaybackQueue } from '../playbackQueue'
+import { isSessionSwitchIntegrationEnabled } from '../sessionSwitch/featureFlag.ts'
 import {
   beginQueueTransport,
   cancelActiveFallback,
@@ -1098,7 +1099,10 @@ export class AudioPlayer {
     if (!track) {
       // PLAYBACK-CME-01: album end → related (same-artist library) или stop.
       const endedContext = before.context
-      if (endedContext.type === 'album') {
+      if (
+        endedContext.type === 'album' &&
+        isSessionSwitchIntegrationEnabled()
+      ) {
         try {
           const { ensureAlbumRelatedContinuationPort } = await import(
             '../sessionSwitch/integration/albumRelatedContinuation.ts'

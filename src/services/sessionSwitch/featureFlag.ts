@@ -1,21 +1,28 @@
 /**
- * Feature flag интеграции SessionSwitchCoordinator ↔ AudioPlayer (PLAYBACK-DEV-05).
- * По умолчанию выключен. В production-сборке всегда false.
- * При ON (DEV): auth bootstrap SessionStore + CATALOG play через SessionSwitchCoordinator.
- * SEARCH/WAVE/SWIPES/ALBUM остаются на legacy Intent.
+ * Feature flag SessionSwitchCoordinator ↔ AudioPlayer (PLAYBACK-RELEASE-01).
+ *
+ * По умолчанию OFF. Ошибка конфигурации — OFF.
+ * Production не читает localStorage: включение только решением сервера
+ * (`GET /api/runtime-config`, файл `.data/session-switch.flag` или
+ * SWIPE_SESSION_SWITCH=1, если файла нет).
+ * DEV по-прежнему может включить localStorage-ключом для локальной приёмки.
  */
 
 export const SESSION_SWITCH_INTEGRATION_STORAGE_KEY =
   'swipe-music-session-switch-integration-v1'
 
-/** Тестовый override: null = читать storage / default. */
-let testOverride: boolean | null = null
+export const SESSION_SWITCH_RUNTIME_CONFIG_PATH = '/api/runtime-config'
 
-/**
- * Включена ли контролируемая интеграция session-switch.
- * Production (`import.meta.env.PROD`) — всегда false.
- */
+/** Тестовый override: null = обычное чтение. */
+let testOverride: boolean | null = null
+/** null = сервер ещё не ответил или ответ не удалось прочитать. */
+let serverDecision: boolean | null = null
+let productionOverride: boolean | null = null
+
 function isProductionBuild(): boolean {
+  if (productionOverride !== null) {
+    return productionOverride
+  }
   try {
     return import.meta.env?.PROD === true
   } catch {
@@ -23,13 +30,7 @@ function isProductionBuild(): boolean {
   }
 }
 
-export function isSessionSwitchIntegrationEnabled(): boolean {
-  if (isProductionBuild()) {
-    return false
-  }
-  if (testOverride !== null) {
-    return testOverride
-  }
+function devLocalStorageEnabled(): boolean {
   try {
     if (typeof localStorage === 'undefined') {
       return false
@@ -40,13 +41,60 @@ export function isSessionSwitchIntegrationEnabled(): boolean {
   }
 }
 
-/** Только для тестов / DEV-консоли. В PROD no-op на чтение через isEnabled. */
+export function isSessionSwitchIntegrationEnabled(): boolean {
+  if (testOverride !== null) {
+    return testOverride
+  }
+  if (serverDecision === true) {
+    return true
+  }
+  if (isProductionBuild()) {
+    return false
+  }
+  return devLocalStorageEnabled()
+}
+
+export function applySessionSwitchServerDecision(enabled: boolean | null): void {
+  serverDecision = enabled === true ? true : enabled === false ? false : null
+}
+
+export async function refreshSessionSwitchFromServer(
+  fetchImpl: typeof fetch = fetch,
+): Promise<boolean> {
+  try {
+    const response = await fetchImpl(SESSION_SWITCH_RUNTIME_CONFIG_PATH, {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    })
+    if (!response.ok) {
+      applySessionSwitchServerDecision(null)
+      return isSessionSwitchIntegrationEnabled()
+    }
+    const body = (await response.json()) as { sessionSwitch?: unknown }
+    applySessionSwitchServerDecision(body.sessionSwitch === true)
+  } catch {
+    applySessionSwitchServerDecision(null)
+  }
+  return isSessionSwitchIntegrationEnabled()
+}
+
+/** Только для тестов. */
 export function setSessionSwitchIntegrationEnabledForTests(
   enabled: boolean | null,
 ): void {
   testOverride = enabled
 }
 
+export function setSessionSwitchProductionForTests(
+  production: boolean | null,
+): void {
+  productionOverride = production
+}
+
 export function resetSessionSwitchIntegrationFlagForTests(): void {
   testOverride = null
+  serverDecision = null
+  productionOverride = null
 }

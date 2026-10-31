@@ -670,6 +670,10 @@ describe('PLAYBACK-DEV-05 source contracts (AudioPlayer / PlayerManager)', () =>
     assert.equal(/this\.adapter\.load/.test(prepareBody), false)
     assert.equal(/playResolved/.test(prepareBody), false)
     assert.match(prepareBody, /resolver\.resolve/)
+    assert.match(
+      src,
+      /endedContext\.type === 'album' &&\s*isSessionSwitchIntegrationEnabled\(\)/,
+    )
   })
 
   it('PlayerManager.load pauseBackends до смены адаптера', () => {
@@ -683,10 +687,15 @@ describe('PLAYBACK-DEV-05 source contracts (AudioPlayer / PlayerManager)', () =>
     assert.ok(loadIdx >= 0 && pauseIdx > loadIdx && activateIdx > pauseIdx)
   })
 
-  it('feature flag в PROD всегда false', () => {
+  it('production не включает SessionSwitch из localStorage', () => {
     const src = readFileSync(join(here, '../featureFlag.ts'), 'utf8')
-    assert.match(src, /import\.meta\.env\.PROD/)
-    assert.match(src, /return false/)
+    assert.match(src, /import\.meta\.env\?\.PROD === true/)
+    assert.match(src, /serverDecision === true/)
+    const productionGuard = src.indexOf('if (isProductionBuild())')
+    const localStorageRead = src.indexOf('return devLocalStorageEnabled()')
+    assert.ok(productionGuard > 0 && localStorageRead > productionGuard)
+    const guard = src.slice(productionGuard, localStorageRead)
+    assert.match(guard, /return false/)
   })
 
   it('queue subscribe не ставит currentTrack из очереди', () => {

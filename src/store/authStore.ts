@@ -16,7 +16,12 @@ function clearContinuousRuntimeOnAuthChange(): void {
 
 /** Dynamic import: не тянуть AudioPlayer в node:test graph authStore. */
 function bindPlaybackSessionsSafe(userId: string | null): void {
-  void import('../services/sessionSwitch/integration/playbackSessionBootstrap.ts')
+  void import('../services/sessionSwitch/featureFlag.ts')
+    .then((flag) => flag.refreshSessionSwitchFromServer())
+    .catch(() => false)
+    .then(() =>
+      import('../services/sessionSwitch/integration/playbackSessionBootstrap.ts'),
+    )
     .then(async (mod) => {
       if (!userId) {
         await mod.teardownPlaybackSessionsForAuth()

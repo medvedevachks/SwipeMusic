@@ -5,10 +5,10 @@
 
 | Поле | Значение |
 |---|---|
-| Дата снимка | 2026-10-31 (PLAYBACK-FIX-01) |
+| Дата снимка | 2026-10-31 (PLAYBACK-RELEASE-01) |
 | Канонический репозиторий | https://github.com/medvedevachks/SwipeMusic |
 | Ветка снимка | `feature/playback-session-store-v2` (поверх deploy-windows-01) |
-| Проверенный HEAD | FIX-01: SWIPES Next continuous; suite 756; flag default OFF / PROD always false. DEV UI: ≥10× Next PASS на `dev-acceptance`. Повторный DEV-09 ещё не закрыт. Deploy не выполнялся. |
+| Проверенный HEAD | RELEASE-01: подготовка выкладки, сервер ещё не менялся. SessionSwitch по умолчанию OFF. В production localStorage его не включает; включение только `GET /api/runtime-config` (файл `.data/session-switch.flag` или env). Runbook: `docs/PLAYBACK_RELEASE_01.md`. |
 | Исторический upstream | https://github.com/r-sh-galimov/SwipeMusic |
 
 **Легенда источников фактов**
@@ -52,7 +52,7 @@ UI (pages / BottomPlayer)
 
 **Ограничение:** не создавать второй GlobalPlayer и не заводить конкурирующую очередь.
 
-**Playback sessions v2 + CME-01 + BUG-01 + FIX-01 (ветка `feature/playback-session-store-v2`):** SessionStore + Coordinator; flag **default OFF** (PROD always false). Пять слотов; durable sync; CME ownership. Cold seed idle/epoch. Buffer **10/5**; SWIPES ~70/30; hidden excluded; ALBUM related = same-artist. **BUG-01 fixed:** historyRanks. **FIX-01:** (C/F) heal stale CME ownership + guard-before-take buffer + soft miss; (B) `resetLanes` без bump generation + collect не break до refill. DEV UI smoke: ≥10× SWIPES Next PASS (`dev-acceptance` WAV, flag ON locally). Production flag не включать. Повторный DEV-09 (audible/Android/Yandex/round-trip) — следующий шаг.
+**Playback sessions v2 + CME-01 + BUG-01 + FIX-01 (ветка `feature/playback-session-store-v2`):** SessionStore + Coordinator. Флаг по умолчанию **OFF**. Production не смотрит localStorage: решение отдаёт backend (`/api/runtime-config`), ошибка чтения = OFF. DEV-приёмка по-прежнему может включить localStorage. Пять слотов; durable sync; CME ownership. Cold seed idle/epoch. Buffer **10/5**; SWIPES ~70/30; hidden excluded; ALBUM related = same-artist и только при флаге ON. **BUG-01 fixed:** historyRanks. Выкладка не выполнялась. Порядок выпуска: `docs/PLAYBACK_RELEASE_01.md`.
 
 ---
 
