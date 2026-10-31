@@ -135,11 +135,17 @@ export function ensureContinuousDiscoverySession(
   mode = nextMode
   if (modeChanged) {
     // Mode switch: отменить inflight discovery предыдущего режима.
+    // recentKeys тоже сбрасываем: иначе малый каталог (DEV acceptance /
+    // ограниченный browse), уже целиком попавший в recent на SWIPES,
+    // даёт пустой pool на WAVE → «нет подходящих композиций» (PLAYBACK-FIX-02A).
     bumpDiscoveryGeneration()
     lanes = []
     queryOrder = []
     queryIndex = 0
     clearCandidatePool()
+    recentKeys = []
+    rebuildRecentSet()
+    lastSeed = null
     noteContinuousDiag({
       mode: nextMode,
       phase: 'discovery-start',

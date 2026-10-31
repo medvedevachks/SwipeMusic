@@ -481,17 +481,30 @@ test('swipe and wave share continuous-random-v1 strategy', async () => {
   const swipe = await recommendNext(
     baseRequest({ mode: 'swipe', current, port: makePort() }),
   )
+  // Same mode still avoids immediate recent repeat (before mode switch).
+  const swipeAgain = await recommendNext(
+    baseRequest({ mode: 'swipe', current, port: makePort() }),
+  )
+  assert.equal(swipe.ok, true)
+  assert.equal(swipeAgain.ok, true)
+  if (swipe.ok && swipeAgain.ok) {
+    assert.notEqual(swipe.track.id, swipeAgain.track.id)
+  }
   const wave = await recommendNext(
     baseRequest({ mode: 'wave', current, port: makePort() }),
   )
-  assert.equal(swipe.ok, true)
   assert.equal(wave.ok, true)
   if (swipe.ok && wave.ok) {
     assert.equal(swipe.reason, 'continuous-random')
     assert.equal(wave.reason, 'continuous-random')
     assert.equal(swipe.mode, 'swipe')
     assert.equal(wave.mode, 'wave')
-    assert.notEqual(swipe.track.id, wave.track.id)
+    // Mode switch clears recent (FIX-02A): wave may reuse a swipe seed.
+    // Independence of sessions > cross-mode dedupe on tiny catalogs.
+    assert.ok(
+      wave.track.id === hitA.id || wave.track.id === hitB.id,
+      'wave still finds a playable discovery track',
+    )
   }
 })
 

@@ -394,6 +394,34 @@ test('cold start without likes works with discovery catalog', async () => {
   assert.equal(result.ok, true)
 })
 
+test('WAVE cold start after SWIPES recent-fill still finds a track (FIX-02A)', async () => {
+  resetAll()
+  // Малый каталог целиком попадает в recent на SWIPES — как DEV acceptance.
+  const pool = catalog(12, 'tiny')
+  const port = paginatedPort(pool, { pageSize: 12 })
+  ensureContinuousDiscoverySession('swipe')
+  for (const track of pool) {
+    noteContinuousRecent(track)
+  }
+  assert.ok(getContinuousRecentSize() > 0)
+
+  ensureContinuousDiscoverySession('wave')
+  assert.equal(getContinuousRecentSize(), 0, 'mode switch clears recent')
+
+  const result = await pickContinuousRandom({
+    mode: 'wave',
+    current: null,
+    taste: emptyTaste(),
+    excluded: [],
+    library: [],
+    port,
+  })
+  assert.equal(result.ok, true)
+  if (result.ok) {
+    assert.ok(pool.some((track) => track.id === result.track.id))
+  }
+})
+
 test('no sources yields clear miss', async () => {
   resetAll()
   const result = await pickContinuousRandom({
