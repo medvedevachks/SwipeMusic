@@ -79,9 +79,35 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       workbox: {
+        /*
+         * injectRegister: false отключает авто-проставление этих флагов при
+         * registerType: 'autoUpdate'. Без skipWaiting новый SW остаётся waiting,
+         * и обычный Reload продолжает получать старый precache index.html.
+         */
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        navigateFallbackDenylist: [/^\/api\//],
+        /*
+         * Пустое значение отключает createHandlerBoundToURL(index.html).
+         * Иначе NavigationRoute всегда перехватывает navigate раньше NetworkFirst
+         * и обычный Reload продолжает получать stale precache shell.
+         */
+        navigateFallback: '',
         runtimeCaching: [
+          {
+            /*
+             * Навигации: сеть первой (online Reload / новая вкладка),
+             * cache — запас для offline.
+             */
+            urlPattern: ({ request }: { request: Request }) =>
+              request.mode === 'navigate',
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'html-navigations',
+              networkTimeoutSeconds: 3,
+            },
+          },
           {
             urlPattern: ({ url }: { url: URL }) =>
               url.pathname.startsWith('/api/auth/') ||
