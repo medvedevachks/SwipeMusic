@@ -23,6 +23,8 @@ type CatalogSeed = {
   file: string
   durationMs: number
   coverColor: string
+  /** Альбом для LibraryBrowse / ALBUM session (PLAYBACK-FIX-02). */
+  album?: string
 }
 
 /**
@@ -82,6 +84,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     file: 'kino1.wav',
     durationMs: 8_000,
     coverColor: '#7c2d12',
+    album: 'Группа крови',
   },
   {
     externalId: 'kino-star',
@@ -90,6 +93,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     file: 'kino2.wav',
     durationMs: 8_000,
     coverColor: '#9a3412',
+    album: 'Группа крови',
   },
   {
     externalId: 'zem-iskala',
@@ -98,6 +102,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     file: 'zem1.wav',
     durationMs: 8_000,
     coverColor: '#4c1d95',
+    album: 'Прости меня моя любовь',
   },
   {
     externalId: 'zem-snow',
@@ -106,6 +111,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     file: 'zem2.wav',
     durationMs: 8_000,
     coverColor: '#5b21b6',
+    album: 'Прости меня моя любовь',
   },
   {
     externalId: 'bi2-polkovnik',
@@ -114,6 +120,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     file: 'bi2-1.wav',
     durationMs: 8_000,
     coverColor: '#0e7490',
+    album: 'Нечётный воин',
   },
   {
     externalId: 'bi2-serebro',
@@ -122,6 +129,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     file: 'bi2-2.wav',
     durationMs: 8_000,
     coverColor: '#155e75',
+    album: 'Нечётный воин',
   },
   {
     externalId: 'mt-vlad',
@@ -223,7 +231,7 @@ export function buildDevAcceptanceCatalog(): Track[] {
       coverColor: seed.coverColor,
       previewUrl: resolveDevAcceptanceAssetUrl(seed.file),
       durationMs: seed.durationMs,
-      album: 'DEV Acceptance',
+      album: seed.album ?? 'DEV Acceptance',
     }),
   )
 }

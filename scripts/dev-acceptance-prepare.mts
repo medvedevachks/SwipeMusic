@@ -59,17 +59,19 @@ function seedLiked(
     externalId: string
     title: string
     artist: string
+    album?: string | null
     lastPlayed?: string
     playCount?: number
   },
 ): void {
   const lastPlayed = input.lastPlayed ?? now
   const playCount = input.playCount ?? 2
+  const album = input.album ?? null
   db.prepare(`
     INSERT INTO user_canonical_tracks (
       user_id, id, title, artist, album, duration_ms, artwork_url, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, NULL, 2000, NULL, ?, ?)
-  `).run(userId, input.canonicalId, input.title, input.artist, now, now)
+    ) VALUES (?, ?, ?, ?, ?, 8000, NULL, ?, ?)
+  `).run(userId, input.canonicalId, input.title, input.artist, album, now, now)
   db.prepare(`
     INSERT INTO user_canonical_library_tracks (
       user_id, canonical_track_id, added_at, last_played, play_count, liked, liked_at,
@@ -80,7 +82,7 @@ function seedLiked(
     INSERT INTO user_track_source_copies (
       user_id, source_track_key, canonical_track_id, source_id, external_id,
       title, artist, album, duration_ms, artwork_url, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 2000, NULL, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 8000, NULL, ?, ?)
   `).run(
     userId,
     `${SOURCE_ID}:${input.externalId}`,
@@ -89,9 +91,47 @@ function seedLiked(
     input.externalId,
     input.title,
     input.artist,
+    album,
     now,
     now,
   )
+}
+
+function seedUserCatalog(
+  db: ReturnType<typeof openDatabase>,
+  userId: string,
+  catalog: {
+    id: string
+    name: string
+    icon: string
+    color: string
+    sortOrder: number
+    trackCanonicalIds: readonly string[]
+  },
+): void {
+  db.prepare(`
+    INSERT INTO user_categories (
+      user_id, id, name, icon, color, description, created_at, updated_at,
+      sort_order, favorite, system
+    ) VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, 0, 0)
+  `).run(
+    userId,
+    catalog.id,
+    catalog.name,
+    catalog.icon,
+    catalog.color,
+    now,
+    now,
+    catalog.sortOrder,
+  )
+  const insertMembership = db.prepare(`
+    INSERT INTO user_catalog_canonical_tracks (
+      user_id, catalog_id, canonical_track_id, created_at
+    ) VALUES (?, ?, ?, ?)
+  `)
+  for (const canonicalId of catalog.trackCanonicalIds) {
+    insertMembership.run(userId, catalog.id, canonicalId, now)
+  }
 }
 
 mkdirSync(dataDir, { recursive: true })
@@ -175,6 +215,11 @@ if (existing) {
       userId,
     )
   }
+  db.prepare('DELETE FROM user_catalog_canonical_tracks WHERE user_id = ?').run(userId)
+  db.prepare('DELETE FROM user_category_tracks WHERE user_id = ?').run(userId)
+  db.prepare('DELETE FROM user_categories WHERE user_id = ? AND system = 0').run(
+    userId,
+  )
   db.prepare('DELETE FROM user_track_source_copies WHERE user_id = ?').run(userId)
   db.prepare('DELETE FROM user_canonical_library_tracks WHERE user_id = ?').run(userId)
   db.prepare('DELETE FROM user_canonical_tracks WHERE user_id = ?').run(userId)
@@ -225,14 +270,25 @@ seedLiked(db, userId, {
   externalId: 'kino-blood',
   title: 'Группа крови',
   artist: 'Кино',
+  album: 'Группа крови',
   lastPlayed: '2026-10-20T12:00:00.000Z',
   playCount: 12,
+})
+seedLiked(db, userId, {
+  canonicalId: 'can_dev_kino2',
+  externalId: 'kino-star',
+  title: 'Звезда по имени Солнце',
+  artist: 'Кино',
+  album: 'Группа крови',
+  lastPlayed: '2026-10-20T13:00:00.000Z',
+  playCount: 11,
 })
 seedLiked(db, userId, {
   canonicalId: 'can_dev_zem',
   externalId: 'zem-iskala',
   title: 'Искала',
   artist: 'Земфира',
+  album: 'Прости меня моя любовь',
   lastPlayed: '2026-10-21T12:00:00.000Z',
   playCount: 10,
 })
@@ -241,8 +297,18 @@ seedLiked(db, userId, {
   externalId: 'bi2-polkovnik',
   title: 'Полковнику никто не пишет',
   artist: 'Би-2',
+  album: 'Нечётный воин',
   lastPlayed: '2026-10-22T12:00:00.000Z',
   playCount: 9,
+})
+seedLiked(db, userId, {
+  canonicalId: 'can_dev_bi2b',
+  externalId: 'bi2-serebro',
+  title: 'Серебро',
+  artist: 'Би-2',
+  album: 'Нечётный воин',
+  lastPlayed: '2026-10-22T13:00:00.000Z',
+  playCount: 8,
 })
 seedLiked(db, userId, {
   canonicalId: 'can_dev_mt',
@@ -259,6 +325,24 @@ seedLiked(db, userId, {
   artist: 'ДДТ',
   lastPlayed: '2026-10-24T12:00:00.000Z',
   playCount: 7,
+})
+
+// Два пользовательских каталога для CATALOG A↔B (PLAYBACK-FIX-02).
+seedUserCatalog(db, userId, {
+  id: 'cat_dev_a',
+  name: 'Acceptance A',
+  icon: 'music',
+  color: '#0f766e',
+  sortOrder: 100,
+  trackCanonicalIds: ['can_dev_seed', 'can_dev_atl', 'can_dev_rec1'],
+})
+seedUserCatalog(db, userId, {
+  id: 'cat_dev_b',
+  name: 'Acceptance B',
+  icon: 'star',
+  color: '#9f1239',
+  sortOrder: 101,
+  trackCanonicalIds: ['can_dev_kino', 'can_dev_zem', 'can_dev_bi2'],
 })
 
 // Без завершающего \\n: копирование «всего файла» иначе ломает verifyPassword.
