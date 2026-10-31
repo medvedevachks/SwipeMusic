@@ -34,11 +34,13 @@ test('DEV acceptance resolve works after SessionTrack strips previewUrl', async 
 
 test('DEV acceptance album metadata groups Би-2 for ALBUM session', () => {
   const bi2 = buildDevAcceptanceCatalog().filter((track) => track.artist === 'Би-2')
-  assert.equal(bi2.length, 2)
-  assert.ok(bi2.every((track) => track.album === 'Нечётный воин'))
+  assert.equal(bi2.length, 3)
+  const albumTracks = bi2.filter((track) => track.album === 'Нечётный воин')
+  assert.equal(albumTracks.length, 2)
+  assert.ok(bi2.some((track) => track.album === 'Горизонт событий'))
 })
 
-test('DEV acceptance catalog groups three named albums', () => {
+test('DEV acceptance catalog groups named albums including related seed', () => {
   const albums = new Set(
     buildDevAcceptanceCatalog()
       .map((track) => track.album?.trim())
@@ -47,4 +49,5 @@ test('DEV acceptance catalog groups three named albums', () => {
   assert.ok(albums.has('Нечётный воин'))
   assert.ok(albums.has('Группа крови'))
   assert.ok(albums.has('Прости меня моя любовь'))
+  assert.ok(albums.has('Горизонт событий'))
 })

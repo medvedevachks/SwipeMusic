@@ -132,6 +132,16 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     album: 'Нечётный воин',
   },
   {
+    /** Вне «Нечётный воин» — для ALBUM related continuation (PLAYBACK-FIX-02B). */
+    externalId: 'bi2-varvara',
+    title: 'Варвара',
+    artist: 'Би-2',
+    file: 'bi2-1.wav',
+    durationMs: 8_000,
+    coverColor: '#0f766e',
+    album: 'Горизонт событий',
+  },
+  {
     externalId: 'mt-vlad',
     title: 'Владивосток 2000',
     artist: 'Мумий Тролль',

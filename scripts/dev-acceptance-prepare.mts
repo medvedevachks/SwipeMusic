@@ -311,6 +311,15 @@ seedLiked(db, userId, {
   playCount: 8,
 })
 seedLiked(db, userId, {
+  canonicalId: 'can_dev_bi2c',
+  externalId: 'bi2-varvara',
+  title: 'Варвара',
+  artist: 'Би-2',
+  album: 'Горизонт событий',
+  lastPlayed: '2026-10-22T14:00:00.000Z',
+  playCount: 6,
+})
+seedLiked(db, userId, {
   canonicalId: 'can_dev_mt',
   externalId: 'mt-vlad',
   title: 'Владивосток 2000',
