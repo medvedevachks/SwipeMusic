@@ -207,6 +207,56 @@ describe('PLAYBACK-DEV-06 catalog session', () => {
     assert.equal(live.previous()?.id, 'b')
   })
 
+  it('Catalog A → B → A: один CATALOG-слот, Play A стартует с выбранного трека', async () => {
+    const { store, live } = setupRuntime()
+    store.replaceSlot('wave', {
+      meta: { kind: 'wave' },
+      queue: {
+        ...createEmptySessionQueueSnapshot('2026-01-01T00:00:00.000Z'),
+        items: [toSessionTrack(track('w1'))],
+        currentIndex: 0,
+        playOrder: [0],
+        playOrderIndex: 0,
+        history: ['w1'],
+        historyIndex: 0,
+      },
+    })
+    const waveGen = store.getSlot('wave').slotGeneration
+
+    await playCatalogViaSessionSwitch({
+      tracks: [track('a1'), track('a2'), track('a3')],
+      startIndex: 0,
+      catalogId: 'cat-a',
+      catalogTitle: 'A',
+    })
+    assert.equal(live.next()?.id, 'a2')
+
+    await playCatalogViaSessionSwitch({
+      tracks: [track('b1'), track('b2')],
+      startIndex: 0,
+      catalogId: 'cat-b',
+      catalogTitle: 'B',
+    })
+    assert.equal(live.current()?.id, 'b1')
+
+    await playCatalogViaSessionSwitch({
+      tracks: [track('a1'), track('a2'), track('a3')],
+      startIndex: 1,
+      catalogId: 'cat-a',
+      catalogTitle: 'A',
+    })
+    assert.equal(store.getActiveSessionId(), 'catalog')
+    assert.equal(
+      store.getSlot('catalog').meta.kind === 'catalog'
+        ? store.getSlot('catalog').meta.catalogId
+        : null,
+      'cat-a',
+    )
+    assert.equal(live.current()?.id, 'a2')
+    assert.equal(store.getSlot('wave').slotGeneration, waveGen)
+    assert.equal(store.getSlot('wave').queue.items[0]?.id, 'w1')
+  })
+
   it('цикл после последнего трека: peekNext null при OFF repeat', async () => {
     const { live } = setupRuntime()
     await playCatalogViaSessionSwitch({
