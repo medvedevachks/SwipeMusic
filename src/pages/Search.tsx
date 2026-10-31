@@ -29,7 +29,11 @@ export default function Search() {
 
   const [draft, setDraft] = useState(query)
 
-  const openInSwipeDeck = (tracks: Track[], selectedTrackId?: string, q?: string) => {
+  const openInSwipeDeck = (
+    tracks: Track[],
+    selectedTrackId?: string,
+    q?: string,
+  ) => {
     // Search results → только колода карточек. PlaybackQueue заполняет playSearchTrack / plan.
     applySearchDeck(tracks, {
       selectedTrackId,
@@ -63,11 +67,16 @@ export default function Search() {
               explicitUserPlay: true,
             })
           : Promise.resolve()
-    void playback.catch(() => {
-      // resolve / autoplay — BottomPlayer
-    })
 
-    navigate('/')
+    // Дождаться commit/play: иначе Home монтируется на старой сессии и UI
+    // выглядит как «поиск не запустился» (PLAYBACK-FIX-02).
+    void playback
+      .catch(() => {
+        // resolve / autoplay — BottomPlayer
+      })
+      .finally(() => {
+        navigate('/')
+      })
   }
 
   const onSubmit = async (event: FormEvent) => {
