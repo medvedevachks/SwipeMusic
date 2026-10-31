@@ -37,6 +37,38 @@ export function resetCmeSessionOwnershipForTests(): void {
 }
 
 /**
+ * Если активна та же recommendation-сессия, но epoch устарел после switch —
+ * перепривязать ownership (иначе Next теряет buffer-кандидат и ложно exhausted).
+ */
+export function healCmeOwnershipIfStale(): boolean {
+  if (!isSessionSwitchIntegrationEnabled()) {
+    return true
+  }
+  const runtime = getSessionSwitchAppRuntime()
+  if (!runtime) {
+    return true
+  }
+  const active = runtime.store.getActiveSessionId()
+  if (active !== 'swipes' && active !== 'wave' && active !== 'search') {
+    return false
+  }
+  const liveEpoch = runtime.store.getSwitchEpoch()
+  if (
+    ownership &&
+    ownership.sessionId === active &&
+    ownership.switchEpoch === liveEpoch
+  ) {
+    return true
+  }
+  // Та же сессия (или ownership пуст после seed/play) — актуальный epoch.
+  if (!ownership || ownership.sessionId === active) {
+    bindCmeSessionOwnership({ sessionId: active, switchEpoch: liveEpoch })
+    return true
+  }
+  return false
+}
+
+/**
  * Разрешена ли мутация live PlaybackQueue из CME (insertNext и т.п.).
  * Flag OFF / нет runtime → true (legacy).
  */
@@ -48,6 +80,7 @@ export function isCmeLiveMutationAllowed(): boolean {
   if (!runtime) {
     return true
   }
+  healCmeOwnershipIfStale()
   if (!ownership) {
     return false
   }

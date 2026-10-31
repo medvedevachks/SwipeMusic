@@ -8,22 +8,48 @@ import { isContinuationCandidateAvailable } from '../continuation/types.ts'
 import type { PlaybackQueue } from '../playbackQueue/PlaybackQueue.ts'
 import type { RecommendationMode } from './types.ts'
 import {
+  peekContinuousBuffer,
   requestContinuousBufferRefill,
   takeContinuousBufferedTrack,
 } from './continuousBuffer.ts'
+import { noteContinuousDiag } from './continuousDiag.ts'
 import { noteContinuousSeed } from './continuousSession.ts'
-import { getActiveRecommendationMode } from './sessionState.ts'
+import {
+  getActiveRecommendationMode,
+  noteRecommendationMiss,
+  peekRecommendationMiss,
+} from './sessionState.ts'
 import { isCmeLiveMutationAllowed } from '../sessionSwitch/integration/cmeSessionOwnership.ts'
 
 function guardLiveInsert(source: string): boolean {
   if (isCmeLiveMutationAllowed()) {
     return true
   }
+  noteRecommendationMiss(
+    'error',
+    'Продолжение потока временно недоступно. Нажмите Next ещё раз.',
+  )
   noteSearchFlowEvent({
     source: 'consumeRecommendationAdvance',
     detail: `cme-ownership-block:${source}`,
   })
+  noteContinuousDiag({
+    mode: getActiveRecommendationMode() ?? 'swipe',
+    phase: 'playback-miss',
+    reason: `cme-ownership-block:${source}`,
+  })
   return false
+}
+
+function peekBufferedCandidate(
+  excludeIds: ReadonlySet<string>,
+): Track | null {
+  for (const track of peekContinuousBuffer()) {
+    if (!excludeIds.has(track.id)) {
+      return track
+    }
+  }
+  return null
 }
 
 /** Контексты, где Next/ended/жест идут через Recommendation Engine. */
@@ -134,22 +160,28 @@ export function consumeRecommendationAdvance(
     session.takePrepared()
   }
 
-  // Prefetch buffer continuous-random-v1 (metadata only) — до ожидания discovery.
+  // Prefetch buffer: ownership ДО take — иначе кандидат теряется при block.
   const currentId = queue.current()?.id ?? null
-  const buffered = takeContinuousBufferedTrack(
-    new Set(
-      [
-        currentId,
-        ...queue.getItems().map((item) => item.id),
-      ].filter((id): id is string => Boolean(id)),
-    ),
+  const excludeIds = new Set(
+    [
+      currentId,
+      ...queue.getItems().map((item) => item.id),
+    ].filter((id): id is string => Boolean(id)),
   )
+  const bufferedPeek = peekBufferedCandidate(excludeIds)
   if (
-    buffered &&
+    bufferedPeek &&
     currentId &&
-    isContinuationCandidateAvailable(buffered, currentId, queue.getItems())
+    isContinuationCandidateAvailable(bufferedPeek, currentId, queue.getItems())
   ) {
     if (!guardLiveInsert('buffer')) {
+      return null
+    }
+    const buffered = takeContinuousBufferedTrack(excludeIds)
+    if (
+      !buffered ||
+      !isContinuationCandidateAvailable(buffered, currentId, queue.getItems())
+    ) {
       return null
     }
     noteContinuousSeed(buffered)
@@ -222,7 +254,25 @@ export async function resolveRecommendationAdvance(
 
   session.prepare(current, syntheticPrepareContext(current, context), { force: true })
   await session.flush()
-  return consumeRecommendationAdvance(queue, session, options)
+  track = consumeRecommendationAdvance(queue, session, options)
+  if (track) {
+    return track
+  }
+
+  // Не оставляем AudioPlayer без miss → ложный permanent exhausted.
+  if (!peekRecommendationMiss()) {
+    noteRecommendationMiss(
+      'no-candidates',
+      'Пока нет подходящих композиций. Можно повторить подбор.',
+    )
+    noteContinuousDiag({
+      mode: getActiveRecommendationMode() ?? 'swipe',
+      phase: 'playback-miss',
+      reason: 'advance-empty-no-miss',
+      trackId: current.id,
+    })
+  }
+  return null
 }
 
 export function prepareRecommendationFollowUp(

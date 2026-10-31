@@ -281,9 +281,9 @@ async function refillCandidatePool(input: {
   let searchFailed = false
   let pages = 0
   const sourceIds = input.port.sources.map((item) => item.id)
-  const op = beginContinuousDiscoveryOperation()
 
   // Исчерпанные lanes прошлой попытки не должны блокировать Retry / новый fill.
+  // resetLanes — до begin op (и без bump generation), иначе op сразу stale.
   if (allDiscoveryLanesExhausted() && getContinuousPoolSize() === 0) {
     ensureContinuousDiscoverySession(input.request.mode, { resetLanes: true })
     setDiscoveryQueryOrder(buildDiscoveryQueries(input.request.current), {
@@ -292,9 +292,8 @@ async function refillCandidatePool(input: {
   } else {
     setDiscoveryQueryOrder(buildDiscoveryQueries(input.request.current))
   }
-  if (!isContinuousDiscoveryOperationCurrent(op)) {
-    return { searchFailed: false, pages: 0, hadPlayableInPool: false }
-  }
+
+  const op = beginContinuousDiscoveryOperation()
   ensureDiscoveryLanes(sourceIds)
 
   // Резерв библиотеки один раз, если pool пуст.
@@ -583,9 +582,9 @@ export async function collectContinuousPlayableBatch(
       !gate.signal.aborted &&
       isContinuousDiscoveryOperationCurrent(op)
     ) {
-      if (allDiscoveryLanesExhausted() && getContinuousPoolSize() === 0) {
-        break
-      }
+      // Не break до refill: exhausted lanes + пустой pool сбрасываются внутри
+      // refillCandidatePool (resetLanes). Иначе single-page feed навсегда
+      // блокирует Next после первого батча (PLAYBACK-FIX-01).
       const before = getContinuousPoolSize()
       await refillCandidatePool({
         request,
@@ -617,7 +616,7 @@ export async function collectContinuousPlayableBatch(
       }
       selected.push(...more)
       if (more.length === 0 && getContinuousPoolSize() === before) {
-        // Нет прогресса (exhausted / rate limit / timeout).
+        // Нет прогресса после refill (excluded-only / rate limit / timeout).
         break
       }
       // Достаточно для buffer — выходим, даже если gate ещё жив.

@@ -75,6 +75,7 @@ export {
   bindCmeSessionOwnership,
   clearCmeSessionOwnership,
   isCmeLiveMutationAllowed,
+  healCmeOwnershipIfStale,
   getCmeSessionOwnership,
   resetCmeSessionOwnershipForTests,
 } from './cmeSessionOwnership.ts'

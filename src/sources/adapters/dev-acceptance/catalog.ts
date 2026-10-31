@@ -74,12 +74,13 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     coverColor: '#365314',
   },
   // --- Персональные / вне выдачи «Сплин» ---
+  // Длительность ≥8s: UI успевает Next до ended (PLAYBACK-FIX-01).
   {
     externalId: 'kino-blood',
     title: 'Группа крови',
     artist: 'Кино',
     file: 'kino1.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#7c2d12',
   },
   {
@@ -87,7 +88,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Звезда по имени Солнце',
     artist: 'Кино',
     file: 'kino2.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#9a3412',
   },
   {
@@ -95,7 +96,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Искала',
     artist: 'Земфира',
     file: 'zem1.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#4c1d95',
   },
   {
@@ -103,7 +104,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Хочешь',
     artist: 'Земфира',
     file: 'zem2.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#5b21b6',
   },
   {
@@ -111,7 +112,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Полковнику никто не пишет',
     artist: 'Би-2',
     file: 'bi2-1.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#0e7490',
   },
   {
@@ -119,7 +120,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Серебро',
     artist: 'Би-2',
     file: 'bi2-2.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#155e75',
   },
   {
@@ -127,7 +128,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Владивосток 2000',
     artist: 'Мумий Тролль',
     file: 'mt1.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#166534',
   },
   {
@@ -135,7 +136,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Утекай',
     artist: 'Мумий Тролль',
     file: 'mt2.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#15803d',
   },
   {
@@ -143,7 +144,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Что такое осень',
     artist: 'ДДТ',
     file: 'ddt1.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#1e40af',
   },
   {
@@ -151,7 +152,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Дождь',
     artist: 'ДДТ',
     file: 'ddt2.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#1d4ed8',
   },
   {
@@ -159,7 +160,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Скованные одной цепью',
     artist: 'Наутилус Помпилиус',
     file: 'nau1.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#831843',
   },
   {
@@ -167,8 +168,48 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Other Hit',
     artist: 'Другой',
     file: 'other1.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#334155',
+  },
+  {
+    externalId: 'flow-01',
+    title: 'Flow One',
+    artist: 'Acceptance Band',
+    file: 'flow1.wav',
+    durationMs: 8_000,
+    coverColor: '#0f766e',
+  },
+  {
+    externalId: 'flow-02',
+    title: 'Flow Two',
+    artist: 'Acceptance Band',
+    file: 'flow2.wav',
+    durationMs: 8_000,
+    coverColor: '#115e59',
+  },
+  {
+    externalId: 'flow-03',
+    title: 'Flow Three',
+    artist: 'Acceptance Band',
+    file: 'flow3.wav',
+    durationMs: 8_000,
+    coverColor: '#134e4a',
+  },
+  {
+    externalId: 'flow-04',
+    title: 'Flow Four',
+    artist: 'Acceptance Band',
+    file: 'flow4.wav',
+    durationMs: 8_000,
+    coverColor: '#042f2e',
+  },
+  {
+    externalId: 'flow-05',
+    title: 'Flow Five',
+    artist: 'Acceptance Band',
+    file: 'flow5.wav',
+    durationMs: 8_000,
+    coverColor: '#164e63',
   },
 ]
 

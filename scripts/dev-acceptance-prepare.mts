@@ -97,25 +97,30 @@ function seedLiked(
 mkdirSync(dataDir, { recursive: true })
 mkdirSync(audioDir, { recursive: true })
 
-// seed/atl длиннее — жест и двойной Next успевают до ended; остальные короткие.
+// ≥8s: UI Next до ended (PLAYBACK-FIX-01 continuous SWIPES).
 const tones: Array<{ file: string; sec: number; hz: number }> = [
   { file: 'seed.wav', sec: 8.0, hz: 220 },
   { file: 'atl.wav', sec: 8.0, hz: 330 },
-  { file: 'rec1.wav', sec: 2.5, hz: 440 },
-  { file: 'rec2.wav', sec: 2.5, hz: 554 },
-  { file: 'rec3.wav', sec: 2.5, hz: 659 },
-  { file: 'kino1.wav', sec: 3.0, hz: 392 },
-  { file: 'kino2.wav', sec: 3.0, hz: 415 },
-  { file: 'zem1.wav', sec: 3.0, hz: 466 },
-  { file: 'zem2.wav', sec: 3.0, hz: 494 },
-  { file: 'bi2-1.wav', sec: 3.0, hz: 523 },
-  { file: 'bi2-2.wav', sec: 3.0, hz: 587 },
-  { file: 'mt1.wav', sec: 3.0, hz: 622 },
-  { file: 'mt2.wav', sec: 3.0, hz: 698 },
-  { file: 'ddt1.wav', sec: 3.0, hz: 740 },
-  { file: 'ddt2.wav', sec: 3.0, hz: 784 },
-  { file: 'nau1.wav', sec: 3.0, hz: 831 },
-  { file: 'other1.wav', sec: 3.0, hz: 880 },
+  { file: 'rec1.wav', sec: 8.0, hz: 440 },
+  { file: 'rec2.wav', sec: 8.0, hz: 554 },
+  { file: 'rec3.wav', sec: 8.0, hz: 659 },
+  { file: 'kino1.wav', sec: 8.0, hz: 392 },
+  { file: 'kino2.wav', sec: 8.0, hz: 415 },
+  { file: 'zem1.wav', sec: 8.0, hz: 466 },
+  { file: 'zem2.wav', sec: 8.0, hz: 494 },
+  { file: 'bi2-1.wav', sec: 8.0, hz: 523 },
+  { file: 'bi2-2.wav', sec: 8.0, hz: 587 },
+  { file: 'mt1.wav', sec: 8.0, hz: 622 },
+  { file: 'mt2.wav', sec: 8.0, hz: 698 },
+  { file: 'ddt1.wav', sec: 8.0, hz: 740 },
+  { file: 'ddt2.wav', sec: 8.0, hz: 784 },
+  { file: 'nau1.wav', sec: 8.0, hz: 831 },
+  { file: 'other1.wav', sec: 8.0, hz: 880 },
+  { file: 'flow1.wav', sec: 8.0, hz: 196 },
+  { file: 'flow2.wav', sec: 8.0, hz: 247 },
+  { file: 'flow3.wav', sec: 8.0, hz: 294 },
+  { file: 'flow4.wav', sec: 8.0, hz: 349 },
+  { file: 'flow5.wav', sec: 8.0, hz: 370 },
 ]
 for (const tone of tones) {
   writeToneWav(join(audioDir, tone.file), tone.sec, tone.hz)

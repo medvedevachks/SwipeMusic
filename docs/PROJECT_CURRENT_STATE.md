@@ -5,10 +5,10 @@
 
 | Поле | Значение |
 |---|---|
-| Дата снимка | 2026-10-31 (PLAYBACK-DEV-09) |
+| Дата снимка | 2026-10-31 (PLAYBACK-FIX-01) |
 | Канонический репозиторий | https://github.com/medvedevachks/SwipeMusic |
 | Ветка снимка | `feature/playback-session-store-v2` (поверх deploy-windows-01) |
-| Проверенный HEAD | DEV-09: BUG-01 fixed (`historyRanks`); suite 753; flag default OFF / PROD always false. Staging verdict: NOT READY (см. блокеры continuous UI). Deploy не выполнялся. |
+| Проверенный HEAD | FIX-01: SWIPES Next continuous; suite 756; flag default OFF / PROD always false. DEV UI: ≥10× Next PASS на `dev-acceptance`. Повторный DEV-09 ещё не закрыт. Deploy не выполнялся. |
 | Исторический upstream | https://github.com/r-sh-galimov/SwipeMusic |
 
 **Легенда источников фактов**
@@ -52,7 +52,7 @@ UI (pages / BottomPlayer)
 
 **Ограничение:** не создавать второй GlobalPlayer и не заводить конкурирующую очередь.
 
-**Playback sessions v2 + CME-01 + BUG-01 (ветка `feature/playback-session-store-v2`):** SessionStore + Coordinator; flag **default OFF** (PROD always false). Пять слотов; durable sync; CME ownership. Cold seed idle/epoch. Buffer **10/5**; SWIPES ~70/30; hidden excluded; ALBUM related = same-artist. **BUG-01 fixed:** historyRanks + occurrence rank for duplicate track IDs. DEV-09 UI: Wave/Search partial PASS on `dev-acceptance` WAV; SWIPES Next/continuous 10× — FAIL в локальном smoke (empty discovery). Production flag не включать.
+**Playback sessions v2 + CME-01 + BUG-01 + FIX-01 (ветка `feature/playback-session-store-v2`):** SessionStore + Coordinator; flag **default OFF** (PROD always false). Пять слотов; durable sync; CME ownership. Cold seed idle/epoch. Buffer **10/5**; SWIPES ~70/30; hidden excluded; ALBUM related = same-artist. **BUG-01 fixed:** historyRanks. **FIX-01:** (C/F) heal stale CME ownership + guard-before-take buffer + soft miss; (B) `resetLanes` без bump generation + collect не break до refill. DEV UI smoke: ≥10× SWIPES Next PASS (`dev-acceptance` WAV, flag ON locally). Production flag не включать. Повторный DEV-09 (audible/Android/Yandex/round-trip) — следующий шаг.
 
 ---
 
@@ -235,6 +235,7 @@ Last.fm и MusicBrainz для рекомендаций **не** подключа
 
 | Приоритет | Задача | Суть |
 |---|---|---|
+| **1** | PLAYBACK-DEV-09 (повтор) | После FIX-01: полный DEV acceptance (WAVE/SEARCH/SWIPES round-trip, audible, Android/Yandex). Flag default OFF. Без push/PR/deploy. |
 | **1** | Continuous Music Engine V1 — device acceptance | PR #3 unlimited stream (paginated discovery). После merge + frontend-only S1 hotfix: реальный Swipe/Wave 100× UP и Yandex audio. Merge/deploy не выполнять без задачи. |
 | **2** | UX-10 device acceptance | UX-10 уже в baseline `ed53b08`. Device smoke + deploy по отдельному разрешению. |
 | **2** | LIBRARY-UX / S1 deploy | Inbox + compact `/library` на ветке; production deploy только после PASS review. **S1 не трогать** без задачи. |

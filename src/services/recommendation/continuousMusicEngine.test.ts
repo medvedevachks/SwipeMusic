@@ -30,15 +30,19 @@ import {
   pickContinuousRandom,
 } from './continuousRandomV1.ts'
 import {
+  allDiscoveryLanesExhausted,
   clearContinuousDiscoveryRuntime,
   ensureContinuousDiscoverySession,
   getContinuousDiscoverySnapshot,
   getContinuousPagesFetched,
   getContinuousPoolSize,
   getContinuousRecentSize,
+  getDiscoveryLanes,
+  noteContinuousRecent,
   peekCandidatePoolIds,
   pushCandidatesToPool,
   resetContinuousDiscoveryForTests,
+  takeFromCandidatePool,
 } from './continuousSession.ts'
 import {
   clearRecommendationMiss,
@@ -415,6 +419,58 @@ test('soft miss is retryable and not permanent exhausted', () => {
   const miss = noteRecommendationMiss('timeout', 'Подбор превысил время. Можно повторить.')
   assert.equal(miss.soft, true)
   assert.equal(takeRecommendationMiss()?.soft, true)
+})
+
+test('FIX-01: after single-page feed exhaustion refill still finds more tracks', async () => {
+  resetAll()
+  const pool = catalog(20, 'fix01')
+  const port = paginatedPort(pool, { pageSize: 20 })
+  const first = await collectContinuousPlayableBatch(
+    {
+      mode: 'swipe',
+      current: null,
+      taste: emptyTaste(),
+      excluded: [],
+      library: [],
+      port,
+    },
+    8,
+  )
+  assert.ok(first.length >= 5, `first batch too small: ${first.length}`)
+  for (const item of first) {
+    noteContinuousRecent(item)
+  }
+  takeFromCandidatePool(100, new Set())
+  assert.equal(getContinuousPoolSize(), 0)
+  // Симулируем конец single-page discovery: все lane exhausted, pool пуст.
+  for (const lane of getDiscoveryLanes()) {
+    lane.exhausted = true
+  }
+  assert.equal(allDiscoveryLanesExhausted(), true)
+
+  const second = await collectContinuousPlayableBatch(
+    {
+      mode: 'swipe',
+      current: first[0]!,
+      taste: emptyTaste(),
+      excluded: first.map((item) => ({
+        id: item.id,
+        title: item.title,
+        artist: item.artist,
+        sourceId: item.sourceId,
+        externalId: item.externalId,
+      })),
+      library: [],
+      port,
+    },
+    8,
+  )
+  assert.ok(
+    second.length >= 3,
+    `expected refill after lane reset, got ${second.length}`,
+  )
+  const overlap = second.filter((item) => first.some((f) => f.id === item.id))
+  assert.equal(overlap.length, 0)
 })
 
 test('buffer ready while hung search still advances immediately', async () => {

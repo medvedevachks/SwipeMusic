@@ -133,7 +133,8 @@ export function ensureContinuousDiscoverySession(
     return
   }
   mode = nextMode
-  if (modeChanged || options?.resetLanes) {
+  if (modeChanged) {
+    // Mode switch: отменить inflight discovery предыдущего режима.
     bumpDiscoveryGeneration()
     lanes = []
     queryOrder = []
@@ -142,7 +143,22 @@ export function ensureContinuousDiscoverySession(
     noteContinuousDiag({
       mode: nextMode,
       phase: 'discovery-start',
-      reason: modeChanged ? 'mode-switch' : 'reset-lanes',
+      reason: 'mode-switch',
+    })
+    return
+  }
+  if (options?.resetLanes) {
+    // Исчерпанные lane + retry refill: НЕ bump generation — иначе
+    // collectContinuousPlayableBatch / refill отменяют свой же op и Next
+    // получает вечный soft-miss после single-page feed (PLAYBACK-FIX-01).
+    lanes = []
+    queryOrder = []
+    queryIndex = 0
+    clearCandidatePool()
+    noteContinuousDiag({
+      mode: nextMode,
+      phase: 'discovery-start',
+      reason: 'reset-lanes',
     })
   }
 }
