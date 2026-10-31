@@ -20,7 +20,10 @@ export default function WaveStartCard({
 
   return (
     <div className="swipe-deck" data-testid="wave-start-card">
-      {/* Та же центральная ячейка stage, что у SwipeDeck — иначе grid сжимает карточку в боковую колонку. */}
+      {/*
+        Та же 3-колоночная сетка и grid-area: stage, что у SwipeDeck после Play.
+        Без swipe-stage-slot / grid-area браузер кладёт карточку в колонку 2.75rem.
+      */}
       <div className="swipe-stage-slot">
         <div className="swipe-stage">
           <article className="absolute inset-0">

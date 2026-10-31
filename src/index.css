@@ -621,14 +621,18 @@ body {
   width: 100%;
 }
 
-.swipe-stage-slot {
+.swipe-stage-slot,
+/* Защита: голый .swipe-stage прямым ребёнком .swipe-deck тоже занимает центр. */
+.swipe-deck > .swipe-stage {
   grid-area: stage;
   position: relative;
   min-width: 0;
+  width: 100%;
 }
 
 .swipe-stage {
   position: relative;
+  width: 100%;
   height: clamp(268px, 44svh, 420px);
   overflow: hidden;
   touch-action: none;
