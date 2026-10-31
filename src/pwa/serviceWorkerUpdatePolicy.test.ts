@@ -69,9 +69,11 @@ test('vite workbox enables skipWaiting and clientsClaim despite injectRegister f
   assert.match(vite, /skipWaiting:\s*true/)
   assert.match(vite, /clientsClaim:\s*true/)
   assert.match(vite, /cleanupOutdatedCaches:\s*true/)
-  assert.match(vite, /handler:\s*'NetworkFirst'/)
-  assert.match(vite, /request\.mode\s*===\s*'navigate'/)
-  assert.match(vite, /navigateFallback:\s*''/)
+  assert.match(vite, /navigateFallback:\s*'index\.html'/)
+  assert.match(vite, /navigateFallbackDenylist/)
+  assert.match(vite, /\/\^\\\/api\\\//)
+  // API routes remain NetworkOnly — не кешируются как HTML shell.
+  assert.match(vite, /handler:\s*'NetworkOnly'/)
 })
 
 test('main registers app SW with music-aware reload policy', () => {

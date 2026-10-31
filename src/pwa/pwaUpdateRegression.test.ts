@@ -22,11 +22,13 @@ test('generated SW skips waiting and claims clients when dist is present', () =>
   assert.match(sw, /skipWaiting/)
   assert.match(sw, /clientsClaim/)
   assert.match(sw, /cleanupOutdatedCaches/)
-  // NetworkFirst navigation runtime route present; BoundToURL shell disabled
-  assert.match(sw, /html-navigations/)
-  assert.match(sw, /NetworkFirst/)
-  assert.equal(sw.includes('createHandlerBoundToURL'), false)
-  assert.equal(sw.includes('NavigationRoute'), false)
+  // SPA offline shell preserved; API denylist kept
+  assert.match(sw, /createHandlerBoundToURL/)
+  assert.match(sw, /NavigationRoute/)
+  assert.match(sw, /\/\^\\\/api\\\//)
+  assert.match(sw, /NetworkOnly/)
+  // Must not treat /api as HTML navigation fallback target in denylist absence
+  assert.equal(/navigateFallbackDenylist:\s*\[\s*\]/.test(sw), false)
 })
 
 test('rollback path: previous hashed assets remain addressable by old index revision', () => {

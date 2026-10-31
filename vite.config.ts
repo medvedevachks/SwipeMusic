@@ -89,25 +89,13 @@ export default defineConfig(({ mode }) => ({
         cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         /*
-         * Пустое значение отключает createHandlerBoundToURL(index.html).
-         * Иначе NavigationRoute всегда перехватывает navigate раньше NetworkFirst
-         * и обычный Reload продолжает получать stale precache shell.
+         * Сохраняем SPA offline shell (как до hotfix). Stale Reload чинится
+         * skipWaiting+clientsClaim: после activate precache уже новый.
+         * NetworkFirst для navigate не ставим — NavigationRoute его перекрывал бы.
          */
-        navigateFallback: '',
+        navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
-          {
-            /*
-             * Навигации: сеть первой (online Reload / новая вкладка),
-             * cache — запас для offline.
-             */
-            urlPattern: ({ request }: { request: Request }) =>
-              request.mode === 'navigate',
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'html-navigations',
-              networkTimeoutSeconds: 3,
-            },
-          },
           {
             urlPattern: ({ url }: { url: URL }) =>
               url.pathname.startsWith('/api/auth/') ||
