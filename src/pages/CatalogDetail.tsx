@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { getCategoryGlyph } from '../config/categoryPresets'
 import { PlayIcon } from '../components/icons'
 import { removeCanonicalFromCatalog } from '../services/canonical/userOrganization'
@@ -20,6 +20,8 @@ import {
   cancelCatalogPlaybackGate,
   playUserCatalog,
 } from '../services/catalogPlayback'
+import { shouldOpenFullscreenAfterCatalogPlay } from '../navigation/catalogFullscreen'
+import { openFullscreenPlayer } from '../navigation/fullscreenPlayer'
 import { useCanonicalLibraryStore } from '../store/canonicalLibraryStore'
 import { useCollectionStore } from '../store/collectionStore'
 import { getSourceDisplayName } from '../utils/sourceDisplay'
@@ -27,6 +29,7 @@ import { getSourceDisplayName } from '../utils/sourceDisplay'
 export default function CatalogDetail() {
   const params = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   const catalogId = params.catalogId ?? ''
   const categories = useCollectionStore((state) => state.categories)
   const itemsById = useCanonicalLibraryStore((state) => state.itemsById)
@@ -45,10 +48,13 @@ export default function CatalogDetail() {
   const [playError, setPlayError] = useState<string | null>(null)
   const [playHint, setPlayHint] = useState<string | null>(null)
   const playGeneration = useRef(0)
+  /** Синхронный gate: React busyKey ещё не успевает при быстрых повторных Play. */
+  const playBusyRef = useRef(false)
 
   useEffect(() => {
     return () => {
       playGeneration.current += 1
+      playBusyRef.current = false
       cancelCatalogPlaybackGate()
     }
   }, [catalogId])
@@ -93,10 +99,11 @@ export default function CatalogDetail() {
   }
 
   const runPlay = async (startCanonicalTrackId?: string) => {
-    if (busyKey) {
+    if (busyKey || playBusyRef.current) {
       setPlayError(CATALOG_PLAYBACK_MESSAGE.BUSY)
       return
     }
+    playBusyRef.current = true
     const generation = ++playGeneration.current
     const key = startCanonicalTrackId ?? 'catalog'
     setBusyKey(key)
@@ -111,14 +118,21 @@ export default function CatalogDetail() {
       if (generation !== playGeneration.current) {
         return
       }
-      if (result.status === 'played') {
+      if (
+        result.status === 'played' &&
+        shouldOpenFullscreenAfterCatalogPlay(result)
+      ) {
         setPlayError(null)
         if (result.needsUserPlayGesture) {
           setPlayHint(CATALOG_PLAYBACK_MESSAGE.NEEDS_USER_PLAY)
         }
+        // После успешного CATALOG intent — overlay на текущем маршруте каталога.
+        openFullscreenPlayer(navigate, location)
         return
       }
-      setPlayError(result.message)
+      if (result.status !== 'played') {
+        setPlayError(result.message)
+      }
     } catch {
       if (generation === playGeneration.current) {
         setPlayError(CATALOG_PLAYBACK_MESSAGE.FAILED)
@@ -126,6 +140,7 @@ export default function CatalogDetail() {
     } finally {
       if (generation === playGeneration.current) {
         setBusyKey(null)
+        playBusyRef.current = false
       }
     }
   }

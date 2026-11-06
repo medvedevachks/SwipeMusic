@@ -1229,6 +1229,67 @@ body {
   margin-bottom: 0.35rem;
 }
 
+/* NAV-CATALOG-01: очередь CATALOG внутри FullscreenPlayer (тот же queue store). */
+.fullscreen-player-catalog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-height: min(28vh, 14rem);
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.15rem;
+  border-radius: 0.85rem;
+  border: 1px solid var(--color-border);
+  background: color-mix(in oklab, var(--color-surface) 88%, transparent);
+}
+
+.fullscreen-player-catalog-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 2.75rem;
+  width: 100%;
+  padding: 0.35rem 0.55rem;
+  border: 0;
+  border-radius: 0.65rem;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+.fullscreen-player-catalog-row:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+}
+
+.fullscreen-player-catalog-row.is-current {
+  background: color-mix(in oklab, var(--color-accent) 16%, transparent);
+}
+
+.fullscreen-player-catalog-row:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.fullscreen-player-catalog-row-index {
+  flex: 0 0 1.25rem;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-muted);
+  text-align: right;
+}
+
+.fullscreen-player-catalog-row.is-current .fullscreen-player-catalog-row-index {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.fullscreen-player-catalog-row-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 @media (max-height: 700px) {
   .fullscreen-player-frame {
     gap: 0.55rem;
@@ -1240,6 +1301,10 @@ body {
 
   .fullscreen-player-meta h2 {
     font-size: 1.25rem;
+  }
+
+  .fullscreen-player-catalog-list {
+    max-height: min(22vh, 9rem);
   }
 }
 
@@ -1255,12 +1320,14 @@ body {
     min-height: 0;
     display: grid;
     grid-template-columns: minmax(9rem, 0.85fr) minmax(0, 1.25fr);
+    grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
     grid-template-areas:
       'top top'
       'art meta'
       'art progress'
       'art transport'
-      'art actions';
+      'art actions'
+      'list list';
     gap: 0.45rem 0.85rem;
     align-items: center;
   }
@@ -1300,5 +1367,12 @@ body {
     grid-area: actions;
     justify-content: flex-start;
     margin-bottom: 0;
+  }
+
+  .fullscreen-player-catalog-list {
+    grid-area: list;
+    align-self: stretch;
+    max-height: none;
+    min-height: 0;
   }
 }

@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useFullscreenPlayer } from '../../hooks/useFullscreenPlayer'
+import {
+  isUserCatalogPlayback,
+  resolveCatalogPlaybackTitle,
+} from '../../navigation/catalogFullscreen'
 import { resolvePlayerSessionLabel } from '../../navigation/fullscreenPlayer'
 import {
   canFullscreenLike,
@@ -14,6 +18,7 @@ import { commitCatalogChoice } from '../../services/canonical/userOrganization'
 import { createCategoryConfirmed } from '../../services/catalogs/createCategoryConfirmed'
 import { beginSearchFlowCommand } from '../../services/continuation/searchFlowDiag'
 import { SAVE_FAILED_MESSAGE } from '../../services/libraryPersistence/statusStore'
+import { getPlaybackIntent } from '../../services/playbackIntent'
 import { openManualSourceAlternatives } from '../../services/runtimeFallback/fallbackUxRuntime'
 import { isSessionSwitchIntegrationEnabled } from '../../services/sessionSwitch/featureFlag'
 import { getSessionSwitchAppRuntime } from '../../services/sessionSwitch/integration/sessionSwitchAppRuntime'
@@ -68,7 +73,9 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
   const repeatMode = useGlobalPlayerStore((s) => s.repeatMode)
   const shuffleMode = useGlobalPlayerStore((s) => s.shuffleMode)
   const error = useGlobalPlayerStore((s) => s.error)
-  const queueLength = useGlobalPlayerStore((s) => s.queue.length)
+  const queue = useGlobalPlayerStore((s) => s.queue)
+  const queueLength = queue.length
+  const queueIndex = useGlobalPlayerStore((s) => s.queueIndex)
   const playbackContext = useGlobalPlayerStore((s) => s.playbackContext)
   const ownsPlayerError = usePlaybackFallbackUxStore((s) => s.model.ownsPlayerError)
 
@@ -138,6 +145,14 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
     context: playbackContext,
     activeSessionId,
   })
+  const showCatalogQueue = isUserCatalogPlayback({
+    context: playbackContext,
+    activeSessionId,
+  })
+  const catalogTitle = showCatalogQueue
+    ? resolveCatalogPlaybackTitle(playbackContext)
+    : null
+  const activeQueueTrackId = (pendingTrack ?? currentTrack)?.id ?? null
 
   const sourceLabel = displayTrack ? getSourceDisplayName(displayTrack.sourceId) : null
   const coverStyle = displayTrack?.coverUrl
@@ -252,6 +267,14 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
             >
               {sessionLabel}
             </p>
+            {catalogTitle ? (
+              <p
+                className="truncate text-xs text-[var(--color-muted)]"
+                data-testid="fullscreen-player-catalog-title"
+              >
+                {catalogTitle}
+              </p>
+            ) : null}
           </div>
           <div className="relative">
             <button
@@ -486,6 +509,56 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
             <QueueListIcon className="h-5 w-5" />
           </button>
         </div>
+
+        {showCatalogQueue && queueLength > 0 ? (
+          <div
+            className="fullscreen-player-catalog-list"
+            data-testid="fullscreen-player-catalog-list"
+            role="list"
+            aria-label={catalogTitle ? `Композиции: ${catalogTitle}` : 'Композиции каталога'}
+          >
+            {queue.map((track, index) => {
+              const isCurrent =
+                track.id === activeQueueTrackId ||
+                (activeQueueTrackId == null && index === queueIndex)
+              return (
+                <button
+                  key={track.id}
+                  type="button"
+                  role="listitem"
+                  className={[
+                    'fullscreen-player-catalog-row',
+                    isCurrent ? 'is-current' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                  aria-current={isCurrent ? 'true' : undefined}
+                  data-testid={`fullscreen-player-catalog-track-${track.id}`}
+                  disabled={!canControl && !isCurrent}
+                  onClick={() => {
+                    if (isCurrent && playing) {
+                      return
+                    }
+                    clearCatalogSheet()
+                    void getPlaybackIntent().playFromQueue({ track })
+                  }}
+                >
+                  <span className="fullscreen-player-catalog-row-index" aria-hidden>
+                    {index + 1}
+                  </span>
+                  <span className="fullscreen-player-catalog-row-meta min-w-0">
+                    <span className="block truncate text-sm font-medium text-[var(--color-fg)]">
+                      {track.title}
+                    </span>
+                    <span className="block truncate text-xs text-[var(--color-muted)]">
+                      {track.artist}
+                    </span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        ) : null}
 
         {error && !ownsPlayerError ? (
           <p className="px-1 text-center text-sm text-rose-500" role="alert">
