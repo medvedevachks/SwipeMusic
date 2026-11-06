@@ -30,8 +30,9 @@ export default function Search() {
   const [draft, setDraft] = useState(query)
 
   /**
-   * Play из строки поиска: только SEARCH-сессия.
-   * Не уходим на /, не трогаем колоду SWIPES / applySearchDeck.
+   * Play из строки поиска → SEARCH seed-сессия + UI колоды на /.
+   * Не трогает SWIPES SessionStore; не dump'ит hits в PlaybackQueue / applySearchDeck.
+   * NAV-SEARCH-01: экран «Свайпы» показывает карточки активной SEARCH session.
    */
   const playSearchResult = (tracks: Track[], selectedTrackId?: string, q?: string) => {
     const playbackTracks = selectSearchPlaybackTracks({
@@ -52,16 +53,20 @@ export default function Search() {
     if (!track) {
       return
     }
-    // Всегда SEARCH-сессия через playSearchTrack (не legacy swipe-queue dump).
-    void getPlaybackIntent()
-      .playSearchTrack({
-        track,
-        query: plan.mode === 'single-track' ? plan.query : (q ?? query),
-        searchHits: playbackTracks,
-      })
-      .catch(() => {
-        // resolve / autoplay — BottomPlayer
-      })
+    const seedQuery = plan.mode === 'single-track' ? plan.query : (q ?? query)
+    void (async () => {
+      try {
+        await getPlaybackIntent().playSearchTrack({
+          track,
+          query: seedQuery,
+          searchHits: playbackTracks,
+        })
+      } catch {
+        // resolve / autoplay — BottomPlayer; seed уже в SEARCH-слоте при SessionSwitch.
+      }
+      // После commit SEARCH: Home читает playback deck (search-seed), не SWIPES browse.
+      navigate('/')
+    })()
   }
 
   /**

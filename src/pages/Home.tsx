@@ -466,9 +466,11 @@ export default function Home({ stage = 'sorting' }: HomeProps) {
             ? waveView === 'deck'
               ? 'Карточка показывает очередь волны. Свайпы лайкают её, открывают каталог и переключают треки.'
               : 'Play на карточке собирает волну из избранного.'
-            : mode === 'search' && searchQuery
-              ? `Результаты: «${searchQuery}»`
-              : 'Свайп оценивает трек. Play на карточке включает именно его.'}
+            : playbackContext.type === 'search-seed' && playbackContext.query
+              ? `От поиска «${playbackContext.query}» — лайк / каталог / дальше по рекомендациям`
+              : mode === 'search' && searchQuery
+                ? `Результаты: «${searchQuery}»`
+                : 'Свайп оценивает трек. Play на карточке включает именно его.'}
         </p>
         {stage === 'sorting' &&
         playerTrackId &&
