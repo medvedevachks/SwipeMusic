@@ -121,7 +121,7 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
         }
         if (result.status === 'played') {
           setPlayError(null)
-          navigate('/', { state: { focusHomeTab: 'sorting' } })
+          navigate('/')
           return
         }
         setPlayError(result.message)

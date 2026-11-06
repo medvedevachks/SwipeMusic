@@ -19,6 +19,7 @@ import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import Search from './pages/Search'
 import Sources from './pages/Sources'
+import Wave from './pages/Wave'
 
 function App() {
   return (
@@ -33,7 +34,8 @@ function App() {
         </Route>
         <Route element={<RequireAuth />}>
           <Route element={<MainLayout />}>
-            <Route index element={<Home />} />
+            <Route index element={<Home stage="sorting" />} />
+            <Route path="wave" element={<Wave />} />
             <Route path="search" element={<Search />} />
             <Route path="library" element={<Library />} />
             <Route path="library/browse" element={<LibraryBrowse />} />

@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { ProfileIcon } from './icons'
 import { ThemeSwitchControl } from './ThemeSwitch'
 
 export default function AppHeader() {
@@ -13,23 +14,12 @@ export default function AppHeader() {
         <div className="flex shrink-0 items-center gap-2">
           <ThemeSwitchControl />
           <Link
-            to="/search"
+            to="/profile"
             className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-fg)] transition-colors hover:bg-[var(--color-surface-hover)]"
-            aria-label="Поиск"
+            aria-label="Профиль"
+            data-testid="header-profile-link"
           >
-            <svg
-              viewBox="0 0 24 24"
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <circle cx="11" cy="11" r="7" />
-              <path d="m20 20-3.5-3.5" />
-            </svg>
+            <ProfileIcon className="h-5 w-5" />
           </Link>
         </div>
       </div>

@@ -52,12 +52,13 @@ test('swipes folder still surfaces create/assign failure and partial unassign re
   assert.match(source, /SAVE_FAILED_MESSAGE/)
 })
 
-test('swipes Play starts Home sorting; mobile touch targets stay large', () => {
+test('swipes Play starts Swipes route; mobile touch targets stay large', () => {
   const source = readFileSync(folderPath, 'utf8')
   assert.match(source, /startSwipeInboxSorting/)
-  assert.match(source, /navigate\('\/', \{ state: \{ focusHomeTab: 'sorting' \} \}/)
+  assert.match(source, /navigate\('\/'\)/)
+  assert.equal(source.includes('focusHomeTab'), false)
   assert.match(source, /min-h-11/)
   assert.match(source, /h-11 w-11/)
   const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8')
-  assert.match(css, /\.home-mode-tabs\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s)
+  assert.match(css, /\.app-nav ul\s*\{[^}]*height:\s*3\.5rem/s)
 })

@@ -23,6 +23,29 @@ export function HomeIcon(props: IconProps) {
   )
 }
 
+/** Карточка свайпа — вкладка «Свайпы». */
+export function SwipesIcon(props: IconProps) {
+  return (
+    <svg {...iconProps(props)}>
+      <rect x="5" y="4" width="11" height="16" rx="2.5" />
+      <path d="M17.5 7.5 20 12l-2.5 4.5" />
+    </svg>
+  )
+}
+
+/** Радиоволны — вкладка «Моя волна». */
+export function WaveIcon(props: IconProps) {
+  return (
+    <svg {...iconProps(props)}>
+      <path d="M12 6v12" />
+      <path d="M8 9v6" />
+      <path d="M16 9v6" />
+      <path d="M4.5 11v2" />
+      <path d="M19.5 11v2" />
+    </svg>
+  )
+}
+
 export function SearchIcon(props: IconProps) {
   return (
     <svg {...iconProps(props)}>

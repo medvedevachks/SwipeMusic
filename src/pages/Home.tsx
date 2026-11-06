@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
 import { AlbumModeBanner } from '../components/AlbumModeBanner'
-import { HomeCatalogsPanel } from '../components/catalog/HomeCatalogsPanel'
 import CategoryPickerSheet from '../components/CategoryPickerSheet'
 import SwipeDeck from '../components/SwipeDeck'
 import WaveStartCard from '../components/WaveStartCard'
@@ -52,27 +50,12 @@ import { isDemoSourceId } from '../sources/demoSource'
 import { isQueueLockedContext } from '../types/playbackContext'
 import type { Track } from '../types/track'
 
-/** Вкладки главной. Не расширяет HomeStage (sorting/wave) для карточек. */
-type HomeTab = 'sorting' | 'wave' | 'catalogs'
-
-function initialHomeTab(): HomeTab {
-  const context = usePlayerStore.getState().playbackContext
-  if (context.type === 'radio') {
-    return 'wave'
-  }
-  // Разбор inbox — вкладка «Свайпы», не «Каталоги».
-  if (context.type === 'playlist' && context.id === SYS_SWIPES_ID) {
-    return 'sorting'
-  }
-  if (context.type === 'playlist') {
-    return 'catalogs'
-  }
-  return 'sorting'
+type HomeProps = {
+  /** Экран маршрута: / → sorting, /wave → wave. Не берётся из playback session. */
+  stage?: HomeStage
 }
 
-export default function Home() {
-  const location = useLocation()
-  const navigate = useNavigate()
+export default function Home({ stage = 'sorting' }: HomeProps) {
   const { tracks, isLoading, error, mode, searchQuery } = useSwipeFeed()
   const resetToCatalog = useSwipeDeckSessionStore((state) => state.resetToCatalog)
   const gestureConfig = useCollectionStore((state) => state.gestureConfig)
@@ -104,23 +87,12 @@ export default function Home() {
     pendingPlaybackTrack?.id ??
     (playerLoading && !playing ? (currentTrack?.id ?? null) : null)
 
-  const [homeTab, setHomeTab] = useState<HomeTab>(initialHomeTab)
-  /** HomeStage только для sorting/wave-карточек; вкладка catalogs их не использует. */
-  const stage: HomeStage = homeTab === 'catalogs' ? 'sorting' : homeTab
   const [wavePending, setWavePending] = useState(false)
   const [waveNotice, setWaveNotice] = useState<string | null>(null)
   const [pendingTrack, setPendingTrack] = useState<Track | null>(null)
   const [categorizeNotice, setCategorizeNotice] = useState<string | null>(null)
   const [categorizeBusy, setCategorizeBusy] = useState(false)
 
-  // Play из /library/swipes → сразу вкладка «Свайпы».
-  useEffect(() => {
-    const state = location.state as { focusHomeTab?: HomeTab } | null
-    if (state?.focusHomeTab === 'sorting' || state?.focusHomeTab === 'wave' || state?.focusHomeTab === 'catalogs') {
-      setHomeTab(state.focusHomeTab)
-      navigate('.', { replace: true, state: null })
-    }
-  }, [location.state, navigate])
   const likedCount = useCanonicalLibraryStore((state) =>
     Object.values(state.itemsById).filter(
       (item) =>
@@ -244,8 +216,9 @@ export default function Home() {
   }, [playbackContext, radioActive, sessionMode])
 
   // Холодный старт «Свайпы»: одна рекомендация в очередь без autoplay.
+  // Только экран / — открытие /wave не сидит и не переключает сессию.
   useEffect(() => {
-    if (mode === 'search') {
+    if (stage !== 'sorting' || mode === 'search') {
       return
     }
     let cancelled = false
@@ -277,7 +250,7 @@ export default function Home() {
     return () => {
       cancelled = true
     }
-  }, [mode, tracks])
+  }, [stage, mode, tracks])
 
   const playListedTrack = useCallback(
     (track: Track, _list: readonly Track[], nextStage: HomeStage, intent: 'toggle' | 'advance' = 'toggle') => {
@@ -462,11 +435,8 @@ export default function Home() {
 
   const retryContinuousPick = () => {
     clearRecommendationExhausted()
-    const mode =
-      homeTab === 'wave' ? 'wave' : homeTab === 'sorting' ? 'swipe' : null
-    if (mode === 'swipe' || mode === 'wave') {
-      ensureContinuousDiscoverySession(mode, { resetLanes: true })
-    }
+    const discoveryMode = stage === 'wave' ? 'wave' : 'swipe'
+    ensureContinuousDiscoverySession(discoveryMode, { resetLanes: true })
     void getAudioPlayer().next()
   }
 
@@ -488,67 +458,19 @@ export default function Home() {
         </div>
       ) : null}
       <div className="space-y-2 px-1">
-        <div
-          className="home-mode-tabs"
-          role="tablist"
-          aria-label="Режим главной"
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={homeTab === 'sorting'}
-            className={[
-              'home-mode-tab',
-              homeTab === 'sorting' ? 'home-mode-tab-active' : 'home-mode-tab-idle',
-            ].join(' ')}
-            onClick={() => {
-              // Только UI: без смены очереди, stop и без запуска рекомендаций.
-              setHomeTab('sorting')
-            }}
-          >
-            Свайпы
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={homeTab === 'wave'}
-            className={[
-              'home-mode-tab',
-              homeTab === 'wave' ? 'home-mode-tab-active' : 'home-mode-tab-idle',
-            ].join(' ')}
-            onClick={() => {
-              setHomeTab('wave')
-            }}
-          >
-            Моя волна
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={homeTab === 'catalogs'}
-            className={[
-              'home-mode-tab',
-              homeTab === 'catalogs' ? 'home-mode-tab-active' : 'home-mode-tab-idle',
-            ].join(' ')}
-            onClick={() => {
-              setHomeTab('catalogs')
-            }}
-          >
-            Каталоги
-          </button>
-        </div>
-        <p className="text-center text-sm text-[var(--color-muted)] sm:text-left">
-          {homeTab === 'catalogs'
-            ? 'Выберите каталог — доступные композиции играют по кругу. «Открыть» ведёт к редактированию.'
-            : homeTab === 'wave'
-              ? waveView === 'deck'
-                ? 'Карточка показывает очередь волны. Свайпы лайкают её, открывают каталог и переключают треки.'
-                : 'Play на карточке собирает волну из избранного.'
-              : mode === 'search' && searchQuery
-                ? `Результаты: «${searchQuery}»`
-                : 'Свайп оценивает трек. Play на карточке включает именно его.'}
+        <h1 className="font-display text-2xl font-semibold tracking-tight text-[var(--color-fg)]">
+          {stage === 'wave' ? 'Моя волна' : 'Свайпы'}
+        </h1>
+        <p className="text-sm text-[var(--color-muted)]">
+          {stage === 'wave'
+            ? waveView === 'deck'
+              ? 'Карточка показывает очередь волны. Свайпы лайкают её, открывают каталог и переключают треки.'
+              : 'Play на карточке собирает волну из избранного.'
+            : mode === 'search' && searchQuery
+              ? `Результаты: «${searchQuery}»`
+              : 'Свайп оценивает трек. Play на карточке включает именно его.'}
         </p>
-        {homeTab === 'sorting' &&
+        {stage === 'sorting' &&
         playerTrackId &&
         playbackContext.type !== 'swipe' &&
         playbackContext.type !== 'none' &&
@@ -557,7 +479,7 @@ export default function Home() {
           playbackContext.type === 'playlist' &&
           playbackContext.id === SYS_SWIPES_ID
         ) ? (
-          <p className="text-center text-xs text-[var(--color-muted)] sm:text-left">
+          <p className="text-xs text-[var(--color-muted)]">
             {radioActive
               ? 'В плеере всё ещё играет «Моя волна». Play на карточке переключит очередь на свайпы.'
               : playbackContext.type === 'playlist'
@@ -565,10 +487,10 @@ export default function Home() {
                 : 'В плеере другая композиция. Play на карточке включит именно её.'}
           </p>
         ) : null}
-        {homeTab === 'sorting' && mode === 'search' ? (
+        {stage === 'sorting' && mode === 'search' ? (
           <button
             type="button"
-            className="rounded-xl border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-fg)]"
+            className="min-h-11 rounded-xl border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-fg)]"
             onClick={() => resetToCatalog()}
           >
             Сбросить поиск
@@ -584,96 +506,98 @@ export default function Home() {
         />
       ) : null}
 
-      <div className="home-deck-pane" hidden={homeTab !== 'sorting'}>
-        {isLoading ? (
-          <p className="py-20 text-center text-sm text-[var(--color-muted)]">
-            Загрузка коллекции…
-          </p>
-        ) : error ? (
-          <p className="py-20 text-center text-sm text-rose-600">{error}</p>
-        ) : sortingDeck.emptyReason === 'playback-empty' ? (
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-8 text-center">
-            <p className="text-sm text-[var(--color-fg)]">
-              Нет доступных рекомендаций для продолжения.
+      {stage === 'sorting' ? (
+        <div className="home-deck-pane">
+          {isLoading ? (
+            <p className="py-20 text-center text-sm text-[var(--color-muted)]">
+              Загрузка коллекции…
             </p>
-            <p className="mt-1 text-sm text-[var(--color-muted)]">
-              Выберите другой трек в поиске или подключите источник.
-            </p>
-          </div>
-        ) : sortingDeck.emptyReason === 'playback-exhausted' ? (
-          <div className="space-y-3">
-            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-center sm:text-left">
-              <p className="text-sm text-[var(--color-fg)]">Рекомендации закончились.</p>
-              <p className="mt-1 text-xs text-[var(--color-muted)]">
-                Next не подставляет результаты поиска. Выберите другой трек или сбросьте поиск.
+          ) : error ? (
+            <p className="py-20 text-center text-sm text-rose-600">{error}</p>
+          ) : sortingDeck.emptyReason === 'playback-empty' ? (
+            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-8 text-center">
+              <p className="text-sm text-[var(--color-fg)]">
+                Нет доступных рекомендаций для продолжения.
+              </p>
+              <p className="mt-1 text-sm text-[var(--color-muted)]">
+                Выберите другой трек в поиске или подключите источник.
               </p>
             </div>
+          ) : sortingDeck.emptyReason === 'playback-exhausted' ? (
+            <div className="space-y-3">
+              <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-center sm:text-left">
+                <p className="text-sm text-[var(--color-fg)]">Рекомендации закончились.</p>
+                <p className="mt-1 text-xs text-[var(--color-muted)]">
+                  Next не подставляет результаты поиска. Выберите другой трек или сбросьте поиск.
+                </p>
+              </div>
+              <SwipeDeck
+                key={`${deckKey}:exhausted`}
+                tracks={sortingTracks}
+                gestureConfig={gestureConfig}
+                categoryResolveKey={categoryResolveKey}
+                categoryCancelKey={categoryCancelKey}
+                playerTrackId={playerTrackId}
+                playerIsPlaying={false}
+                syncWithPlayer={sortingDeck.syncWithPlayer}
+                advanceAtEnd={false}
+                playback={playback}
+                audibleTrackId={null}
+                startingTrackId={null}
+                nowPlaying={currentTrack}
+                playbackContextType={playbackContext.type}
+                onTogglePlay={playSortingTrack}
+                onDeckNavigate={() => {
+                  /* exhausted: Next/жест вперёд игнорируются */
+                }}
+                onCategorize={setPendingTrack}
+              />
+            </div>
+          ) : sortingTracks.length === 0 ? (
+            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-8 text-center">
+              <p className="text-sm text-[var(--color-fg)]">
+                {mode === 'search'
+                  ? 'Ничего не найдено.'
+                  : 'Нет музыки из подключённых источников.'}
+              </p>
+              <p className="mt-1 text-sm text-[var(--color-muted)]">
+                {mode === 'search'
+                  ? 'Измените запрос или сбросьте поиск.'
+                  : 'Демо-библиотека не попадает в ленту. Подключите свой источник.'}
+              </p>
+            </div>
+          ) : (
             <SwipeDeck
-              key={`${deckKey}:exhausted`}
+              key={deckKey}
               tracks={sortingTracks}
               gestureConfig={gestureConfig}
               categoryResolveKey={categoryResolveKey}
               categoryCancelKey={categoryCancelKey}
               playerTrackId={playerTrackId}
-              playerIsPlaying={false}
+              playerIsPlaying={playing}
               syncWithPlayer={sortingDeck.syncWithPlayer}
-              advanceAtEnd={false}
+              advanceAtEnd={sortingDeck.advanceAtEnd}
               playback={playback}
-              audibleTrackId={null}
-              startingTrackId={null}
-              nowPlaying={currentTrack}
+              audibleTrackId={audibleTrackId}
+              startingTrackId={startingTrackId}
+              nowPlaying={pendingPlaybackTrack ?? currentTrack}
               playbackContextType={playbackContext.type}
               onTogglePlay={playSortingTrack}
-              onDeckNavigate={() => {
-                /* exhausted: Next/жест вперёд игнорируются */
-              }}
+              onDeckNavigate={(track, direction) =>
+                navigateDeckPlayback(track, direction, 'sorting')
+              }
               onCategorize={setPendingTrack}
             />
-          </div>
-        ) : sortingTracks.length === 0 ? (
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-8 text-center">
-            <p className="text-sm text-[var(--color-fg)]">
-              {mode === 'search'
-                ? 'Ничего не найдено.'
-                : 'Нет музыки из подключённых источников.'}
-            </p>
-            <p className="mt-1 text-sm text-[var(--color-muted)]">
-              {mode === 'search'
-                ? 'Измените запрос или сбросьте поиск.'
-                : 'Демо-библиотека не попадает в ленту. Подключите свой источник.'}
-            </p>
-          </div>
-        ) : (
-          <SwipeDeck
-            key={deckKey}
-            tracks={sortingTracks}
-            gestureConfig={gestureConfig}
-            categoryResolveKey={categoryResolveKey}
-            categoryCancelKey={categoryCancelKey}
-            playerTrackId={playerTrackId}
-            playerIsPlaying={playing}
-            syncWithPlayer={sortingDeck.syncWithPlayer}
-            advanceAtEnd={sortingDeck.advanceAtEnd}
-            playback={playback}
-            audibleTrackId={audibleTrackId}
-            startingTrackId={startingTrackId}
-            nowPlaying={pendingPlaybackTrack ?? currentTrack}
-            playbackContextType={playbackContext.type}
-            onTogglePlay={playSortingTrack}
-            onDeckNavigate={(track, direction) =>
-              navigateDeckPlayback(track, direction, 'sorting')
-            }
-            onCategorize={setPendingTrack}
-          />
-        )}
-      </div>
-
-      {homeTab === 'wave' && favoritesNote ? (
-        <p className="px-1 text-center text-xs text-[var(--color-muted)] sm:text-left">{favoritesNote}</p>
+          )}
+        </div>
       ) : null}
 
-      {waveView === 'deck' ? (
-        <div className="home-deck-pane" hidden={homeTab !== 'wave'}>
+      {stage === 'wave' && favoritesNote ? (
+        <p className="px-1 text-xs text-[var(--color-muted)]">{favoritesNote}</p>
+      ) : null}
+
+      {stage === 'wave' && waveView === 'deck' ? (
+        <div className="home-deck-pane">
           {waveDeck.emptyReason === 'playback-empty' ? (
             <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-8 text-center">
               <p className="text-sm text-[var(--color-fg)]">
@@ -727,7 +651,9 @@ export default function Home() {
             />
           )}
         </div>
-      ) : homeTab === 'wave' ? (
+      ) : null}
+
+      {stage === 'wave' && waveView !== 'deck' ? (
         <WaveStartCard
           pending={wavePending}
           canStart={waveView === 'start'}
@@ -742,10 +668,6 @@ export default function Home() {
           onStart={startWave}
         />
       ) : null}
-
-      <div hidden={homeTab !== 'catalogs'}>
-        <HomeCatalogsPanel />
-      </div>
 
       {categorizeNotice ? (
         <p
