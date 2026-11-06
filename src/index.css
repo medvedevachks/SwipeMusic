@@ -368,8 +368,9 @@ body {
   top: 50%;
   left: 50%;
   z-index: 5;
-  width: 96px;
-  height: 96px;
+  /* NAV-PLAYER-03B: компактнее 96px, без потери touch target ≥44. */
+  width: 68px;
+  height: 68px;
   margin: 0;
   transform: translate(-50%, -50%);
   touch-action: manipulation;
@@ -387,8 +388,8 @@ body {
 }
 
 .deck-key.deck-orb svg {
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 1.65rem;
+  height: 1.65rem;
 }
 
 .deck-key.deck-orb[aria-pressed='true'] {
@@ -402,7 +403,7 @@ body {
 .deck-key.deck-orb::before {
   content: '';
   position: absolute;
-  inset: -18px;
+  inset: -12px;
   z-index: -1;
   border-radius: inherit;
   pointer-events: none;
@@ -533,6 +534,29 @@ body {
   overflow: hidden;
 }
 
+/* Compact shell: phone default + short landscape (магнитола). Expanded extras ≥880px dock. */
+.player-expanded-only {
+  display: none;
+}
+
+.player-source-line {
+  display: none;
+}
+
+@container dock (min-width: 880px) {
+  .player-expanded-only {
+    display: inline-flex;
+  }
+
+  .player-source-line {
+    display: block;
+  }
+
+  .player-compact-menu {
+    display: none;
+  }
+}
+
 .app-main {
   min-width: 0;
   min-height: 0;
@@ -556,6 +580,140 @@ body {
 
 .app-nav ul {
   height: 3.5rem;
+}
+
+/*
+ * NAV-PLAYER-03B — плотность оболочки на низкой высоте (магнитола / landscape).
+ * Ориентир 1024×600: header ~48, mini ~56, nav ~48.
+ */
+@media (orientation: landscape) and (max-height: 700px) {
+  /*
+   * Магнитола: даже при широком dock — compact mini (не expanded desktop).
+   * Ширина ≥880px иначе включает shuffle/volume/speed inline.
+   */
+  .player-expanded-only,
+  .player-extra,
+  .player-progress-wide,
+  .player-source-line {
+    display: none !important;
+  }
+
+  .player-compact-menu {
+    display: block !important;
+  }
+
+  .bottom-player-shell .player-grid {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'meta transport tools'
+      'progress progress progress' !important;
+    gap: 0.1rem 0.3rem;
+  }
+
+  .bottom-player-shell .player-transport {
+    display: block;
+  }
+
+  .bottom-player-shell .player-progress {
+    display: block !important;
+    min-height: 0;
+  }
+
+  .app-header-inner {
+    height: 3rem; /* 48px */
+    min-height: 3rem;
+  }
+
+  .app-header-brand {
+    font-size: 1rem;
+    line-height: 1.2;
+  }
+
+  .app-header-profile {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .bottom-player-shell {
+    padding-block: 0;
+    padding-inline: 0.5rem;
+  }
+
+  .bottom-player-shell .player-grid.deck-panel {
+    padding: 0.15rem 0.45rem 0.1rem;
+  }
+
+  .bottom-player-shell .player-cover {
+    width: 1.85rem;
+    height: 1.85rem;
+  }
+
+  .bottom-player-shell .player-meta p {
+    line-height: 1.15;
+  }
+
+  .bottom-player-shell .player-keys {
+    padding: 0.05rem;
+    gap: 0.15rem;
+    justify-content: flex-end;
+  }
+
+  .bottom-player-shell .player-progress [role='slider'] {
+    height: 1.35rem;
+  }
+
+  .bottom-player-shell .player-progress > span {
+    font-size: 9px;
+    width: 1.9rem;
+  }
+
+  .bottom-player-shell .player-grid .deck-key-primary {
+    width: 40px;
+    height: 40px;
+  }
+
+  .bottom-player-shell .player-grid .deck-key-side,
+  .bottom-player-shell .player-grid .deck-key-utility {
+    width: 40px;
+    height: 40px;
+  }
+
+  .app-nav ul {
+    height: 3rem; /* 48px */
+  }
+}
+
+/* Телефон / узкий dock: компактный мини по умолчанию */
+@container dock (max-width: 879px) {
+  .bottom-player-shell .player-grid.deck-panel {
+    padding-top: 0.15rem;
+    padding-bottom: 0.1rem;
+    gap: 0.15rem 0.35rem;
+  }
+
+  .bottom-player-shell .player-cover {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  .bottom-player-shell .player-progress [role='slider'] {
+    height: 1.75rem;
+  }
+
+  .bottom-player-shell .player-progress > span {
+    font-size: 9px;
+    width: 2rem;
+  }
+
+  .bottom-player-shell .player-grid .deck-key-primary {
+    width: 44px;
+    height: 44px;
+  }
+
+  .bottom-player-shell .player-grid .deck-key-side {
+    width: 40px;
+    height: 40px;
+  }
 }
 
 /*

@@ -23,7 +23,6 @@ import { useCollectionStore } from '../../store/collectionStore'
 import { usePlaybackFallbackUxStore } from '../../store/playbackFallbackUxStore'
 import { useGlobalPlayerStore } from '../../store/playerStore'
 import type { Track } from '../../types/track'
-import { formatPlaybackTime } from '../../utils/formatTime'
 import { getSourceDisplayName } from '../../utils/sourceDisplay'
 import CategoryPickerSheet from '../CategoryPickerSheet'
 import {
@@ -39,6 +38,9 @@ import {
   ShuffleIcon,
 } from '../icons'
 import PlayerProgressBar from './PlayerProgressBar'
+import PlayerVolumeControl from './PlayerVolumeControl'
+
+const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 2] as const
 
 /**
  * Overlay поверх текущего раздела. Состояние только из playerStore / SessionSwitch.
@@ -58,7 +60,6 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
 
   const currentTrack = useGlobalPlayerStore((s) => s.currentTrack)
   const pendingTrack = useGlobalPlayerStore((s) => s.pendingTrack)
-  const activeCandidate = useGlobalPlayerStore((s) => s.activeCandidate)
   const playing = useGlobalPlayerStore((s) => s.playing)
   const buffering = useGlobalPlayerStore((s) => s.buffering)
   const loading = useGlobalPlayerStore((s) => s.loading)
@@ -71,11 +72,18 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
   const playbackContext = useGlobalPlayerStore((s) => s.playbackContext)
   const ownsPlayerError = usePlaybackFallbackUxStore((s) => s.model.ownsPlayerError)
 
+  const volume = useGlobalPlayerStore((s) => s.volume)
+  const muted = useGlobalPlayerStore((s) => s.muted)
+  const playbackRate = useGlobalPlayerStore((s) => s.playbackRate)
   const pause = useGlobalPlayerStore((s) => s.pause)
   const resume = useGlobalPlayerStore((s) => s.resume)
   const next = useGlobalPlayerStore((s) => s.next)
   const previous = useGlobalPlayerStore((s) => s.previous)
   const seek = useGlobalPlayerStore((s) => s.seek)
+  const setVolume = useGlobalPlayerStore((s) => s.setVolume)
+  const toggleMute = useGlobalPlayerStore((s) => s.toggleMute)
+  const setMuted = useGlobalPlayerStore((s) => s.setMuted)
+  const setPlaybackRate = useGlobalPlayerStore((s) => s.setPlaybackRate)
   const cycleRepeatMode = useGlobalPlayerStore((s) => s.cycleRepeatMode)
   const toggleShuffle = useGlobalPlayerStore((s) => s.toggleShuffle)
 
@@ -244,7 +252,6 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
             >
               {sessionLabel}
             </p>
-            <p className="truncate text-xs text-[var(--color-muted)]">Сейчас играет</p>
           </div>
           <div className="relative">
             <button
@@ -268,6 +275,11 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
                 >
                   Очередь ({queueLength})
                 </button>
+                {sourceLabel ? (
+                  <p className="px-3 py-2 text-xs text-[var(--color-muted)]">
+                    Источник: {sourceLabel}
+                  </p>
+                ) : null}
                 {alternativeCount >= 2 && actionTrack ? (
                   <button
                     type="button"
@@ -300,6 +312,42 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
                 >
                   Repeat: {repeatMode}
                 </button>
+                <div className="border-t border-[var(--color-border)] px-3 py-2">
+                  <p className="mb-1 text-[10px] uppercase text-[var(--color-muted)]">Скорость</p>
+                  <div className="flex flex-wrap gap-1">
+                    {PLAYBACK_RATES.map((rate) => (
+                      <button
+                        key={rate}
+                        type="button"
+                        className={[
+                          'rounded-full border border-[var(--color-border)] px-2 py-1 text-xs',
+                          playbackRate === rate
+                            ? 'bg-[var(--color-accent)] text-white'
+                            : 'bg-[var(--color-surface)] text-[var(--color-fg)]',
+                        ].join(' ')}
+                        onClick={() => {
+                          setPlaybackRate(rate)
+                          setMenuOpen(false)
+                        }}
+                      >
+                        {rate}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="border-t border-[var(--color-border)] px-3 py-2">
+                  <PlayerVolumeControl
+                    volume={volume}
+                    muted={muted}
+                    onToggleMute={toggleMute}
+                    onVolumeChange={(nextVolume) => {
+                      setVolume(nextVolume)
+                      if (muted && nextVolume > 0) {
+                        setMuted(false)
+                      }
+                    }}
+                  />
+                </div>
               </div>
             ) : null}
           </div>
@@ -320,20 +368,11 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
           <p className="truncate text-base text-[var(--color-muted)]">
             {displayTrack?.artist ?? 'Выберите композицию в любом разделе'}
           </p>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted)]">
-            {sourceLabel ? (
-              <span className="rounded-full border border-[var(--color-border)] px-2 py-1 uppercase tracking-wide text-[var(--color-accent)]">
-                {sourceLabel}
-              </span>
-            ) : null}
-            {switching ? (
-              <span className="text-[var(--color-accent)]">Переключение…</span>
-            ) : buffering || loading ? (
-              <span className="text-[var(--color-accent)]">Загрузка…</span>
-            ) : activeCandidate?.type ? (
-              <span>{activeCandidate.type}</span>
-            ) : null}
-          </div>
+          {switching || buffering || loading ? (
+            <p className="mt-1 text-xs text-[var(--color-accent)]">
+              {switching ? 'Переключение…' : 'Загрузка…'}
+            </p>
+          ) : null}
         </div>
 
         <div className="fullscreen-player-progress">
@@ -343,10 +382,6 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
             disabled={!canControl || duration <= 0}
             onSeek={seek}
           />
-          <div className="mt-1 flex justify-between text-xs tabular-nums text-[var(--color-muted)]">
-            <span>{formatPlaybackTime(currentTime)}</span>
-            <span>{formatPlaybackTime(duration)}</span>
-          </div>
         </div>
 
         <div className="fullscreen-player-transport" data-testid="fullscreen-player-transport">

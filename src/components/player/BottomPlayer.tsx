@@ -93,17 +93,22 @@ export default function BottomPlayer() {
   }
 
   return (
-    <div className="px-2 pb-1.5 sm:px-3" role="region" aria-label="Глобальный плеер">
-      <div className="player-grid deck-panel mx-auto max-w-3xl px-3 py-1.5 text-[var(--color-player-fg)]">
+    <div
+      className="bottom-player-shell px-2 pb-1 sm:px-3"
+      role="region"
+      aria-label="Глобальный плеер"
+      data-testid="bottom-player"
+    >
+      <div className="player-grid deck-panel mx-auto max-w-3xl px-2.5 py-1 text-[var(--color-player-fg)] sm:px-3 sm:py-1.5">
           <button
             type="button"
-            className="player-meta flex min-w-0 items-center gap-2.5 text-left"
+            className="player-meta flex min-w-0 items-center gap-2 text-left sm:gap-2.5"
             title={displayTrack ? 'Открыть полноэкранный плеер' : undefined}
             data-testid="mini-player-open-fullscreen"
             onClick={openFullscreen}
           >
             <div
-              className="player-cover shrink-0 rounded-xl bg-cover bg-center ring-1 ring-[var(--deck-panel-border)]"
+              className="player-cover shrink-0 rounded-lg bg-cover bg-center ring-1 ring-[var(--deck-panel-border)] sm:rounded-xl"
               style={coverStyle}
               aria-hidden
             />
@@ -119,7 +124,7 @@ export default function BottomPlayer() {
                   {switching ? 'Переключение…' : 'Загрузка…'}
                 </p>
               ) : sourceLabel ? (
-                <p className="truncate text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--color-accent)]">
+                <p className="player-source-line truncate text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--color-accent)]">
                   {sourceLabel}
                 </p>
               ) : null}
@@ -207,24 +212,26 @@ export default function BottomPlayer() {
           <div className="player-tools relative flex items-center justify-end gap-1">
             {candidateHint ? (
               <span
-                className="hidden rounded-full border border-[var(--deck-key-border)] bg-[var(--deck-key-fill)] px-2 py-1 text-[10px] uppercase tracking-wide text-[var(--color-player-muted)] lg:inline"
+                className="player-expanded-only rounded-full border border-[var(--deck-key-border)] bg-[var(--deck-key-fill)] px-2 py-1 text-[10px] uppercase tracking-wide text-[var(--color-player-muted)]"
                 title="Тип PlaybackCandidate"
               >
                 {candidateHint}
               </span>
             ) : null}
-            <PlayerVolumeControl
-              volume={volume}
-              muted={muted}
-              onToggleMute={toggleMute}
-              onVolumeChange={(nextVolume) => {
-                setVolume(nextVolume)
-                if (muted && nextVolume > 0) {
-                  setMuted(false)
-                }
-              }}
-            />
-            <label className="hidden items-center lg:flex">
+            <div className="player-expanded-only">
+              <PlayerVolumeControl
+                volume={volume}
+                muted={muted}
+                onToggleMute={toggleMute}
+                onVolumeChange={(nextVolume) => {
+                  setVolume(nextVolume)
+                  if (muted && nextVolume > 0) {
+                    setMuted(false)
+                  }
+                }}
+              />
+            </div>
+            <label className="player-expanded-only items-center">
               <span className="sr-only">Скорость</span>
               <select
                 className="deck-select"
@@ -270,6 +277,11 @@ export default function BottomPlayer() {
                     Источники композиции
                   </button>
                 ) : null}
+                {sourceLabel ? (
+                  <p className="px-3 py-2 text-xs text-[var(--color-muted)]">
+                    Источник: {sourceLabel}
+                  </p>
+                ) : null}
                 <button
                   type="button"
                   className="block w-full px-3 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
@@ -290,7 +302,7 @@ export default function BottomPlayer() {
                 >
                   Repeat: {repeatMode}
                 </button>
-                <div className="border-t border-[var(--color-border)] px-3 py-2 lg:hidden">
+                <div className="border-t border-[var(--color-border)] px-3 py-2 player-compact-menu">
                   <p className="mb-1 text-[10px] uppercase text-[var(--color-player-muted)]">
                     Скорость
                   </p>
@@ -314,6 +326,19 @@ export default function BottomPlayer() {
                       </button>
                     ))}
                   </div>
+                </div>
+                <div className="border-t border-[var(--color-border)] px-3 py-2 player-compact-menu">
+                  <PlayerVolumeControl
+                    volume={volume}
+                    muted={muted}
+                    onToggleMute={toggleMute}
+                    onVolumeChange={(nextVolume) => {
+                      setVolume(nextVolume)
+                      if (muted && nextVolume > 0) {
+                        setMuted(false)
+                      }
+                    }}
+                  />
                 </div>
               </div>
             ) : null}

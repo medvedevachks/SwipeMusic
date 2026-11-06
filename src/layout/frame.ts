@@ -1,5 +1,6 @@
 export const PLAY_CONTROL = {
-  size: 96,
+  /** Центральный Play на свайп-карточке (NAV-PLAYER-03B: было 96). */
+  size: 68,
   minTarget: 44,
 } as const
 

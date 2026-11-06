@@ -25,7 +25,7 @@ export default function BottomNav() {
       aria-label="Основная навигация"
       data-testid="primary-bottom-nav"
     >
-      <ul className="mx-auto flex h-14 max-w-2xl items-stretch justify-between px-1 sm:h-16 sm:px-2">
+      <ul className="app-nav-list mx-auto flex h-14 max-w-2xl items-stretch justify-between px-1 sm:h-16 sm:px-2">
         {navItems.map(({ to, label, Icon, end }) => (
           <li key={to} className="flex-1 min-w-0">
             <NavLink

@@ -1,0 +1,397 @@
+{
+  "screens": [
+    {
+      "id": "01-swipes-card",
+      "viewport": "phone-390x844",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/01-swipes-card__phone-390x844.png"
+    },
+    {
+      "id": "02-wave-playing",
+      "viewport": "phone-390x844",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/02-wave-playing__phone-390x844.png"
+    },
+    {
+      "id": "03-search-results-mini",
+      "viewport": "phone-390x844",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/03-search-results-mini__phone-390x844.png"
+    },
+    {
+      "id": "04-library",
+      "viewport": "phone-390x844",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/04-library__phone-390x844.png"
+    },
+    {
+      "id": "05-catalog-tracks",
+      "viewport": "phone-390x844",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/05-catalog-tracks__phone-390x844.png"
+    },
+    {
+      "id": "06-fullscreen-playing",
+      "viewport": "phone-390x844",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/06-fullscreen-playing__phone-390x844.png"
+    },
+    {
+      "id": "07-fullscreen-paused",
+      "viewport": "phone-390x844",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/07-fullscreen-paused__phone-390x844.png"
+    },
+    {
+      "id": "08-queue",
+      "viewport": "phone-390x844",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/08-queue__phone-390x844.png"
+    },
+    {
+      "id": "01-swipes-card",
+      "viewport": "car-1024x600",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/01-swipes-card__car-1024x600.png"
+    },
+    {
+      "id": "02-wave-playing",
+      "viewport": "car-1024x600",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/02-wave-playing__car-1024x600.png"
+    },
+    {
+      "id": "03-search-results-mini",
+      "viewport": "car-1024x600",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/03-search-results-mini__car-1024x600.png"
+    },
+    {
+      "id": "04-library",
+      "viewport": "car-1024x600",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/04-library__car-1024x600.png"
+    },
+    {
+      "id": "05-catalog-tracks",
+      "viewport": "car-1024x600",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/05-catalog-tracks__car-1024x600.png"
+    },
+    {
+      "id": "06-fullscreen-playing",
+      "viewport": "car-1024x600",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/06-fullscreen-playing__car-1024x600.png"
+    },
+    {
+      "id": "07-fullscreen-paused",
+      "viewport": "car-1024x600",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/07-fullscreen-paused__car-1024x600.png"
+    },
+    {
+      "id": "08-queue",
+      "viewport": "car-1024x600",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/08-queue__car-1024x600.png"
+    },
+    {
+      "id": "01-swipes-card",
+      "viewport": "pc-1366x768",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/01-swipes-card__pc-1366x768.png"
+    },
+    {
+      "id": "02-wave-playing",
+      "viewport": "pc-1366x768",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/02-wave-playing__pc-1366x768.png"
+    },
+    {
+      "id": "03-search-results-mini",
+      "viewport": "pc-1366x768",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/03-search-results-mini__pc-1366x768.png"
+    },
+    {
+      "id": "04-library",
+      "viewport": "pc-1366x768",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/04-library__pc-1366x768.png"
+    },
+    {
+      "id": "05-catalog-tracks",
+      "viewport": "pc-1366x768",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/05-catalog-tracks__pc-1366x768.png"
+    },
+    {
+      "id": "06-fullscreen-playing",
+      "viewport": "pc-1366x768",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/06-fullscreen-playing__pc-1366x768.png"
+    },
+    {
+      "id": "07-fullscreen-paused",
+      "viewport": "pc-1366x768",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/07-fullscreen-paused__pc-1366x768.png"
+    },
+    {
+      "id": "08-queue",
+      "viewport": "pc-1366x768",
+      "path": "C:/Users/Крис/SwipeMusic/docs/nav-player-03-screenshots/08-queue__pc-1366x768.png"
+    }
+  ],
+  "chrome": [
+    {
+      "screen": "swipes",
+      "vh": 600,
+      "vw": 1024,
+      "header": {
+        "top": 0,
+        "bottom": 65,
+        "h": 65,
+        "w": 1024
+      },
+      "dock": {
+        "top": 456,
+        "bottom": 600,
+        "h": 144,
+        "w": 1024
+      },
+      "mini": {
+        "top": 456,
+        "bottom": 551,
+        "h": 95,
+        "w": 1024
+      },
+      "nav": {
+        "top": 551,
+        "bottom": 600,
+        "h": 49,
+        "w": 1024
+      },
+      "main": {
+        "top": 65,
+        "bottom": 456,
+        "h": 391,
+        "w": 1024
+      },
+      "fs": null,
+      "card": null,
+      "path": "/"
+    },
+    {
+      "screen": "wave",
+      "vh": 600,
+      "vw": 1024,
+      "header": {
+        "top": 0,
+        "bottom": 65,
+        "h": 65,
+        "w": 1024
+      },
+      "dock": {
+        "top": 456,
+        "bottom": 600,
+        "h": 144,
+        "w": 1024
+      },
+      "mini": {
+        "top": 456,
+        "bottom": 551,
+        "h": 95,
+        "w": 1024
+      },
+      "nav": {
+        "top": 551,
+        "bottom": 600,
+        "h": 49,
+        "w": 1024
+      },
+      "main": {
+        "top": 65,
+        "bottom": 456,
+        "h": 391,
+        "w": 1024
+      },
+      "fs": null,
+      "card": null,
+      "path": "/wave"
+    },
+    {
+      "screen": "search",
+      "vh": 600,
+      "vw": 1024,
+      "header": {
+        "top": 0,
+        "bottom": 65,
+        "h": 65,
+        "w": 1024
+      },
+      "dock": {
+        "top": 456,
+        "bottom": 600,
+        "h": 144,
+        "w": 1024
+      },
+      "mini": {
+        "top": 456,
+        "bottom": 551,
+        "h": 95,
+        "w": 1024
+      },
+      "nav": {
+        "top": 551,
+        "bottom": 600,
+        "h": 49,
+        "w": 1024
+      },
+      "main": {
+        "top": 65,
+        "bottom": 456,
+        "h": 391,
+        "w": 1024
+      },
+      "fs": null,
+      "card": null,
+      "path": "/search"
+    },
+    {
+      "screen": "library",
+      "vh": 600,
+      "vw": 1024,
+      "header": {
+        "top": 0,
+        "bottom": 65,
+        "h": 65,
+        "w": 1024
+      },
+      "dock": {
+        "top": 456,
+        "bottom": 600,
+        "h": 144,
+        "w": 1024
+      },
+      "mini": {
+        "top": 456,
+        "bottom": 551,
+        "h": 95,
+        "w": 1024
+      },
+      "nav": {
+        "top": 551,
+        "bottom": 600,
+        "h": 49,
+        "w": 1024
+      },
+      "main": {
+        "top": 65,
+        "bottom": 456,
+        "h": 391,
+        "w": 1024
+      },
+      "fs": null,
+      "card": null,
+      "path": "/library"
+    },
+    {
+      "screen": "catalog",
+      "vh": 600,
+      "vw": 1024,
+      "header": {
+        "top": 0,
+        "bottom": 65,
+        "h": 65,
+        "w": 1024
+      },
+      "dock": {
+        "top": 456,
+        "bottom": 600,
+        "h": 144,
+        "w": 1024
+      },
+      "mini": {
+        "top": 456,
+        "bottom": 551,
+        "h": 95,
+        "w": 1024
+      },
+      "nav": {
+        "top": 551,
+        "bottom": 600,
+        "h": 49,
+        "w": 1024
+      },
+      "main": {
+        "top": 65,
+        "bottom": 456,
+        "h": 391,
+        "w": 1024
+      },
+      "fs": null,
+      "card": null,
+      "path": "/library/catalogs/cat_dev_a"
+    },
+    {
+      "screen": "fullscreen-playing",
+      "vh": 600,
+      "vw": 1024,
+      "header": {
+        "top": 0,
+        "bottom": 65,
+        "h": 65,
+        "w": 1024
+      },
+      "dock": {
+        "top": 456,
+        "bottom": 600,
+        "h": 144,
+        "w": 1024
+      },
+      "mini": {
+        "top": 456,
+        "bottom": 551,
+        "h": 95,
+        "w": 1024
+      },
+      "nav": {
+        "top": 551,
+        "bottom": 600,
+        "h": 49,
+        "w": 1024
+      },
+      "main": {
+        "top": 65,
+        "bottom": 456,
+        "h": 391,
+        "w": 1024
+      },
+      "fs": {
+        "top": 0,
+        "bottom": 600,
+        "h": 600,
+        "w": 1024
+      },
+      "card": null,
+      "path": "/library/catalogs/cat_dev_a"
+    },
+    {
+      "screen": "queue",
+      "vh": 600,
+      "vw": 1024,
+      "header": {
+        "top": 0,
+        "bottom": 65,
+        "h": 65,
+        "w": 1024
+      },
+      "dock": {
+        "top": 456,
+        "bottom": 600,
+        "h": 144,
+        "w": 1024
+      },
+      "mini": {
+        "top": 456,
+        "bottom": 551,
+        "h": 95,
+        "w": 1024
+      },
+      "nav": {
+        "top": 551,
+        "bottom": 600,
+        "h": 49,
+        "w": 1024
+      },
+      "main": {
+        "top": 65,
+        "bottom": 456,
+        "h": 391,
+        "w": 1024
+      },
+      "fs": null,
+      "card": null,
+      "path": "/queue"
+    }
+  ]
+}

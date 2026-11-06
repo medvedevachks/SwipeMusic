@@ -4,10 +4,13 @@ import { ThemeSwitchControl } from './ThemeSwitch'
 
 export default function AppHeader() {
   return (
-    <header className="border-b border-[var(--color-border)]/80 bg-[var(--color-bg)]/90 backdrop-blur-md">
-      <div className="mx-auto flex h-14 max-w-2xl items-center justify-between gap-2 px-4 sm:h-16 sm:gap-3 sm:px-6">
+    <header
+      className="app-header border-b border-[var(--color-border)]/80 bg-[var(--color-bg)]/90 backdrop-blur-md"
+      data-testid="app-header"
+    >
+      <div className="app-header-inner mx-auto flex h-14 max-w-2xl items-center justify-between gap-2 px-4 sm:h-16 sm:gap-3 sm:px-6">
         <Link to="/" className="min-w-0">
-          <span className="block truncate font-display text-lg font-semibold tracking-tight text-[var(--color-fg)] sm:text-xl">
+          <span className="app-header-brand block truncate font-display text-lg font-semibold tracking-tight text-[var(--color-fg)] sm:text-xl">
             Swipe Music
           </span>
         </Link>
@@ -15,7 +18,7 @@ export default function AppHeader() {
           <ThemeSwitchControl />
           <Link
             to="/profile"
-            className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-fg)] transition-colors hover:bg-[var(--color-surface-hover)]"
+            className="app-header-profile inline-flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-fg)] transition-colors hover:bg-[var(--color-surface-hover)]"
             aria-label="Профиль"
             data-testid="header-profile-link"
           >
