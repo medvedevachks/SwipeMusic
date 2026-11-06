@@ -1,7 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useFullscreenPlayer } from '../../hooks/useFullscreenPlayer'
 import { resolvePlayerSessionLabel } from '../../navigation/fullscreenPlayer'
+import {
+  canFullscreenLike,
+  resolveCatalogCommitTrack,
+  resolveFullscreenActionTrack,
+  shouldDismissCatalogOnTrackChange,
+} from '../../navigation/fullscreenPlayerActions'
 import { sourceTrackKeyOf } from '../../services/canonical/mapCanonical'
 import { canonicalItemForTrack, isSourceCopyLiked } from '../../services/canonical/selectors'
 import { commitCatalogChoice } from '../../services/canonical/userOrganization'
@@ -16,6 +22,7 @@ import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore'
 import { useCollectionStore } from '../../store/collectionStore'
 import { usePlaybackFallbackUxStore } from '../../store/playbackFallbackUxStore'
 import { useGlobalPlayerStore } from '../../store/playerStore'
+import type { Track } from '../../types/track'
 import { formatPlaybackTime } from '../../utils/formatTime'
 import { getSourceDisplayName } from '../../utils/sourceDisplay'
 import CategoryPickerSheet from '../CategoryPickerSheet'
@@ -47,6 +54,7 @@ export default function FullscreenPlayer() {
 
 function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate()
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
 
   const currentTrack = useGlobalPlayerStore((s) => s.currentTrack)
   const pendingTrack = useGlobalPlayerStore((s) => s.pendingTrack)
@@ -85,6 +93,8 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [catalogOpen, setCatalogOpen] = useState(false)
+  const [catalogTrack, setCatalogTrack] = useState<Track | null>(null)
+  const [catalogBusy, setCatalogBusy] = useState(false)
   const [likeBusy, setLikeBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
 
@@ -93,14 +103,25 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
   const canControl = Boolean(currentTrack) && !switching
   const busy = switching || buffering || loading
   const launching = busy && !playing
-  const audibleForLike = currentTrack
+  const actionTrack = resolveFullscreenActionTrack({ currentTrack, pendingTrack })
 
-  const liked = audibleForLike
-    ? isSourceCopyLiked(canonicalLookup, sourceTrackKeyOf(audibleForLike))
+  const liked = actionTrack
+    ? isSourceCopyLiked(canonicalLookup, sourceTrackKeyOf(actionTrack))
     : false
+  const likeEnabled = canFullscreenLike({
+    actionTrack,
+    liked,
+    likeBusy,
+  })
   const alternativeCount = displayTrack
     ? (canonicalItemForTrack(canonicalLookup, displayTrack)?.copies.length ?? 0)
     : 0
+  const catalogStale = shouldDismissCatalogOnTrackChange({
+    catalogOpen,
+    pinnedTrackId: catalogTrack?.id,
+    currentTrackId: currentTrack?.id,
+  })
+  const catalogSheetOpen = catalogOpen && !catalogStale
 
   const activeSessionId = isSessionSwitchIntegrationEnabled()
     ? (getSessionSwitchAppRuntime()?.store.getActiveSessionId() ?? null)
@@ -115,11 +136,43 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
     ? { backgroundImage: `url(${displayTrack.coverUrl})` }
     : { backgroundColor: displayTrack?.coverColor ?? 'var(--color-accent)' }
 
+  const clearCatalogSheet = () => {
+    setCatalogOpen(false)
+    setCatalogTrack(null)
+    setCatalogBusy(false)
+  }
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null
+    closeButtonRef.current?.focus()
+    return () => {
+      const mini = document.querySelector(
+        '[data-testid="mini-player-open-fullscreen"]',
+      ) as HTMLElement | null
+      if (mini && typeof mini.focus === 'function') {
+        mini.focus()
+        return
+      }
+      if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+        previouslyFocused.focus()
+      }
+    }
+  }, [])
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose()
+      if (event.key !== 'Escape') {
+        return
       }
+      if (catalogSheetOpen) {
+        clearCatalogSheet()
+        return
+      }
+      if (menuOpen) {
+        setMenuOpen(false)
+        return
+      }
+      onClose()
     }
     window.addEventListener('keydown', onKey)
     const prev = document.body.style.overflow
@@ -128,7 +181,7 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
       window.removeEventListener('keydown', onKey)
       document.body.style.overflow = prev
     }
-  }, [onClose])
+  }, [onClose, catalogSheetOpen, menuOpen])
 
   const togglePlay = () => {
     if (playing) {
@@ -139,11 +192,11 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
   }
 
   const onLike = () => {
-    if (!audibleForLike || likeBusy || liked) {
+    if (!likeEnabled || !actionTrack) {
       return
     }
     setLikeBusy(true)
-    const result = classifySwipeTrack(audibleForLike, 'like')
+    const result = classifySwipeTrack(actionTrack, 'like')
     if (result.kind === 'applied' && result.saved) {
       void result.saved.finally(() => setLikeBusy(false))
       return
@@ -151,8 +204,16 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
     setLikeBusy(false)
   }
 
+  const openCatalog = () => {
+    if (!actionTrack) {
+      return
+    }
+    setCatalogTrack(actionTrack)
+    setCatalogOpen(true)
+    setNotice(null)
+  }
+
   const openQueue = () => {
-    // replace: Back из /queue не восстанавливает ?player=full поверх раздела.
     navigate('/queue', { replace: true })
   }
 
@@ -167,15 +228,20 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
       <div className="fullscreen-player-frame">
         <header className="fullscreen-player-top">
           <button
+            ref={closeButtonRef}
             type="button"
             className="deck-key deck-key-utility min-h-11 min-w-11"
             aria-label="Свернуть плеер"
+            data-testid="fullscreen-player-close"
             onClick={onClose}
           >
             <CloseIcon className="h-5 w-5" />
           </button>
           <div className="min-w-0 text-center">
-            <p className="truncate text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-accent)]">
+            <p
+              className="truncate text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--color-accent)]"
+              data-testid="fullscreen-player-session"
+            >
               {sessionLabel}
             </p>
             <p className="truncate text-xs text-[var(--color-muted)]">Сейчас играет</p>
@@ -202,13 +268,13 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
                 >
                   Очередь ({queueLength})
                 </button>
-                {alternativeCount >= 2 && displayTrack ? (
+                {alternativeCount >= 2 && actionTrack ? (
                   <button
                     type="button"
                     className="block min-h-11 w-full px-3 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-surface-hover)]"
                     onClick={() => {
                       setMenuOpen(false)
-                      void openManualSourceAlternatives(displayTrack)
+                      void openManualSourceAlternatives(actionTrack)
                     }}
                   >
                     Источники композиции
@@ -283,7 +349,7 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        <div className="fullscreen-player-transport">
+        <div className="fullscreen-player-transport" data-testid="fullscreen-player-transport">
           <button
             type="button"
             className="deck-key deck-key-utility min-h-11 min-w-11"
@@ -299,7 +365,10 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
             className="deck-key deck-key-side min-h-12 min-w-12"
             aria-label="Предыдущий"
             disabled={!canControl}
-            onClick={() => void previous()}
+            onClick={() => {
+              clearCatalogSheet()
+              void previous()
+            }}
           >
             <PreviousIcon className="h-6 w-6" />
           </button>
@@ -326,6 +395,7 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
             aria-label="Следующий"
             disabled={!canControl}
             onClick={() => {
+              clearCatalogSheet()
               beginSearchFlowCommand('FullscreenPlayer.Next')
               void next()
             }}
@@ -357,7 +427,8 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
             className="deck-key deck-key-utility min-h-11 min-w-11"
             aria-label={liked ? 'В избранном' : 'Лайк'}
             aria-pressed={liked}
-            disabled={!audibleForLike || likeBusy || switching}
+            data-testid="fullscreen-player-like"
+            disabled={!likeEnabled}
             onClick={onLike}
           >
             <HeartIcon className="h-5 w-5" filled={liked} />
@@ -365,8 +436,9 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             className="inline-flex min-h-11 flex-1 items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm font-medium text-[var(--color-fg)] disabled:opacity-40"
-            disabled={!audibleForLike || switching}
-            onClick={() => setCatalogOpen(true)}
+            data-testid="fullscreen-player-catalog"
+            disabled={!actionTrack || catalogBusy}
+            onClick={openCatalog}
           >
             В каталог
           </button>
@@ -393,19 +465,31 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <CategoryPickerSheet
-        open={catalogOpen}
-        trackTitle={audibleForLike?.title}
+        open={catalogSheetOpen}
+        trackTitle={catalogTrack?.title}
         categories={categories}
-        onClose={() => setCatalogOpen(false)}
+        onClose={() => {
+          if (catalogBusy) {
+            return
+          }
+          clearCatalogSheet()
+        }}
         onCreateCategory={createCategoryConfirmed}
         onSelect={(categoryId) => {
-          if (!audibleForLike) {
+          const track = resolveCatalogCommitTrack({
+            pinnedTrack: catalogTrack,
+            currentTrack,
+          })
+          if (!track || catalogBusy) {
+            clearCatalogSheet()
             return
           }
           const category = useCollectionStore
             .getState()
             .categories.find((item) => item.id === categoryId)
-          void commitCatalogChoice(audibleForLike, categoryId, category).then((result) => {
+          setCatalogBusy(true)
+          void commitCatalogChoice(track, categoryId, category).then((result) => {
+            setCatalogBusy(false)
             if (result.status === 'failed') {
               setNotice(SAVE_FAILED_MESSAGE)
               return
@@ -414,11 +498,11 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
               setNotice(
                 'Сохранено в каталог, но не удалось убрать из «Свайпов». Можно повторить позже.',
               )
-              setCatalogOpen(false)
+              clearCatalogSheet()
               return
             }
             setNotice(null)
-            setCatalogOpen(false)
+            clearCatalogSheet()
           })
         }}
       />
