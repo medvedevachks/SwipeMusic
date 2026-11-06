@@ -148,6 +148,37 @@ export function MoreIcon(props: IconProps) {
   )
 }
 
+export function CloseIcon(props: IconProps) {
+  return (
+    <svg {...iconProps(props)}>
+      <path d="M6 6 18 18M18 6 6 18" />
+    </svg>
+  )
+}
+
+export function HeartIcon(props: IconProps & { filled?: boolean }) {
+  const { filled = false, ...rest } = props
+  return (
+    <svg
+      {...iconProps({
+        ...rest,
+        fill: filled ? 'currentColor' : 'none',
+        stroke: 'currentColor',
+      })}
+    >
+      <path d="M12 19.2 5.8 13.4a4.2 4.2 0 0 1 6-5.9l.2.2.2-.2a4.2 4.2 0 0 1 6 5.9L12 19.2Z" />
+    </svg>
+  )
+}
+
+export function QueueListIcon(props: IconProps) {
+  return (
+    <svg {...iconProps(props)}>
+      <path d="M5 7h14M5 12h14M5 17h10" />
+    </svg>
+  )
+}
+
 export function VolumeIcon(props: IconProps & { level: 'mute' | 'low' | 'mid' | 'high' }) {
   const { level, ...rest } = props
   return (

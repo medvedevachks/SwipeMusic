@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useFullscreenPlayer } from '../../hooks/useFullscreenPlayer'
 import { canonicalItemForTrack } from '../../services/canonical/selectors'
 import { beginSearchFlowCommand } from '../../services/continuation/searchFlowDiag.ts'
 import { openManualSourceAlternatives } from '../../services/runtimeFallback/fallbackUxRuntime'
@@ -63,6 +64,7 @@ export default function BottomPlayer() {
   const setPlaybackRate = useGlobalPlayerStore((s) => s.setPlaybackRate)
 
   const [menuOpen, setMenuOpen] = useState(false)
+  const { open: openFullscreen } = useFullscreenPlayer()
   /** Во время switch показываем запрошенный трек, но не как «уже играет». */
   const displayTrack = pendingTrack ?? currentTrack
   const switching = Boolean(pendingTrack)
@@ -93,10 +95,12 @@ export default function BottomPlayer() {
   return (
     <div className="px-2 pb-1.5 sm:px-3" role="region" aria-label="Глобальный плеер">
       <div className="player-grid deck-panel mx-auto max-w-3xl px-3 py-1.5 text-[var(--color-player-fg)]">
-          <Link
-            to="/queue"
-            className="player-meta flex min-w-0 items-center gap-2.5"
-            title={displayTrack ? 'Открыть очередь / сейчас играет' : undefined}
+          <button
+            type="button"
+            className="player-meta flex min-w-0 items-center gap-2.5 text-left"
+            title={displayTrack ? 'Открыть полноэкранный плеер' : undefined}
+            data-testid="mini-player-open-fullscreen"
+            onClick={openFullscreen}
           >
             <div
               className="player-cover shrink-0 rounded-xl bg-cover bg-center ring-1 ring-[var(--deck-panel-border)]"
@@ -120,7 +124,7 @@ export default function BottomPlayer() {
                 </p>
               ) : null}
             </div>
-          </Link>
+          </button>
 
           <div className="player-transport">
             <div className="player-keys">

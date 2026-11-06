@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom'
 import AppHeader from '../components/AppHeader'
 import BottomNav from '../components/BottomNav'
 import BottomPlayer from '../components/player/BottomPlayer'
+import FullscreenPlayer from '../components/player/FullscreenPlayer'
 import PlaybackFallbackHost from '../components/player/PlaybackFallbackHost'
 import { useGlobalPlayerHotkeys } from '../hooks/useGlobalPlayerHotkeys'
 import { usePlayerQueueBootstrap } from '../hooks/usePlayerQueueBootstrap'
@@ -25,6 +26,8 @@ export default function MainLayout() {
         <BottomPlayer />
         <BottomNav />
       </div>
+      {/* Overlay: раздел под ним остаётся смонтированным; мини-плеер тоже. */}
+      <FullscreenPlayer />
     </div>
   )
 }
