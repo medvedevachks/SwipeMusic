@@ -126,6 +126,10 @@ export default defineConfig(({ mode }) => ({
         target: 'http://127.0.0.1:8787',
         changeOrigin: true,
       },
+      '/api/runtime-config': {
+        target: 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
       '/api/yandex-music': {
         target: 'http://127.0.0.1:8787',
         changeOrigin: true,
@@ -149,6 +153,10 @@ export default defineConfig(({ mode }) => ({
         changeOrigin: true,
       },
       '/api/me': {
+        target: 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
+      '/api/runtime-config': {
         target: 'http://127.0.0.1:8787',
         changeOrigin: true,
       },

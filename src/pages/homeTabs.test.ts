@@ -35,6 +35,17 @@ test('Wave page reuses Home with wave stage', () => {
   assert.match(wave, /stage="wave"/)
 })
 
+test('route screens keep independent titles without nested home-mode-tabs chrome', () => {
+  const home = readFileSync(new URL('./Home.tsx', import.meta.url), 'utf8')
+  const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8')
+  assert.match(home, /Свайпы/)
+  assert.match(home, /Моя волна/)
+  assert.equal(home.includes('home-mode-tabs'), false)
+  // Прежний 3-колоночный tab chrome больше не контракт UI; bottom nav — app-nav.
+  assert.match(css, /\.app-nav ul\s*\{[^}]*height:\s*3\.5rem/s)
+  assert.match(css, /\.app-main\s*\{[^}]*overflow-x:\s*hidden/s)
+})
+
 test('LibraryFolder swipes Play navigates to / without focusHomeTab', () => {
   const folder = readFileSync(new URL('./LibraryFolder.tsx', import.meta.url), 'utf8')
   assert.match(folder, /startSwipeInboxSorting/)
