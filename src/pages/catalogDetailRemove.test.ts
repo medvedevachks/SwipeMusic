@@ -286,7 +286,7 @@ test('account switch during DELETE does not apply stale error', () => {
 test('CatalogDetail resets remove/crud busy when auth user changes', () => {
   const source = readFileSync(new URL('./CatalogDetail.tsx', import.meta.url), 'utf8')
   assert.match(source, /authUserId/)
-  assert.match(source, /\[authUserId, catalogId\]/)
+  assert.match(source, /authUserIdRef\.current !== authUserId/)
   assert.match(source, /createCatalogRemoveBusyState\(catalogId\)/)
   assert.match(source, /setCrudBusy\(false\)/)
 })

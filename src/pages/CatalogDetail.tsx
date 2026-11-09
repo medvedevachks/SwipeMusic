@@ -82,8 +82,18 @@ export default function CatalogDetail() {
   const removeBusyIdsRef = useRef<Set<string>>(new Set())
   const removeMountedRef = useRef(true)
 
+  const authUserIdRef = useRef(authUserId)
   if (removeBusy.catalogId !== catalogId) {
     setRemoveBusy(switchCatalogRemoveBusyState(removeBusy, catalogId))
+  }
+  // LIB-06: смена аккаунта не оставляет залипшие busy на DELETE прошлого пользователя.
+  if (authUserIdRef.current !== authUserId) {
+    authUserIdRef.current = authUserId
+    setRemoveBusy(createCatalogRemoveBusyState(catalogId))
+    removeBusyIdsRef.current = new Set()
+    setCrudBusy(false)
+    crudBusyRef.current = false
+    setCrudError(null)
   }
 
   useEffect(() => {
@@ -93,15 +103,6 @@ export default function CatalogDetail() {
       removeBusyIdsRef.current = new Set()
     }
   }, [])
-
-  // LIB-06: смена аккаунта не оставляет залипшие busy на DELETE прошлого пользователя.
-  useEffect(() => {
-    setRemoveBusy(createCatalogRemoveBusyState(catalogId))
-    removeBusyIdsRef.current = new Set()
-    setCrudBusy(false)
-    crudBusyRef.current = false
-    setCrudError(null)
-  }, [authUserId, catalogId])
 
   useEffect(() => {
     playMountedRef.current = true
