@@ -51,6 +51,8 @@ export default function CatalogDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [removed, setRemoved] = useState(false)
   const [busyKey, setBusyKey] = useState<string | null>(null)
+  const [removeBusyId, setRemoveBusyId] = useState<string | null>(null)
+  const [removeError, setRemoveError] = useState<string | null>(null)
   const [crudBusy, setCrudBusy] = useState(false)
   const [crudError, setCrudError] = useState<string | null>(null)
   const [playError, setPlayError] = useState<string | null>(null)
@@ -59,6 +61,8 @@ export default function CatalogDetail() {
   /** Синхронный gate: React busyKey ещё не успевает при быстрых повторных Play. */
   const playBusyRef = useRef(false)
   const crudBusyRef = useRef(false)
+  /** Синхронный gate против двойного DELETE до React re-render. */
+  const removeBusyRef = useRef<string | null>(null)
 
   useEffect(() => {
     return () => {
@@ -403,6 +407,15 @@ export default function CatalogDetail() {
         </div>
       ) : null}
 
+      {removeError ? (
+        <p
+          className="rounded-xl border border-rose-300/70 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/40 dark:bg-rose-950/40 dark:text-rose-100"
+          role="alert"
+        >
+          {removeError}
+        </p>
+      ) : null}
+
       {tracks.length === 0 ? (
         <p className="py-8 text-center text-sm text-[var(--color-muted)]">
           В этом каталоге пока нет треков
@@ -411,6 +424,7 @@ export default function CatalogDetail() {
         <ul className="space-y-2">
           {tracks.map((item) => {
             const rowBusy = busyKey === item.canonicalTrack.id
+            const removeBusy = removeBusyId === item.canonicalTrack.id
             return (
               <li
                 key={item.canonicalTrack.id}
@@ -471,17 +485,39 @@ export default function CatalogDetail() {
                 </span>
                 <button
                   type="button"
-                  className="min-h-11 shrink-0 rounded-xl border border-[var(--color-border)] px-2 text-xs sm:px-3"
+                  className="min-h-11 shrink-0 rounded-xl border border-[var(--color-border)] px-2 text-xs disabled:opacity-40 sm:px-3"
                   aria-label={`Убрать «${item.canonicalTrack.title}» из каталога`}
+                  aria-busy={removeBusy || undefined}
+                  disabled={removeBusy}
                   onClick={() => {
-                    void removeCanonicalFromCatalog(
-                      item.canonicalTrack.id,
-                      catalog.id,
-                    )
+                    const id = item.canonicalTrack.id
+                    if (removeBusyRef.current === id || removeBusyId === id) {
+                      return
+                    }
+                    removeBusyRef.current = id
+                    setRemoveBusyId(id)
+                    setRemoveError(null)
+                    void removeCanonicalFromCatalog(id, catalog.id).then((ok) => {
+                      if (removeBusyRef.current === id) {
+                        removeBusyRef.current = null
+                      }
+                      setRemoveBusyId((current) => (current === id ? null : current))
+                      if (!ok) {
+                        setRemoveError(
+                          `${SAVE_FAILED_MESSAGE} Не удалось убрать из каталога — можно повторить.`,
+                        )
+                      }
+                    })
                   }}
                 >
-                  <span className="sm:hidden">Убрать</span>
-                  <span className="hidden sm:inline">Убрать из каталога</span>
+                  {removeBusy ? (
+                    'Удаление…'
+                  ) : (
+                    <>
+                      <span className="sm:hidden">Убрать</span>
+                      <span className="hidden sm:inline">Убрать из каталога</span>
+                    </>
+                  )}
                 </button>
               </li>
             )

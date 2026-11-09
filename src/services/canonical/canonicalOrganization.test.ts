@@ -202,6 +202,9 @@ function installRemote(identities: Record<string, TrackIdentity>): Calls {
     async unassignCanonical(catalogId, canonicalTrackId) {
       calls.unassign.push({ catalogId, canonicalTrackId })
     },
+    async loadCanonicalLibrary() {
+      return { items: Object.values(useCanonicalLibraryStore.getState().itemsById) }
+    },
   }
   setCanonicalRemote(remote)
   return calls
@@ -503,6 +506,9 @@ test('failed like does not record history or mark the composition liked', async 
     unassignCanonical: async () => {
       throw new LibraryHttpError(500)
     },
+    loadCanonicalLibrary: async () => ({
+      items: Object.values(useCanonicalLibraryStore.getState().itemsById),
+    }),
   })
   const saved = await commitSwipeLike(track)
   assert.equal(saved, false)
@@ -726,6 +732,9 @@ test('categorize partial unassign keeps target membership and retries without se
       }
       useCanonicalLibraryStore.getState().removeCatalog(canonicalTrackId, catalogId)
     },
+    loadCanonicalLibrary: async () => ({
+      items: Object.values(useCanonicalLibraryStore.getState().itemsById),
+    }),
   })
   const first = await commitCatalogChoice(track, 'cat_party')
   assert.equal(first.status, 'partial')
@@ -801,6 +810,9 @@ test('like keeps liked when inbox assign fails and retry completes inbox', async
     unassignCanonical: async (catalogId, canonicalTrackId) => {
       calls.unassign.push({ catalogId, canonicalTrackId })
     },
+    loadCanonicalLibrary: async () => ({
+      items: Object.values(useCanonicalLibraryStore.getState().itemsById),
+    }),
   })
   const originalFetch = globalThis.fetch
   globalThis.fetch = (async () => new Response(null, { status: 204 })) as typeof fetch
@@ -884,6 +896,7 @@ test('unauthorized canonical save uses the existing auth failure path', async ()
     unassignCanonical: async () => {
       throw new LibraryHttpError(401)
     },
+    loadCanonicalLibrary: async () => ({ items: [] }),
   })
   const saved = await likeSourceTrack(sourceTrack('spotify', '1', 'Песня'), true)
   assert.equal(saved, null)
@@ -925,6 +938,7 @@ test('commitCatalogChoice after session switch does not record history for B', a
       }
     },
     unassignCanonical: async () => undefined,
+    loadCanonicalLibrary: async () => ({ items: [] }),
   })
 
   const pending = commitCatalogChoice(track, 'cat_car')
@@ -968,6 +982,7 @@ test('stale identity finally does not drop B flight for same source key', async 
       throw new Error('unused')
     },
     unassignCanonical: async () => undefined,
+    loadCanonicalLibrary: async () => ({ items: [] }),
   })
 
   const pendingA = ensureCanonicalForTrack(track)
@@ -990,6 +1005,309 @@ test('stale identity finally does not drop B flight for same source key', async 
 
   await ensureCanonicalForTrack(track)
   assert.equal(identityCalls, 2)
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+})
+
+test('remove double-click shares one DELETE flight', async () => {
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+  arm()
+  bindAuthSessionEpoch('user-a')
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [
+    canonicalItem(
+      'can_x',
+      'Город',
+      [sourceCopy('yandex-music', '101', 'can_x', 'Город')],
+      true,
+      ['cat_car', 'cat_night'],
+    ),
+  ])
+  let resolveUnassign!: () => void
+  const gate = new Promise<void>((resolve) => {
+    resolveUnassign = resolve
+  })
+  let unassignCalls = 0
+  setCanonicalRemote({
+    ensureIdentity: async () => {
+      throw new Error('unused')
+    },
+    patchCanonicalLiked: async () => {
+      throw new Error('unused')
+    },
+    assignCanonical: async () => {
+      throw new Error('unused')
+    },
+    unassignCanonical: async () => {
+      unassignCalls += 1
+      await gate
+    },
+    loadCanonicalLibrary: async () => ({
+      items: Object.values(useCanonicalLibraryStore.getState().itemsById),
+    }),
+  })
+
+  const a = removeCanonicalFromCatalog('can_x', 'cat_car')
+  const b = removeCanonicalFromCatalog('can_x', 'cat_car')
+  resolveUnassign()
+  assert.equal(await a, true)
+  assert.equal(await b, true)
+  assert.equal(unassignCalls, 1)
+  assert.deepEqual(useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds, [
+    'cat_night',
+  ])
+  assert.equal(useCanonicalLibraryStore.getState().itemsById.can_x?.state.liked, true)
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+})
+
+test('remove 500 keeps membership and allows retry', async () => {
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+  arm()
+  bindAuthSessionEpoch('user-a')
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [
+    canonicalItem(
+      'can_x',
+      'Город',
+      [sourceCopy('yandex-music', '101', 'can_x', 'Город')],
+      true,
+      ['cat_car', 'cat_night'],
+    ),
+  ])
+  let fail = true
+  let unassignCalls = 0
+  setCanonicalRemote({
+    ensureIdentity: async () => {
+      throw new Error('unused')
+    },
+    patchCanonicalLiked: async () => {
+      throw new Error('unused')
+    },
+    assignCanonical: async () => {
+      throw new Error('unused')
+    },
+    unassignCanonical: async () => {
+      unassignCalls += 1
+      if (fail) {
+        throw new LibraryHttpError(500)
+      }
+    },
+    loadCanonicalLibrary: async () => ({
+      items: Object.values(useCanonicalLibraryStore.getState().itemsById),
+    }),
+  })
+
+  assert.equal(await removeCanonicalFromCatalog('can_x', 'cat_car'), false)
+  assert.deepEqual(useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds, [
+    'cat_car',
+    'cat_night',
+  ])
+  assert.equal(useLibraryPersistenceStore.getState().message, SAVE_FAILED_MESSAGE)
+
+  fail = false
+  assert.equal(await removeCanonicalFromCatalog('can_x', 'cat_car'), true)
+  assert.equal(unassignCalls, 2)
+  assert.deepEqual(useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds, [
+    'cat_night',
+  ])
+  assert.equal(useCanonicalLibraryStore.getState().itemsById.can_x?.state.liked, true)
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+})
+
+test('remove network ambiguous reconciles absent membership as success', async () => {
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+  arm()
+  bindAuthSessionEpoch('user-a')
+  const item = canonicalItem(
+    'can_x',
+    'Город',
+    [sourceCopy('yandex-music', '101', 'can_x', 'Город')],
+    true,
+    ['cat_car', 'cat_night'],
+  )
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [item])
+  setCanonicalRemote({
+    ensureIdentity: async () => {
+      throw new Error('unused')
+    },
+    patchCanonicalLiked: async () => {
+      throw new Error('unused')
+    },
+    assignCanonical: async () => {
+      throw new Error('unused')
+    },
+    unassignCanonical: async () => {
+      throw new TypeError('Failed to fetch')
+    },
+    loadCanonicalLibrary: async () => ({
+      items: [
+        {
+          ...item,
+          catalogIds: ['cat_night'],
+        },
+      ],
+    }),
+  })
+
+  assert.equal(await removeCanonicalFromCatalog('can_x', 'cat_car'), true)
+  assert.deepEqual(useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds, [
+    'cat_night',
+  ])
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+})
+
+test('remove 404 without server proof is not false success', async () => {
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+  arm()
+  bindAuthSessionEpoch('user-a')
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [
+    canonicalItem(
+      'can_x',
+      'Город',
+      [sourceCopy('yandex-music', '101', 'can_x', 'Город')],
+      true,
+      ['cat_car'],
+    ),
+  ])
+  setCanonicalRemote({
+    ensureIdentity: async () => {
+      throw new Error('unused')
+    },
+    patchCanonicalLiked: async () => {
+      throw new Error('unused')
+    },
+    assignCanonical: async () => {
+      throw new Error('unused')
+    },
+    unassignCanonical: async () => {
+      throw new LibraryHttpError(404)
+    },
+    loadCanonicalLibrary: async () => {
+      throw new TypeError('Failed to fetch')
+    },
+  })
+
+  assert.equal(await removeCanonicalFromCatalog('can_x', 'cat_car'), false)
+  assert.deepEqual(useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds, [
+    'cat_car',
+  ])
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+})
+
+test('remove different tracks are independent flights', async () => {
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+  arm()
+  bindAuthSessionEpoch('user-a')
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [
+    canonicalItem(
+      'can_a',
+      'A',
+      [sourceCopy('yandex-music', '1', 'can_a', 'A')],
+      true,
+      ['cat_car'],
+    ),
+    canonicalItem(
+      'can_b',
+      'B',
+      [sourceCopy('yandex-music', '2', 'can_b', 'B')],
+      true,
+      ['cat_car'],
+    ),
+  ])
+  const unassignIds: string[] = []
+  setCanonicalRemote({
+    ensureIdentity: async () => {
+      throw new Error('unused')
+    },
+    patchCanonicalLiked: async () => {
+      throw new Error('unused')
+    },
+    assignCanonical: async () => {
+      throw new Error('unused')
+    },
+    unassignCanonical: async (_catalogId, canonicalTrackId) => {
+      unassignIds.push(canonicalTrackId)
+    },
+    loadCanonicalLibrary: async () => ({
+      items: Object.values(useCanonicalLibraryStore.getState().itemsById),
+    }),
+  })
+
+  const [okA, okB] = await Promise.all([
+    removeCanonicalFromCatalog('can_a', 'cat_car'),
+    removeCanonicalFromCatalog('can_b', 'cat_car'),
+  ])
+  assert.equal(okA, true)
+  assert.equal(okB, true)
+  assert.deepEqual(unassignIds.sort(), ['can_a', 'can_b'])
+  assert.deepEqual(useCanonicalLibraryStore.getState().itemsById.can_a?.catalogIds, [])
+  assert.deepEqual(useCanonicalLibraryStore.getState().itemsById.can_b?.catalogIds, [])
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+})
+
+test('remove account switch mid-flight does not drop membership for B', async () => {
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+  arm()
+  bindAuthSessionEpoch('user-a')
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [
+    canonicalItem(
+      'can_x',
+      'Город',
+      [sourceCopy('yandex-music', '101', 'can_x', 'Город')],
+      true,
+      ['cat_car'],
+    ),
+  ])
+  let resolveUnassign!: () => void
+  const gate = new Promise<void>((resolve) => {
+    resolveUnassign = resolve
+  })
+  setCanonicalRemote({
+    ensureIdentity: async () => {
+      throw new Error('unused')
+    },
+    patchCanonicalLiked: async () => {
+      throw new Error('unused')
+    },
+    assignCanonical: async () => {
+      throw new Error('unused')
+    },
+    unassignCanonical: async () => {
+      await gate
+    },
+    loadCanonicalLibrary: async () => ({
+      items: Object.values(useCanonicalLibraryStore.getState().itemsById),
+    }),
+  })
+
+  const pending = removeCanonicalFromCatalog('can_x', 'cat_car')
+  await Promise.resolve()
+  bindAuthSessionEpoch('user-b')
+  useCanonicalLibraryStore.getState().replaceForUser('user-b', [
+    canonicalItem(
+      'can_b',
+      'B',
+      [sourceCopy('yandex-music', '202', 'can_b', 'B')],
+      true,
+      ['cat_car'],
+    ),
+  ])
+  resolveUnassign()
+  assert.equal(await pending, false)
+  assert.ok(useCanonicalLibraryStore.getState().itemsById.can_b)
+  assert.deepEqual(useCanonicalLibraryStore.getState().itemsById.can_b?.catalogIds, [
+    'cat_car',
+  ])
+  assert.equal(useCanonicalLibraryStore.getState().itemsById.can_x, undefined)
   resetRuntime()
   resetAuthSessionEpochForTests()
 })

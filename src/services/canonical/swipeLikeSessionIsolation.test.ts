@@ -175,6 +175,7 @@ test('LEFT pending → logout A → login B: stale like does not write B store o
       throw new Error('assign should not run after stale like')
     },
     unassignCanonical: async () => undefined,
+    loadCanonicalLibrary: async () => ({ items: [] }),
   })
 
   const like = classifySwipeTrack(track, 'like')
@@ -248,6 +249,7 @@ test('commitSwipeLikeWithInbox rejects after session switch before store write',
       throw new Error('should not assign for stale session')
     },
     unassignCanonical: async () => undefined,
+    loadCanonicalLibrary: async () => ({ items: [] }),
   })
 
   const pending = commitSwipeLikeWithInbox(track)
