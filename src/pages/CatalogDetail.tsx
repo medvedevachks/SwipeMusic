@@ -41,7 +41,6 @@ import {
   getCatalogRemoveContext,
   switchCatalogRemoveBusyState,
   type CatalogRemoveBusyState,
-  type CatalogRemoveContext,
 } from './catalogDetailRemoveBusy'
 
 export default function CatalogDetail() {
@@ -72,18 +71,15 @@ export default function CatalogDetail() {
   /** Синхронный gate: React busyKey ещё не успевает при быстрых повторных Play. */
   const playBusyRef = useRef(false)
   const crudBusyRef = useRef(false)
-  /** Синхронный Set busy-id: React state отстаёт при concurrent DELETE. */
+  /**
+   * Синхронный gate in-flight: ключ `${generation}:${trackId}`,
+   * чтобы stale DELETE каталога A не блокировал тот же trackId в B.
+   */
   const removeBusyIdsRef = useRef<Set<string>>(new Set())
   const removeMountedRef = useRef(true)
-  const removeContextRef = useRef<CatalogRemoveContext>(
-    getCatalogRemoveContext(removeBusy),
-  )
 
   if (removeBusy.catalogId !== catalogId) {
-    const next = switchCatalogRemoveBusyState(removeBusy, catalogId)
-    setRemoveBusy(next)
-    removeContextRef.current = getCatalogRemoveContext(next)
-    removeBusyIdsRef.current = new Set()
+    setRemoveBusy(switchCatalogRemoveBusyState(removeBusy, catalogId))
   }
 
   useEffect(() => {
@@ -521,22 +517,19 @@ export default function CatalogDetail() {
                   disabled={trackRemoveBusy}
                   onClick={() => {
                     const id = item.canonicalTrack.id
-                    if (removeBusyIdsRef.current.has(id)) {
+                    if (removeBusy.catalogId !== catalogId) {
                       return
                     }
-                    const contextAtStart = removeContextRef.current
-                    const started = beginCatalogTrackRemove(
-                      {
-                        ...contextAtStart,
-                        busyIds: removeBusyIdsRef.current,
-                        error: removeBusy.error,
-                      },
-                      id,
-                    )
+                    const contextAtStart = getCatalogRemoveContext(removeBusy)
+                    const flightKey = `${contextAtStart.generation}:${id}`
+                    if (removeBusyIdsRef.current.has(flightKey)) {
+                      return
+                    }
+                    const started = beginCatalogTrackRemove(removeBusy, id)
                     if (!started.started) {
                       return
                     }
-                    removeBusyIdsRef.current = new Set(started.state.busyIds)
+                    removeBusyIdsRef.current.add(flightKey)
                     setRemoveBusy(started.state)
                     const sessionAtStart = captureAuthSession()
                     void removeCanonicalFromCatalog(id, catalog.id).then((ok) => {
@@ -550,7 +543,7 @@ export default function CatalogDetail() {
                           failureMessage: `${SAVE_FAILED_MESSAGE} Не удалось убрать из каталога — можно повторить.`,
                         })
                         if (next !== current) {
-                          removeBusyIdsRef.current = new Set(next.busyIds)
+                          removeBusyIdsRef.current.delete(flightKey)
                         }
                         return next
                       })

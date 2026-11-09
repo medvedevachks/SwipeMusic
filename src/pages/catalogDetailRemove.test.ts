@@ -101,13 +101,15 @@ test('CatalogDetail wires catalog context isolation for remove callbacks', () =>
   assert.match(source, /applyCatalogRemoveResult/)
   assert.match(source, /switchCatalogRemoveBusyState/)
   assert.match(source, /contextAtStart/)
-  assert.match(source, /removeContextRef/)
+  assert.match(source, /flightKey/)
+  assert.match(source, /switchCatalogRemoveBusyState/)
   assert.match(source, /captureAuthSession/)
   assert.match(source, /Не удалось убрать из каталога/)
   assert.match(source, /disabled=\{trackRemoveBusy\}/)
   assert.equal(source.includes('setRemoveBusy(createEmptyCatalogRemoveBusyState())'), false)
   assert.equal(/\bremoveBusyId\b/.test(source), false)
   assert.equal(/\bremoveBusyRef\b/.test(source), false)
+  assert.equal(/\bremoveContextRef\b/.test(source), false)
 })
 
 test('A and B can be busy at the same time', () => {
