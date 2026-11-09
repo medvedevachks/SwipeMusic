@@ -340,6 +340,39 @@ test('demo-only SourceCopy is unavailable for catalog playback without allowDemo
   assert.equal(resolved.message, CATALOG_PLAYBACK_MESSAGE.TRACK_UNAVAILABLE)
 })
 
+/**
+ * LIB04-ACC-1: mock (DEMO_SOURCE_ID) отфильтровывается в copiesForPlayback
+ * при allowDemo=false / omitted — production Play «Моя музыка» с только mock
+ * копиями даёт empty (NO_PLAYABLE), даже если AvailabilityPort сказал PLAYABLE.
+ */
+test('LIB04-ACC-1: mock-only my-music play returns empty without allowDemo', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const demo = copyOf('can_mock_only', 'mock', 'r1', 'Midnight Drive')
+  let playCalls = 0
+  const result = await playUserCatalog(
+    {
+      catalog: { id: 'sys_my_music', name: 'Моя музыка' },
+      items: [itemOf('can_mock_only', [demo], 'Midnight Drive')],
+    },
+    {
+      now: 24_100,
+      // allowDemo omitted → false
+      port: portFor({
+        mock: probeAdapter('mock', PLAYBACK_AVAILABILITY_STATUS.PLAYABLE),
+      }),
+      findTrack: findTrackMap([trackFor(demo)]),
+      playSelection: async () => {
+        playCalls += 1
+      },
+    },
+  )
+  assert.equal(result.status, 'empty')
+  if (result.status !== 'empty') return
+  assert.equal(result.message, CATALOG_PLAYBACK_MESSAGE.NO_PLAYABLE)
+  assert.equal(playCalls, 0)
+})
+
 test('several copies of one composition pick one PLAYABLE handoff track', async () => {
   resetPlaybackAvailability()
   const yandex = copyOf('can_multi', 'yandex-music', 'y1', 'Multi')
@@ -1664,4 +1697,260 @@ test('replacePlaylistItemsPreservingPlayback rejects foreign owner without setQu
   assert.equal(after.items[1]?.id, b.id)
   assert.deepEqual(after.history, before.history)
   assert.equal(after.repeatMode, 'ALL')
+})
+
+test('onPlaybackAccepted fires when player pending appears before playSelection settles', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const a = copyOf('can_pend', 'local-folder', 'p.mp3', 'Pending')
+  const track = trackFor(a)
+  let releasePlay!: () => void
+  const holdPlay = new Promise<void>((resolve) => {
+    releasePlay = resolve
+  })
+  const events: string[] = []
+  let pendingTrack: Track | null = null
+
+  const pending = playUserCatalog(
+    { catalog: CATALOG, items: [itemOf('can_pend', [a], 'Pending')] },
+    {
+      now: 50_050,
+      port: portFor({
+        'local-folder': probeAdapter(
+          'local-folder',
+          PLAYBACK_AVAILABILITY_STATUS.PLAYABLE,
+        ),
+      }),
+      findTrack: findTrackMap([track]),
+      getPlayerState: () => ({
+        pendingTrack,
+        currentTrack: null,
+      }),
+      playSelection: async () => {
+        events.push('play-start')
+        pendingTrack = track
+        events.push('pending-set')
+        await holdPlay
+        events.push('play-done')
+      },
+      onPlaybackAccepted: () => {
+        events.push('accepted')
+      },
+    },
+  )
+
+  const acceptedBeforePlayDone = await new Promise<boolean>((resolve) => {
+    const started = Date.now()
+    const tick = () => {
+      if (events.includes('accepted')) {
+        resolve(true)
+        return
+      }
+      if (Date.now() - started > 3000) {
+        resolve(false)
+        return
+      }
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+
+  assert.equal(acceptedBeforePlayDone, true)
+  assert.ok(events.includes('pending-set'))
+  assert.ok(events.includes('accepted'))
+  assert.equal(events.includes('play-done'), false)
+
+  releasePlay()
+  const result = await pending
+  assert.equal(result.status, 'played')
+  assert.ok(events.includes('play-done'))
+})
+
+test('onPlaybackAccepted fires after early intent before slow queue prepare finishes', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const fast = copyOf('can_fast', 'local-folder', 'fast.mp3', 'Fast')
+  const slow = copyOf('can_slow', 'local-folder', 'slow.mp3', 'Slow')
+  const events: string[] = []
+  let releaseSlow!: () => void
+  const holdSlow = new Promise<void>((resolve) => {
+    releaseSlow = resolve
+  })
+  let acceptedTrackId: string | null = null
+
+  const pending = playUserCatalog(
+    {
+      catalog: CATALOG,
+      items: [
+        itemOf('can_fast', [fast], 'Fast'),
+        itemOf('can_slow', [slow], 'Slow'),
+      ],
+    },
+    {
+      now: 50_000,
+      concurrency: 1,
+      port: portFor({
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(input) {
+            if (input.externalId === 'slow.mp3') {
+              events.push('slow-prepare-start')
+              await holdSlow
+              events.push('slow-prepare-done')
+            }
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap([trackFor(fast), trackFor(slow)]),
+      playSelection: async (options) => {
+        events.push(`play:${options.tracks.map((track) => track.id).join(',')}`)
+      },
+      replaceQueue: async (options) => {
+        events.push(`expand:${options.tracks.map((track) => track.id).join(',')}`)
+        return true
+      },
+      onPlaybackAccepted: (info) => {
+        acceptedTrackId = info.track.id
+        events.push('accepted')
+      },
+    },
+  )
+
+  const acceptedBeforeDone = await new Promise<boolean>((resolve) => {
+    const started = Date.now()
+    const tick = () => {
+      if (events.includes('accepted')) {
+        resolve(true)
+        return
+      }
+      if (Date.now() - started > 3000) {
+        resolve(false)
+        return
+      }
+      setTimeout(tick, 10)
+    }
+    tick()
+  })
+
+  assert.equal(acceptedBeforeDone, true)
+  assert.equal(acceptedTrackId, fast.sourceTrackKey)
+  assert.ok(events.includes('play:local-folder:fast.mp3'))
+  assert.ok(events.includes('accepted'))
+  // Fullscreen-момент: prepare остальных ещё не завершён.
+  assert.equal(events.includes('slow-prepare-done'), false)
+  assert.equal(events.includes('expand:local-folder:fast.mp3,local-folder:slow.mp3'), false)
+
+  releaseSlow()
+  const result = await pending
+  assert.equal(result.status, 'played')
+  if (result.status !== 'played') return
+  assert.deepEqual(
+    result.tracks.map((track) => track.id),
+    [fast.sourceTrackKey, slow.sourceTrackKey],
+  )
+  assert.ok(events.includes('slow-prepare-done'))
+  assert.ok(events.includes('expand:local-folder:fast.mp3,local-folder:slow.mp3'))
+  // Ранний play один раз; expand не делает второй playSelection.
+  assert.equal(events.filter((row) => row.startsWith('play:')).length, 1)
+})
+
+test('onPlaybackAccepted is not called when catalog has no playable tracks', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  let accepted = 0
+  const bad = copyOf('can_bad', 'yandex-music', 'bad', 'Bad')
+  const result = await playUserCatalog(
+    { catalog: CATALOG, items: [itemOf('can_bad', [bad], 'Bad')] },
+    {
+      now: 50_100,
+      port: portFor({
+        'yandex-music': probeAdapter(
+          'yandex-music',
+          PLAYBACK_AVAILABILITY_STATUS.UNAVAILABLE,
+        ),
+      }),
+      findTrack: findTrackMap([trackFor(bad)]),
+      playSelection: async () => {
+        throw new Error('should not play')
+      },
+      onPlaybackAccepted: () => {
+        accepted += 1
+      },
+    },
+  )
+  assert.equal(result.status, 'empty')
+  assert.equal(accepted, 0)
+})
+
+test('onPlaybackAccepted still fires when autoplay is blocked after intent', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const a = copyOf('can_gesture', 'local-folder', 'g.mp3', 'Gesture')
+  let acceptedGesture: boolean | null = null
+  const result = await playUserCatalog(
+    { catalog: CATALOG, items: [itemOf('can_gesture', [a], 'Gesture')] },
+    {
+      now: 50_200,
+      port: portFor({
+        'local-folder': probeAdapter(
+          'local-folder',
+          PLAYBACK_AVAILABILITY_STATUS.PLAYABLE,
+        ),
+      }),
+      findTrack: findTrackMap([trackFor(a)]),
+      playSelection: async () => {
+        const error = new Error('NotAllowedError')
+        error.name = 'NotAllowedError'
+        throw error
+      },
+      onPlaybackAccepted: (info) => {
+        acceptedGesture = info.needsUserPlayGesture
+      },
+    },
+  )
+  assert.equal(result.status, 'played')
+  if (result.status !== 'played') return
+  assert.equal(result.needsUserPlayGesture, true)
+  assert.equal(acceptedGesture, true)
+})
+
+test('onPlaybackAccepted is skipped for superseded generation after early play', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const a = copyOf('can_cancel', 'local-folder', 'c.mp3', 'Cancel')
+  let accepted = 0
+  let releasePlay!: () => void
+  const holdPlay = new Promise<void>((resolve) => {
+    releasePlay = resolve
+  })
+
+  const pending = playUserCatalog(
+    { catalog: CATALOG, items: [itemOf('can_cancel', [a], 'Cancel')] },
+    {
+      now: 50_300,
+      port: portFor({
+        'local-folder': probeAdapter(
+          'local-folder',
+          PLAYBACK_AVAILABILITY_STATUS.PLAYABLE,
+        ),
+      }),
+      findTrack: findTrackMap([trackFor(a)]),
+      playSelection: async () => {
+        await holdPlay
+      },
+      onPlaybackAccepted: () => {
+        accepted += 1
+      },
+    },
+  )
+
+  cancelCatalogPlaybackGate()
+  releasePlay()
+  const result = await pending
+  assert.ok(result.status === 'played' || result.status === 'busy')
+  assert.equal(accepted, 0)
 })

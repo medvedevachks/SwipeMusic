@@ -70,7 +70,7 @@ test('shouldOpenFullscreenAfterCatalogPlay only on played', () => {
   assert.equal(shouldOpenFullscreenAfterCatalogPlay({ status: 'unavailable' }), false)
 })
 
-test('CatalogDetail opens fullscreen only after successful CATALOG play', () => {
+test('CatalogDetail opens fullscreen on early playback intent, not after full queue prepare', () => {
   const source = readFileSync(new URL('../pages/CatalogDetail.tsx', import.meta.url), 'utf8')
   assert.match(source, /openFullscreenPlayer/)
   assert.match(source, /shouldOpenFullscreenAfterCatalogPlay/)
@@ -79,11 +79,33 @@ test('CatalogDetail opens fullscreen only after successful CATALOG play', () => 
     source.indexOf('const runPlay'),
     source.indexOf('const catalogBusy'),
   )
-  assert.match(runPlay, /status === 'played'/)
+  assert.match(runPlay, /onPlaybackAccepted/)
+  assert.match(runPlay, /openFullscreenIfCurrent/)
+  assert.match(runPlay, /playMountedRef/)
+  assert.match(runPlay, /fullscreenOpenedForPlayRef/)
   assert.match(runPlay, /openFullscreenPlayer\(navigate, location\)/)
   assert.match(runPlay, /playBusyRef/)
   // Пустой каталог не запускает play — кнопка disabled.
   assert.match(source, /disabled=\{anyBusy \|\| tracks\.length === 0\}/)
+})
+
+test('playUserCatalog exposes onPlaybackAccepted before queue expand', () => {
+  const source = readFileSync(
+    new URL('../services/catalogPlayback/playUserCatalog.ts', import.meta.url),
+    'utf8',
+  )
+  assert.match(source, /onPlaybackAccepted\?:/)
+  assert.match(source, /deps\.onPlaybackAccepted\?\.\(/)
+  // Callback после beginCatalogLoopSession внутри playEarlyTrack, до await buildCatalogPlaybackQueue.
+  const early = source.slice(
+    source.indexOf('const playEarlyTrack'),
+    source.indexOf('if (preferredId)'),
+  )
+  assert.match(early, /onPlaybackAccepted/)
+  assert.match(early, /beginCatalogLoopSession/)
+  const buildAwaitPos = source.indexOf('await buildCatalogPlaybackQueue')
+  const acceptedPos = source.indexOf('deps.onPlaybackAccepted')
+  assert.ok(acceptedPos > 0 && buildAwaitPos > acceptedPos)
 })
 
 test('FullscreenPlayer shows CATALOG queue list without second AudioPlayer', () => {

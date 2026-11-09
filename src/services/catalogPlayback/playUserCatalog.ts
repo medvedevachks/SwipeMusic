@@ -55,6 +55,22 @@ export type PlayUserCatalogDeps = {
     context: PlaylistPlayContext
   }) => boolean | void | Promise<boolean | void>
   onInFlight?: (count: number) => void
+  /**
+   * Сразу после успешного принятия первого playback intent (ранний старт),
+   * до завершения buildCatalogPlaybackQueue / expand и не дожидаясь
+   * окончания adapter.load/play (UI может открыть Fullscreen на «Загрузка…»).
+   * Не вызывается при empty / unavailable / busy / error до intent.
+   */
+  onPlaybackAccepted?: (info: {
+    track: Track
+    entry: CatalogQueueEntry
+    needsUserPlayGesture: boolean
+  }) => void
+  /** Для тестов: состояние плеера без реального AudioPlayer. */
+  getPlayerState?: () => {
+    pendingTrack: Track | null
+    currentTrack: Track | null
+  }
 }
 
 export type PlayUserCatalogResult =
@@ -200,26 +216,105 @@ export async function playUserCatalog(
         .playLibrarySelection
     }
 
+    const readPlayerState = async () => {
+      if (deps.getPlayerState) {
+        return deps.getPlayerState()
+      }
+      const { getAudioPlayer } = await import('../audioPlayer/index.ts')
+      return getAudioPlayer().getState()
+    }
+
     const playEarlyTrack = async (entry: CatalogQueueEntry): Promise<'ok' | 'error'> => {
       const playSelection = await resolvePlaySelection()
-      try {
-        await playSelection({
-          tracks: [entry.track],
-          startIndex: 0,
-          context,
+      let notified = false
+      let resolveNotified: (() => void) | null = null
+      const notifiedPromise = new Promise<void>((resolve) => {
+        resolveNotified = resolve
+      })
+
+      const notifyAccepted = () => {
+        if (notified || !isCurrent(generation)) {
+          return
+        }
+        notified = true
+        startedEarly = true
+        earlyStartCanonicalId = entry.canonicalTrackId
+        // Новая явная сессия Play — не late expand.
+        beginCatalogLoopSession(input.catalog.id)
+        deps.onPlaybackAccepted?.({
+          track: entry.track,
+          entry,
+          needsUserPlayGesture,
         })
-      } catch (error) {
-        if (isAutoplayBlockedError(error)) {
-          needsUserPlayGesture = true
-        } else {
+        resolveNotified?.()
+      }
+
+      let playSettled: 'ok' | 'error' | null = null
+      const playTask = (async (): Promise<'ok' | 'error'> => {
+        try {
+          await playSelection({
+            tracks: [entry.track],
+            startIndex: 0,
+            context,
+          })
+          playSettled = 'ok'
+          // Синхронно после playSelection — как раньше для Repeat policy / тестов.
+          notifyAccepted()
+          return 'ok'
+        } catch (error) {
+          if (isAutoplayBlockedError(error)) {
+            needsUserPlayGesture = true
+            playSettled = 'ok'
+            notifyAccepted()
+            return 'ok'
+          }
+          playSettled = 'error'
           return 'error'
         }
+      })()
+
+      // Intent принят, когда плеер уже держит этот трек (onPending/current),
+      // даже если adapter.load/play ещё идёт — Fullscreen/queue prepare не ждут звук.
+      void (async () => {
+        const trackId = entry.track.id
+        const deadline = Date.now() + 15_000
+        while (Date.now() < deadline && isCurrent(generation) && !notified) {
+          try {
+            const state = await readPlayerState()
+            if (
+              state.pendingTrack?.id === trackId ||
+              state.currentTrack?.id === trackId
+            ) {
+              notifyAccepted()
+              return
+            }
+          } catch {
+            // AudioPlayer может быть недоступен в unit-тестах без getPlayerState.
+          }
+          await new Promise((resolve) => setTimeout(resolve, 16))
+        }
+      })()
+
+      await Promise.race([playTask, notifiedPromise])
+
+      if (playSettled === 'error' && !notified) {
+        return 'error'
       }
-      startedEarly = true
-      earlyStartCanonicalId = entry.canonicalTrackId
-      // Новая явная сессия Play — не late expand.
-      beginCatalogLoopSession(input.catalog.id)
-      return 'ok'
+
+      if (notified) {
+        if (playSettled === null) {
+          // load/play ещё идёт — очередь готовим параллельно.
+          void playTask
+        }
+        return 'ok'
+      }
+
+      const playResult = await playTask
+      if (playResult === 'ok') {
+        notifyAccepted()
+        return 'ok'
+      }
+      return 'error'
     }
 
     if (preferredId) {

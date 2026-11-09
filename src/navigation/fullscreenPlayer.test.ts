@@ -125,6 +125,7 @@ test('FullscreenPlayer consumes playerStore and does not construct AudioPlayer',
   assert.match(source, /useGlobalPlayerStore/)
   assert.match(source, /classifySwipeTrack/)
   assert.match(source, /commitCatalogChoice/)
+  assert.match(source, /removeSortedCanonicalFromSwipesQueue/)
   assert.match(source, /resolvePlayerSessionLabel/)
   assert.equal(source.includes('new AudioPlayer'), false)
   assert.equal(source.includes('getAudioPlayer('), false)

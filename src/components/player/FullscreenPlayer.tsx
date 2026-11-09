@@ -12,8 +12,10 @@ import {
   resolveFullscreenActionTrack,
   shouldDismissCatalogOnTrackChange,
 } from '../../navigation/fullscreenPlayerActions'
+import { captureAuthSession, isAuthSessionCurrent } from '../../services/auth/sessionEpoch'
 import { sourceTrackKeyOf } from '../../services/canonical/mapCanonical'
 import { canonicalItemForTrack, isSourceCopyLiked } from '../../services/canonical/selectors'
+import { removeSortedCanonicalFromSwipesQueue } from '../../services/canonical/swipeInboxQueue'
 import { commitCatalogChoice } from '../../services/canonical/userOrganization'
 import { createCategoryConfirmed } from '../../services/catalogs/createCategoryConfirmed'
 import { beginSearchFlowCommand } from '../../services/continuation/searchFlowDiag'
@@ -595,6 +597,7 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
           const category = useCollectionStore
             .getState()
             .categories.find((item) => item.id === categoryId)
+          const sessionAtStart = captureAuthSession()
           setCatalogBusy(true)
           void commitCatalogChoice(track, categoryId, category).then((result) => {
             setCatalogBusy(false)
@@ -603,11 +606,19 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
               return
             }
             if (result.status === 'partial') {
+              // Разбор inbox не завершён — очередь не трогаем.
               setNotice(
                 'Сохранено в каталог, но не удалось убрать из «Свайпов». Можно повторить позже.',
               )
               clearCatalogSheet()
               return
+            }
+            // Успех: убрать из будущих циклов sys_swipes; текущий звук и Next не трогаем.
+            if (
+              result.canonicalTrackId &&
+              isAuthSessionCurrent(sessionAtStart)
+            ) {
+              removeSortedCanonicalFromSwipesQueue(result.canonicalTrackId)
             }
             setNotice(null)
             clearCatalogSheet()

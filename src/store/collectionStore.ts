@@ -105,6 +105,11 @@ export const useCollectionStore = create<CollectionState>((set, get) => ({
     }
   },
 
+  /**
+   * Локальный helper для тестов / legacy.
+   * UI каталогов (CatalogList / CatalogDetail) обязан использовать
+   * createCategoryConfirmed / updateCategoryConfirmed / deleteCategoryConfirmed.
+   */
   createCategory: (input) => {
     const now = new Date().toISOString()
     const category: Category = {

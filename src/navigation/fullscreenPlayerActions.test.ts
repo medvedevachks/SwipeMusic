@@ -160,6 +160,14 @@ test('FullscreenPlayer wires race-safe catalog/like and does not own playback en
   assert.match(source, /resolveCatalogCommitTrack/)
   assert.match(source, /classifySwipeTrack/)
   assert.match(source, /commitCatalogChoice/)
+  assert.match(source, /removeSortedCanonicalFromSwipesQueue/)
+  assert.match(source, /result\.canonicalTrackId/)
+  assert.match(source, /isAuthSessionCurrent\(sessionAtStart\)/)
+  const partialBlock = source.match(
+    /if \(result\.status === 'partial'\) \{[\s\S]*?\n            \}/,
+  )?.[0]
+  assert.ok(partialBlock)
+  assert.equal(partialBlock.includes('removeSortedCanonicalFromSwipesQueue'), false)
   assert.match(source, /mini-player-open-fullscreen/)
   assert.equal(source.includes('switchTo('), false)
   assert.equal(source.includes('new AudioPlayer'), false)

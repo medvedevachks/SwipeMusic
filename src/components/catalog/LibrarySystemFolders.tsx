@@ -4,6 +4,7 @@ import {
   canonicalCatalogCount,
   likedCanonicalItems,
   listCanonicalItems,
+  myMusicCanonicalItems,
 } from '../../services/canonical/selectors'
 import { formatCatalogTrackCount } from '../../services/catalogs/selectCatalogs'
 import {
@@ -23,7 +24,7 @@ function countForFolder(
     case 'favorites':
       return likedCanonicalItems(items).length
     case 'my-music':
-      return items.length
+      return myMusicCanonicalItems(items).length
     default: {
       const _exhaustive: never = folderId
       void _exhaustive
