@@ -340,6 +340,39 @@ test('demo-only SourceCopy is unavailable for catalog playback without allowDemo
   assert.equal(resolved.message, CATALOG_PLAYBACK_MESSAGE.TRACK_UNAVAILABLE)
 })
 
+/**
+ * LIB04-ACC-1: mock (DEMO_SOURCE_ID) отфильтровывается в copiesForPlayback
+ * при allowDemo=false / omitted — production Play «Моя музыка» с только mock
+ * копиями даёт empty (NO_PLAYABLE), даже если AvailabilityPort сказал PLAYABLE.
+ */
+test('LIB04-ACC-1: mock-only my-music play returns empty without allowDemo', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const demo = copyOf('can_mock_only', 'mock', 'r1', 'Midnight Drive')
+  let playCalls = 0
+  const result = await playUserCatalog(
+    {
+      catalog: { id: 'sys_my_music', name: 'Моя музыка' },
+      items: [itemOf('can_mock_only', [demo], 'Midnight Drive')],
+    },
+    {
+      now: 24_100,
+      // allowDemo omitted → false
+      port: portFor({
+        mock: probeAdapter('mock', PLAYBACK_AVAILABILITY_STATUS.PLAYABLE),
+      }),
+      findTrack: findTrackMap([trackFor(demo)]),
+      playSelection: async () => {
+        playCalls += 1
+      },
+    },
+  )
+  assert.equal(result.status, 'empty')
+  if (result.status !== 'empty') return
+  assert.equal(result.message, CATALOG_PLAYBACK_MESSAGE.NO_PLAYABLE)
+  assert.equal(playCalls, 0)
+})
+
 test('several copies of one composition pick one PLAYABLE handoff track', async () => {
   resetPlaybackAvailability()
   const yandex = copyOf('can_multi', 'yandex-music', 'y1', 'Multi')
