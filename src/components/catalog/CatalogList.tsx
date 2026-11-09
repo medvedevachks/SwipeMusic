@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { getCategoryGlyph } from '../../config/categoryPresets'
 import {
@@ -6,10 +6,18 @@ import {
   listCanonicalItems,
 } from '../../services/canonical/selectors'
 import {
+  CatalogSyncAmbiguousError,
+  createCategoryConfirmed,
+  isAmbiguousCatalogTransportError,
+} from '../../services/catalogs/catalogCrudConfirmed'
+import { isRetryableCategoryCreateError } from '../../services/catalogs/categoryPickerCreateGuard'
+import {
   formatCatalogTrackCount,
   listCatalogs,
 } from '../../services/catalogs/selectCatalogs'
 import { listUserOrganizationCatalogs } from '../../services/catalogs/systemFolders'
+import { createId } from '../../utils/id'
+import { SAVE_FAILED_MESSAGE } from '../../services/libraryPersistence/statusStore'
 import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore'
 import { useCollectionStore } from '../../store/collectionStore'
 import type { Catalog } from '../../types/category'
@@ -40,10 +48,22 @@ export function CatalogList({
 }: CatalogListProps) {
   const categories = useCollectionStore((state) => state.categories)
   const itemsById = useCanonicalLibraryStore((state) => state.itemsById)
-  const createCategory = useCollectionStore((state) => state.createCategory)
   const canonicalItems = listCanonicalItems(Object.values(itemsById))
   const [creating, setCreating] = useState(false)
+  const [createBusy, setCreateBusy] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  /** Стабильный id на время retry после неоднозначного CREATE. */
+  const pendingCreateIdRef = useRef<string | null>(null)
   const catalogs = listCatalogs(listUserOrganizationCatalogs(categories))
+
+  const closeCreateForm = () => {
+    if (createBusy) {
+      return
+    }
+    setCreating(false)
+    setCreateError(null)
+    pendingCreateIdRef.current = null
+  }
 
   return (
     <section className="space-y-3" aria-label="Мои каталоги">
@@ -54,8 +74,16 @@ export function CatalogList({
         {showCreate ? (
           <button
             type="button"
-            className="min-h-11 rounded-xl bg-[var(--color-accent)] px-3 py-2 text-sm font-medium text-white"
-            onClick={() => setCreating((open) => !open)}
+            className="min-h-11 rounded-xl bg-[var(--color-accent)] px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+            disabled={createBusy}
+            onClick={() => {
+              if (creating) {
+                closeCreateForm()
+                return
+              }
+              setCreating(true)
+              setCreateError(null)
+            }}
           >
             Создать каталог
           </button>
@@ -65,10 +93,50 @@ export function CatalogList({
       {creating ? (
         <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
           <CreateCategoryForm
-            onCancel={() => setCreating(false)}
-            onSubmit={(input) => {
-              createCategory(input)
-              setCreating(false)
+            busy={createBusy}
+            error={createError}
+            onCancel={closeCreateForm}
+            onSubmit={async (input) => {
+              if (createBusy) {
+                return
+              }
+              setCreateBusy(true)
+              setCreateError(null)
+              if (!pendingCreateIdRef.current) {
+                pendingCreateIdRef.current = createId('cat')
+              }
+              try {
+                await createCategoryConfirmed({
+                  ...input,
+                  id: pendingCreateIdRef.current,
+                })
+                pendingCreateIdRef.current = null
+                setCreating(false)
+                setCreateError(null)
+              } catch (error) {
+                if (!isRetryableCategoryCreateError(error)) {
+                  pendingCreateIdRef.current = null
+                  setCreating(false)
+                  setCreateError(null)
+                  return
+                }
+                if (
+                  error instanceof CatalogSyncAmbiguousError ||
+                  isAmbiguousCatalogTransportError(error)
+                ) {
+                  setCreateError(
+                    error instanceof CatalogSyncAmbiguousError
+                      ? error.message
+                      : `${SAVE_FAILED_MESSAGE} Результат не подтверждён — повторите без смены названия.`,
+                  )
+                  return
+                }
+                setCreateError(
+                  `${SAVE_FAILED_MESSAGE} Каталог не создан — можно повторить.`,
+                )
+              } finally {
+                setCreateBusy(false)
+              }
             }}
           />
         </div>

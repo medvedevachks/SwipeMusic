@@ -22,6 +22,14 @@ import {
 } from '../services/catalogPlayback'
 import { shouldOpenFullscreenAfterCatalogPlay } from '../navigation/catalogFullscreen'
 import { openFullscreenPlayer } from '../navigation/fullscreenPlayer'
+import {
+  CatalogSyncAmbiguousError,
+  deleteCategoryConfirmed,
+  isAmbiguousCatalogTransportError,
+  updateCategoryConfirmed,
+} from '../services/catalogs/catalogCrudConfirmed'
+import { isRetryableCategoryCreateError } from '../services/catalogs/categoryPickerCreateGuard'
+import { SAVE_FAILED_MESSAGE } from '../services/libraryPersistence/statusStore'
 import { useCanonicalLibraryStore } from '../store/canonicalLibraryStore'
 import { useCollectionStore } from '../store/collectionStore'
 import { getSourceDisplayName } from '../utils/sourceDisplay'
@@ -33,8 +41,6 @@ export default function CatalogDetail() {
   const catalogId = params.catalogId ?? ''
   const categories = useCollectionStore((state) => state.categories)
   const itemsById = useCanonicalLibraryStore((state) => state.itemsById)
-  const updateCategory = useCollectionStore((state) => state.updateCategory)
-  const deleteCategory = useCollectionStore((state) => state.deleteCategory)
 
   const catalog = getCatalogById(categories, catalogId)
   const canonicalItems = listCanonicalItems(Object.values(itemsById))
@@ -45,11 +51,14 @@ export default function CatalogDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [removed, setRemoved] = useState(false)
   const [busyKey, setBusyKey] = useState<string | null>(null)
+  const [crudBusy, setCrudBusy] = useState(false)
+  const [crudError, setCrudError] = useState<string | null>(null)
   const [playError, setPlayError] = useState<string | null>(null)
   const [playHint, setPlayHint] = useState<string | null>(null)
   const playGeneration = useRef(0)
   /** Синхронный gate: React busyKey ещё не успевает при быстрых повторных Play. */
   const playBusyRef = useRef(false)
+  const crudBusyRef = useRef(false)
 
   useEffect(() => {
     return () => {
@@ -89,13 +98,75 @@ export default function CatalogDetail() {
     )
   }
 
-  const saveName = () => {
+  const saveName = async () => {
     const trimmed = name.trim()
-    if (!trimmed) {
+    if (!trimmed || crudBusyRef.current) {
       return
     }
-    updateCategory(catalog.id, { name: trimmed })
-    setRenaming(false)
+    crudBusyRef.current = true
+    setCrudBusy(true)
+    setCrudError(null)
+    try {
+      await updateCategoryConfirmed(catalog.id, { name: trimmed })
+      setRenaming(false)
+      setCrudError(null)
+    } catch (error) {
+      if (!isRetryableCategoryCreateError(error)) {
+        setRenaming(false)
+        setCrudError(null)
+        return
+      }
+      if (
+        error instanceof CatalogSyncAmbiguousError ||
+        isAmbiguousCatalogTransportError(error)
+      ) {
+        setCrudError(
+          error instanceof CatalogSyncAmbiguousError
+            ? error.message
+            : `${SAVE_FAILED_MESSAGE} Результат переименования не подтверждён.`,
+        )
+        return
+      }
+      setCrudError(`${SAVE_FAILED_MESSAGE} Имя не изменено — можно повторить.`)
+    } finally {
+      crudBusyRef.current = false
+      setCrudBusy(false)
+    }
+  }
+
+  const confirmDeleteCatalog = async () => {
+    if (crudBusyRef.current) {
+      return
+    }
+    crudBusyRef.current = true
+    setCrudBusy(true)
+    setCrudError(null)
+    try {
+      await deleteCategoryConfirmed(catalog.id)
+      setRemoved(true)
+      navigate('/library')
+    } catch (error) {
+      if (!isRetryableCategoryCreateError(error)) {
+        setConfirmDelete(false)
+        setCrudError(null)
+        return
+      }
+      if (
+        error instanceof CatalogSyncAmbiguousError ||
+        isAmbiguousCatalogTransportError(error)
+      ) {
+        setCrudError(
+          error instanceof CatalogSyncAmbiguousError
+            ? error.message
+            : `${SAVE_FAILED_MESSAGE} Результат удаления не подтверждён.`,
+        )
+        return
+      }
+      setCrudError(`${SAVE_FAILED_MESSAGE} Каталог не удалён — можно повторить.`)
+    } finally {
+      crudBusyRef.current = false
+      setCrudBusy(false)
+    }
   }
 
   const runPlay = async (startCanonicalTrackId?: string) => {
@@ -146,7 +217,7 @@ export default function CatalogDetail() {
   }
 
   const catalogBusy = busyKey === 'catalog'
-  const anyBusy = busyKey !== null
+  const anyBusy = busyKey !== null || crudBusy
 
   return (
     <section className="space-y-4 pb-8">
@@ -220,31 +291,47 @@ export default function CatalogDetail() {
         </p>
       ) : null}
 
+      {crudError ? (
+        <p
+          className="rounded-xl border border-rose-300/70 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-500/40 dark:bg-rose-950/40 dark:text-rose-100"
+          role="alert"
+        >
+          {crudError}
+        </p>
+      ) : null}
+
       {renaming ? (
         <form
           className="flex flex-wrap gap-2"
           onSubmit={(event) => {
             event.preventDefault()
-            saveName()
+            void saveName()
           }}
         >
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
             aria-label="Новое название каталога"
-            className="min-h-11 min-w-[12rem] flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 text-sm"
+            disabled={crudBusy}
+            className="min-h-11 min-w-[12rem] flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-bg)] px-3 text-sm disabled:opacity-60"
             autoFocus
           />
           <button
             type="submit"
-            className="min-h-11 rounded-xl bg-[var(--color-accent)] px-3 text-sm font-medium text-white"
+            disabled={crudBusy || !name.trim()}
+            aria-busy={crudBusy || undefined}
+            className="min-h-11 rounded-xl bg-[var(--color-accent)] px-3 text-sm font-medium text-white disabled:opacity-40"
           >
-            Сохранить
+            {crudBusy ? 'Сохранение…' : 'Сохранить'}
           </button>
           <button
             type="button"
-            className="min-h-11 rounded-xl border border-[var(--color-border)] px-3 text-sm"
-            onClick={() => setRenaming(false)}
+            className="min-h-11 rounded-xl border border-[var(--color-border)] px-3 text-sm disabled:opacity-40"
+            disabled={crudBusy}
+            onClick={() => {
+              setRenaming(false)
+              setCrudError(null)
+            }}
           >
             Отмена
           </button>
@@ -253,11 +340,13 @@ export default function CatalogDetail() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            className="min-h-11 rounded-xl border border-[var(--color-border)] px-3 text-sm"
+            className="min-h-11 rounded-xl border border-[var(--color-border)] px-3 text-sm disabled:opacity-40"
+            disabled={crudBusy}
             onClick={() => {
               setName(catalog.name)
               setRenaming(true)
               setConfirmDelete(false)
+              setCrudError(null)
             }}
           >
             Переименовать
@@ -265,8 +354,12 @@ export default function CatalogDetail() {
           {canDeleteCatalog(catalog) ? (
             <button
               type="button"
-              className="min-h-11 rounded-xl border border-rose-400 px-3 text-sm text-rose-700 dark:text-rose-300"
-              onClick={() => setConfirmDelete(true)}
+              className="min-h-11 rounded-xl border border-rose-400 px-3 text-sm text-rose-700 dark:text-rose-300 disabled:opacity-40"
+              disabled={crudBusy}
+              onClick={() => {
+                setConfirmDelete(true)
+                setCrudError(null)
+              }}
             >
               Удалить каталог
             </button>
@@ -286,19 +379,23 @@ export default function CatalogDetail() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="min-h-11 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white"
+              className="min-h-11 rounded-xl bg-rose-600 px-3 text-sm font-medium text-white disabled:opacity-40"
+              disabled={crudBusy}
+              aria-busy={crudBusy || undefined}
               onClick={() => {
-                setRemoved(true)
-                deleteCategory(catalog.id)
-                navigate('/library')
+                void confirmDeleteCatalog()
               }}
             >
-              Удалить
+              {crudBusy ? 'Удаление…' : 'Удалить'}
             </button>
             <button
               type="button"
-              className="min-h-11 rounded-xl border border-[var(--color-border)] px-3 text-sm"
-              onClick={() => setConfirmDelete(false)}
+              className="min-h-11 rounded-xl border border-[var(--color-border)] px-3 text-sm disabled:opacity-40"
+              disabled={crudBusy}
+              onClick={() => {
+                setConfirmDelete(false)
+                setCrudError(null)
+              }}
             >
               Отмена
             </button>

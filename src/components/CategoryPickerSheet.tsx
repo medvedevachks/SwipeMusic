@@ -77,57 +77,53 @@ export default function CategoryPickerSheet({
     >
       {mode === 'create' ? (
         <div className="space-y-3">
-          {createError ? (
-            <p className="text-sm text-rose-700 dark:text-rose-300" role="alert">
-              {createError}
-            </p>
-          ) : null}
-          <fieldset disabled={creating} className="min-w-0 border-0 p-0">
-            <CreateCategoryForm
-              onCancel={() => {
-                if (creating) {
-                  return
-                }
-                setMode('list')
+          <CreateCategoryForm
+            busy={creating}
+            error={createError}
+            onCancel={() => {
+              if (creating) {
+                return
+              }
+              setMode('list')
+              setCreateError(null)
+            }}
+            onSubmit={(input) => {
+              void (async () => {
+                const sessionAtStart = captureAuthSession()
+                setCreating(true)
                 setCreateError(null)
-              }}
-              onSubmit={(input) => {
-                void (async () => {
-                  const sessionAtStart = captureAuthSession()
-                  setCreating(true)
-                  setCreateError(null)
-                  try {
-                    const category = await Promise.resolve(onCreateCategory(input))
-                    if (
-                      !canApplyCategoryPickerCreate(
-                        mountedRef.current,
-                        sessionAtStart,
-                      )
-                    ) {
-                      return
-                    }
-                    onSelect(category.id)
-                    setMode('list')
-                    setQuery('')
-                  } catch (error) {
-                    if (
-                      !mountedRef.current ||
-                      !isRetryableCategoryCreateError(error)
-                    ) {
-                      return
-                    }
-                    setCreateError(
-                      `${SAVE_FAILED_MESSAGE} Каталог не создан — сохранение отменено.`,
+                try {
+                  const category = await Promise.resolve(onCreateCategory(input))
+                  if (
+                    !canApplyCategoryPickerCreate(
+                      mountedRef.current,
+                      sessionAtStart,
                     )
-                  } finally {
-                    if (mountedRef.current) {
-                      setCreating(false)
-                    }
+                  ) {
+                    return
                   }
-                })()
-              }}
-            />
-          </fieldset>
+                  onSelect(category.id)
+                  setMode('list')
+                  setQuery('')
+                  setCreateError(null)
+                } catch (error) {
+                  if (
+                    !mountedRef.current ||
+                    !isRetryableCategoryCreateError(error)
+                  ) {
+                    return
+                  }
+                  setCreateError(
+                    `${SAVE_FAILED_MESSAGE} Каталог не создан — сохранение отменено.`,
+                  )
+                } finally {
+                  if (mountedRef.current) {
+                    setCreating(false)
+                  }
+                }
+              })()
+            }}
+          />
           {creating ? (
             <p className="text-xs text-[var(--color-muted)]" role="status">
               Создание каталога…
