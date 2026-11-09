@@ -1,6 +1,7 @@
 import type { CanonicalLibraryItem } from '../../types/canonical.ts'
 import type { TrackMeta } from '../../types/trackMeta.ts'
 import type { Track } from '../../types/track.ts'
+import { itemHasUserCatalogMembership } from '../catalogs/systemFolders.ts'
 import { isDemoSourceId } from '../../sources/demoSource.ts'
 import { sourceTrackKeyOf } from './mapCanonical.ts'
 
@@ -19,6 +20,21 @@ export function likedCanonicalItems(
   items: readonly CanonicalLibraryItem[],
 ): CanonicalLibraryItem[] {
   return items.filter((item) => item.state.liked).sort(byTitle)
+}
+
+/**
+ * «Моя музыка» (вариант A): осознанное сохранение =
+ * liked или membership в пользовательском каталоге (не sys_swipes).
+ * Техническая canonical identity без этих признаков не входит.
+ */
+export function isInMyMusic(item: CanonicalLibraryItem): boolean {
+  return item.state.liked || itemHasUserCatalogMembership(item)
+}
+
+export function myMusicCanonicalItems(
+  items: readonly CanonicalLibraryItem[],
+): CanonicalLibraryItem[] {
+  return items.filter(isInMyMusic).sort(byTitle)
 }
 
 /** Первая не-demo копия → Track для плеера / assign. */

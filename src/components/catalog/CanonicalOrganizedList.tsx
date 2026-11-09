@@ -3,6 +3,7 @@ import {
   formatSourceCopyCount,
   likedCanonicalItems,
   listCanonicalItems,
+  myMusicCanonicalItems,
 } from '../../services/canonical/selectors'
 import { getSourceDisplayName } from '../../utils/sourceDisplay'
 
@@ -11,6 +12,7 @@ export function CanonicalOrganizedList() {
   const itemsById = useCanonicalLibraryStore((state) => state.itemsById)
   const items = listCanonicalItems(Object.values(itemsById))
   const favorites = likedCanonicalItems(items)
+  const myMusic = myMusicCanonicalItems(items)
 
   return (
     <section className="space-y-3" aria-label="Моя музыка">
@@ -53,13 +55,13 @@ export function CanonicalOrganizedList() {
           Сохранённые композиции. Несколько источников одной песни показаны одной строкой.
         </p>
       </div>
-      {items.length === 0 ? (
+      {myMusic.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-[var(--color-border)] px-4 py-6 text-sm text-[var(--color-muted)]">
           Сохранённых композиций пока нет
         </p>
       ) : (
         <ul className="space-y-2">
-          {items.map((item) => (
+          {myMusic.map((item) => (
             <li
               key={item.canonicalTrack.id}
               className="flex items-center gap-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2"

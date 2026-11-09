@@ -8,6 +8,7 @@ import {
   formatSourceCopyCount,
   likedCanonicalItems,
   listCanonicalItems,
+  myMusicCanonicalItems,
   preferredTrackFromCanonical,
 } from '../services/canonical/selectors'
 import { removeSortedCanonicalFromSwipesQueue } from '../services/canonical/swipeInboxQueue'
@@ -58,7 +59,7 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
       case 'favorites':
         return likedCanonicalItems(items)
       case 'my-music':
-        return items
+        return myMusicCanonicalItems(items)
       default: {
         const _exhaustive: never = folderId
         void _exhaustive
