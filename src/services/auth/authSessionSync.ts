@@ -2,11 +2,15 @@
  * LIB-06: лёгкая межвкладочная сверка auth без полной sync библиотеки.
  * Cookie общая; epoch/Zustand — in-memory. На focus/visibility или сигнал
  * другой вкладки вызываем /me и при drift применяем тот же путь, что login/logout.
+ *
+ * LIB-06-HOTFIX-01: ответ /me применяется только если AuthSessionSnapshot
+ * всё ещё актуален; иначе игнорируем и при необходимости запускаем повторную сверку.
  */
 import { authClient } from './authClient.ts'
 import {
   bindAuthSessionEpoch,
   captureAuthSession,
+  isAuthSessionCurrent,
 } from './sessionEpoch.ts'
 import type { AuthUser } from './types.ts'
 import { useAuthStore } from '../../store/authStore.ts'
@@ -22,6 +26,8 @@ const AUTH_SYNC_MESSAGE = 'auth-changed'
 let installed = false
 let revalidateInFlight: Promise<'unchanged' | 'switched' | 'logged_out'> | null =
   null
+/** Пока идёт /me, пришёл ещё один запрос сверки — после завершения нужен повтор. */
+let revalidateQueued = false
 
 function clearContinuousRuntimeOnAuthChange(): void {
   getContinuationSession().cancel()
@@ -71,30 +77,53 @@ export function notifyAuthSessionChanged(): void {
   }
 }
 
-export async function revalidateAuthSessionAgainstServer(): Promise<
+async function runAuthSessionRevalidate(): Promise<
+  'unchanged' | 'switched' | 'logged_out'
+> {
+  const before = captureAuthSession()
+  let user: AuthUser | null
+  try {
+    user = await authClient.me()
+  } catch {
+    return 'unchanged'
+  }
+
+  // Локальный login/logout/register (или другая вкладка через apply) сменил поколение —
+  // устаревший /me нельзя применять к store / epoch / playback.
+  if (!isAuthSessionCurrent(before)) {
+    revalidateQueued = true
+    return 'unchanged'
+  }
+
+  const nextId = user?.id ?? null
+  if (before.userId === nextId) {
+    return 'unchanged'
+  }
+  applyExternalAuthUser(user)
+  return nextId ? 'switched' : 'logged_out'
+}
+
+/** Не async: иначе каждый вызов получит новый wrapper-Promise и coalescing сломается. */
+export function revalidateAuthSessionAgainstServer(): Promise<
   'unchanged' | 'switched' | 'logged_out'
 > {
   if (revalidateInFlight) {
+    revalidateQueued = true
     return revalidateInFlight
   }
-  revalidateInFlight = (async () => {
-    const before = captureAuthSession()
-    let user: AuthUser | null
-    try {
-      user = await authClient.me()
-    } catch {
-      return 'unchanged'
+
+  const flight = runAuthSessionRevalidate().finally(() => {
+    // Снимаем только свой flight — чужой finally не должен обнулить следующий.
+    if (revalidateInFlight === flight) {
+      revalidateInFlight = null
     }
-    const nextId = user?.id ?? null
-    if (before.userId === nextId) {
-      return 'unchanged'
+    if (revalidateQueued) {
+      revalidateQueued = false
+      void revalidateAuthSessionAgainstServer()
     }
-    applyExternalAuthUser(user)
-    return nextId ? 'switched' : 'logged_out'
-  })().finally(() => {
-    revalidateInFlight = null
   })
-  return revalidateInFlight
+  revalidateInFlight = flight
+  return flight
 }
 
 /** Подписка: visibility/focus + BroadcastChannel. Идемпотентна. */
@@ -142,4 +171,5 @@ export function installAuthSessionSync(): () => void {
 export function resetAuthSessionSyncForTests(): void {
   installed = false
   revalidateInFlight = null
+  revalidateQueued = false
 }
