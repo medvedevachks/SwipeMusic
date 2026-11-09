@@ -606,11 +606,10 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
               return
             }
             if (result.status === 'partial') {
-              // Разбор inbox не завершён — очередь не трогаем.
+              // Разбор inbox не завершён — очередь не трогаем; sheet для retry.
               setNotice(
-                'Сохранено в каталог, но не удалось убрать из «Свайпов». Можно повторить позже.',
+                'Сохранено в каталог, но не удалось убрать из «Свайпов». Нажмите каталог ещё раз.',
               )
-              clearCatalogSheet()
               return
             }
             // Успех: убрать из будущих циклов sys_swipes; текущий звук и Next не трогаем.

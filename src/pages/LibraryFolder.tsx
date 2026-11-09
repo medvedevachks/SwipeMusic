@@ -87,6 +87,7 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
   const [sortTrack, setSortTrack] = useState<Track | null>(null)
   const [sortCanonicalId, setSortCanonicalId] = useState<string | null>(null)
   const [sortNotice, setSortNotice] = useState<string | null>(null)
+  const [sortBusy, setSortBusy] = useState(false)
   const playGeneration = useRef(0)
 
   useEffect(() => {
@@ -400,12 +401,15 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
         trackTitle={sortTrack?.title}
         categories={categories}
         onClose={() => {
+          if (sortBusy) {
+            return
+          }
           setSortTrack(null)
           setSortCanonicalId(null)
         }}
         onCreateCategory={createCategoryConfirmed}
         onSelect={(categoryId) => {
-          if (!sortTrack) {
+          if (!sortTrack || sortBusy) {
             return
           }
           const track = sortTrack
@@ -413,20 +417,23 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
           const category =
             useCollectionStore.getState().categories.find((item) => item.id === categoryId) ??
             allCategories.find((item) => item.id === categoryId)
+          setSortBusy(true)
           void commitCatalogChoice(track, categoryId, category).then((result) => {
+            setSortBusy(false)
             if (result.status === 'failed') {
               setSortNotice(SAVE_FAILED_MESSAGE)
               // sheet остаётся открытым для повтора.
               return
             }
-            setSortTrack(null)
-            setSortCanonicalId(null)
             if (result.status === 'partial') {
               setSortNotice(
-                'Сохранено в каталог, но не удалось убрать из «Свайпов». Нажмите «В каталог» ещё раз.',
+                'Сохранено в каталог, но не удалось убрать из «Свайпов». Нажмите каталог ещё раз.',
               )
+              // sheet остаётся — повторный select добьёт unassign без второго assign.
               return
             }
+            setSortTrack(null)
+            setSortCanonicalId(null)
             const id = result.canonicalTrackId ?? canonicalId
             if (id) {
               removeSortedCanonicalFromSwipesQueue(id)

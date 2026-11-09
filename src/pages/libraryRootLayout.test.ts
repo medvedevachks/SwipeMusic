@@ -47,9 +47,16 @@ test('swipes folder still surfaces create/assign failure and partial unassign re
   assert.match(source, /result\.status === 'partial'/)
   assert.match(
     source,
-    /не удалось убрать из «Свайпов»\. Нажмите «В каталог» ещё раз/,
+    /не удалось убрать из «Свайпов»\. Нажмите каталог ещё раз/,
   )
   assert.match(source, /SAVE_FAILED_MESSAGE/)
+  assert.match(source, /sortBusy/)
+  const partialBlock = source.match(
+    /if \(result\.status === 'partial'\) \{[\s\S]*?\n            \}/,
+  )
+  assert.ok(partialBlock)
+  assert.equal(partialBlock[0]!.includes('setSortTrack(null)'), false)
+  assert.equal(partialBlock[0]!.includes('removeSortedCanonicalFromSwipesQueue'), false)
 })
 
 test('swipes Play starts Swipes route; mobile touch targets stay large', () => {
