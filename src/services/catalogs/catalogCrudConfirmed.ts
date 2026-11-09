@@ -43,6 +43,10 @@ const createFlights = new Map<string, Promise<Category>>()
 const updateFlights = new Map<string, Promise<Category>>()
 const deleteFlights = new Map<string, Promise<void>>()
 
+function crudFlightKey(generation: number, id: string): string {
+  return `${generation}\0${id}`
+}
+
 /** Сетевой сбой без HTTP-статуса: сервер мог успеть принять запрос. */
 export function isAmbiguousCatalogTransportError(error: unknown): boolean {
   if (error instanceof LibraryHttpError) {
@@ -176,7 +180,8 @@ export async function createCategoryConfirmed(
     system: false,
   }
 
-  const existingFlight = createFlights.get(category.id)
+  const flightKey = crudFlightKey(session.generation, category.id)
+  const existingFlight = createFlights.get(flightKey)
   if (existingFlight) {
     return existingFlight
   }
@@ -223,12 +228,12 @@ export async function createCategoryConfirmed(
     mergeCategoryLocal(category)
     return category
   })().finally(() => {
-    if (createFlights.get(category.id) === pending) {
-      createFlights.delete(category.id)
+    if (createFlights.get(flightKey) === pending) {
+      createFlights.delete(flightKey)
     }
   })
 
-  createFlights.set(category.id, pending)
+  createFlights.set(flightKey, pending)
   return pending
 }
 
@@ -250,7 +255,8 @@ export async function updateCategoryConfirmed(
     throw new Error('CATALOG_NOT_EDITABLE')
   }
 
-  const existingFlight = updateFlights.get(id)
+  const flightKey = crudFlightKey(session.generation, id)
+  const existingFlight = updateFlights.get(flightKey)
   if (existingFlight) {
     return existingFlight
   }
@@ -289,12 +295,12 @@ export async function updateCategoryConfirmed(
     mergeCategoryLocal(updated)
     return updated
   })().finally(() => {
-    if (updateFlights.get(id) === pending) {
-      updateFlights.delete(id)
+    if (updateFlights.get(flightKey) === pending) {
+      updateFlights.delete(flightKey)
     }
   })
 
-  updateFlights.set(id, pending)
+  updateFlights.set(flightKey, pending)
   return pending
 }
 
@@ -314,7 +320,8 @@ export async function deleteCategoryConfirmed(id: string): Promise<void> {
     throw new Error('CATALOG_SYSTEM_PROTECTED')
   }
 
-  const existingFlight = deleteFlights.get(id)
+  const flightKey = crudFlightKey(session.generation, id)
+  const existingFlight = deleteFlights.get(flightKey)
   if (existingFlight) {
     return existingFlight
   }
@@ -343,18 +350,23 @@ export async function deleteCategoryConfirmed(id: string): Promise<void> {
 
     applyCategoryDeletedLocally(id)
   })().finally(() => {
-    if (deleteFlights.get(id) === pending) {
-      deleteFlights.delete(id)
+    if (deleteFlights.get(flightKey) === pending) {
+      deleteFlights.delete(flightKey)
     }
   })
 
-  deleteFlights.set(id, pending)
+  deleteFlights.set(flightKey, pending)
   return pending
 }
 
-/** Сброс in-flight для unit-тестов. */
-export function clearCatalogCrudFlightsForTests(): void {
+/** Сброс in-flight при смене auth / logout (и в тестах). */
+export function clearCatalogCrudFlights(): void {
   createFlights.clear()
   updateFlights.clear()
   deleteFlights.clear()
+}
+
+/** @deprecated alias — тесты */
+export function clearCatalogCrudFlightsForTests(): void {
+  clearCatalogCrudFlights()
 }

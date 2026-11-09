@@ -15,4 +15,10 @@ test('Home categorizes only after CatalogChoiceResult and uses confirmed create'
     /setCategoryResolveKey\(\(value\) => value \+ 1\)\s*\n\s*void commitCatalogChoice/,
   )
   assert.match(source, /commitCatalogChoice\(track, categoryId, category\)\.then/)
+  const partialBlock = source.match(
+    /if \(result\.status === 'partial'\) \{[\s\S]*?\n            \}/,
+  )
+  assert.ok(partialBlock)
+  assert.equal(partialBlock[0]!.includes('removeSortedCanonicalFromSwipesQueue'), false)
+  assert.equal(partialBlock[0]!.includes('setPendingTrack(null)'), false)
 })

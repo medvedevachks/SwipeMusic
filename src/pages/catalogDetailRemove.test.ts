@@ -283,6 +283,14 @@ test('account switch during DELETE does not apply stale error', () => {
   resetAuthSessionEpochForTests()
 })
 
+test('CatalogDetail resets remove/crud busy when auth user changes', () => {
+  const source = readFileSync(new URL('./CatalogDetail.tsx', import.meta.url), 'utf8')
+  assert.match(source, /authUserId/)
+  assert.match(source, /busyAuthUserId !== authUserId/)
+  assert.match(source, /createCatalogRemoveBusyState\(catalogId\)/)
+  assert.match(source, /setCrudBusy\(false\)/)
+})
+
 test('unmount during request does not update error for new context', () => {
   resetAuthSessionEpochForTests()
   bindAuthSessionEpoch('user-1')

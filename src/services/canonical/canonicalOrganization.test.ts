@@ -1116,6 +1116,94 @@ test('remove 500 keeps membership and allows retry', async () => {
   resetAuthSessionEpochForTests()
 })
 
+test('assign network ambiguous reconciles present membership as success', async () => {
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+  arm()
+  bindAuthSessionEpoch('user-a')
+  const track = sourceTrack('yandex-music', '101', 'Город')
+  const item = canonicalItem(
+    'can_x',
+    'Город',
+    [sourceCopy('yandex-music', '101', 'can_x', 'Город')],
+    true,
+    ['sys_swipes'],
+  )
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [item])
+  let assignCalls = 0
+  setCanonicalRemote({
+    ensureIdentity: async () => identityFrom('can_x', [track]),
+    patchCanonicalLiked: async () => {
+      throw new Error('unused')
+    },
+    assignCanonical: async () => {
+      assignCalls += 1
+      throw new TypeError('Failed to fetch')
+    },
+    unassignCanonical: async () => {
+      throw new Error('unused')
+    },
+    loadCanonicalLibrary: async () => ({
+      items: [
+        {
+          ...item,
+          catalogIds: ['sys_swipes', 'cat_party'],
+        },
+      ],
+    }),
+  })
+
+  assert.equal(await assignSourceToCatalog(track, 'cat_party'), true)
+  assert.equal(assignCalls, 1)
+  assert.ok(
+    useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds.includes('cat_party'),
+  )
+  // Double-tap shares flight / already-in-target — без второго PUT после локального add.
+  assert.equal(await assignSourceToCatalog(track, 'cat_party'), true)
+  assert.equal(assignCalls, 1)
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+})
+
+test('assign network ambiguous without membership stays failed (no false local add)', async () => {
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+  arm()
+  bindAuthSessionEpoch('user-a')
+  const track = sourceTrack('yandex-music', '101', 'Город')
+  const item = canonicalItem(
+    'can_x',
+    'Город',
+    [sourceCopy('yandex-music', '101', 'can_x', 'Город')],
+    false,
+    [],
+  )
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [item])
+  setCanonicalRemote({
+    ensureIdentity: async () => identityFrom('can_x', [track]),
+    patchCanonicalLiked: async () => {
+      throw new Error('unused')
+    },
+    assignCanonical: async () => {
+      throw new TypeError('Failed to fetch')
+    },
+    unassignCanonical: async () => {
+      throw new Error('unused')
+    },
+    loadCanonicalLibrary: async () => ({
+      items: [{ ...item, catalogIds: [] }],
+    }),
+  })
+
+  assert.equal(await assignSourceToCatalog(track, 'cat_party'), false)
+  assert.equal(
+    useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds.includes('cat_party'),
+    false,
+  )
+  resetRuntime()
+  resetAuthSessionEpochForTests()
+})
+
 test('remove network ambiguous reconciles absent membership as success', async () => {
   resetRuntime()
   resetAuthSessionEpochForTests()

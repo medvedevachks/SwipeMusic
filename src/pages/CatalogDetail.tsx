@@ -31,6 +31,7 @@ import {
 import { isRetryableCategoryCreateError } from '../services/catalogs/categoryPickerCreateGuard'
 import { captureAuthSession } from '../services/auth/sessionEpoch'
 import { SAVE_FAILED_MESSAGE } from '../services/libraryPersistence/statusStore'
+import { useAuthStore } from '../store/authStore'
 import { useCanonicalLibraryStore } from '../store/canonicalLibraryStore'
 import { useCollectionStore } from '../store/collectionStore'
 import { getSourceDisplayName } from '../utils/sourceDisplay'
@@ -48,6 +49,7 @@ export default function CatalogDetail() {
   const navigate = useNavigate()
   const location = useLocation()
   const catalogId = params.catalogId ?? ''
+  const authUserId = useAuthStore((state) => state.user?.id ?? null)
   const categories = useCollectionStore((state) => state.categories)
   const itemsById = useCanonicalLibraryStore((state) => state.itemsById)
 
@@ -80,8 +82,16 @@ export default function CatalogDetail() {
   const removeBusyIdsRef = useRef<Set<string>>(new Set())
   const removeMountedRef = useRef(true)
 
+  const [busyAuthUserId, setBusyAuthUserId] = useState(authUserId)
   if (removeBusy.catalogId !== catalogId) {
     setRemoveBusy(switchCatalogRemoveBusyState(removeBusy, catalogId))
+  }
+  // LIB-06: смена аккаунта не оставляет залипшие busy на DELETE прошлого пользователя.
+  if (busyAuthUserId !== authUserId) {
+    setBusyAuthUserId(authUserId)
+    setRemoveBusy(createCatalogRemoveBusyState(catalogId))
+    setCrudBusy(false)
+    setCrudError(null)
   }
 
   useEffect(() => {
@@ -91,6 +101,11 @@ export default function CatalogDetail() {
       removeBusyIdsRef.current = new Set()
     }
   }, [])
+
+  useEffect(() => {
+    removeBusyIdsRef.current = new Set()
+    crudBusyRef.current = false
+  }, [authUserId])
 
   useEffect(() => {
     playMountedRef.current = true

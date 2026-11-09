@@ -1,4 +1,5 @@
 import { clearCanonicalIdentityFlights } from '../canonical/userOrganization.ts'
+import { clearCatalogCrudFlights } from '../catalogs/catalogCrudConfirmed.ts'
 import { resetPlaybackAvailability } from '../playbackAvailability/resetPlaybackAvailability.ts'
 import { cancelActiveFallback } from '../runtimeFallback/fallbackControl.ts'
 import { clearPlaybackFallbackUx } from '../../store/playbackFallbackUxStore.ts'
@@ -24,6 +25,7 @@ function clearLocalLibrary(): void {
   getCollectionEngine().replaceStorageData({ tracks: [], actions: [] })
   useCanonicalLibraryStore.getState().clear()
   clearCanonicalIdentityFlights()
+  clearCatalogCrudFlights()
   resetPlaybackAvailability()
 }
 

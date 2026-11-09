@@ -710,11 +710,10 @@ export default function Home({ stage = 'sorting' }: HomeProps) {
               return
             }
             if (result.status === 'partial') {
+              // Membership в каталоге есть, inbox ещё нет — sheet остаётся для безопасного retry.
               setCategorizeNotice(
-                'Сохранено в каталог, но не удалось убрать из «Свайпов». Можно повторить позже.',
+                'Сохранено в каталог, но не удалось убрать из «Свайпов». Нажмите каталог ещё раз.',
               )
-              setPendingTrack(null)
-              setCategoryResolveKey((value) => value + 1)
               return
             }
             // Успех: убрать из будущих циклов inbox-очереди, звук не рвать.

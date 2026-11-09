@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { authClient } from '../services/auth/authClient.ts'
+import { notifyAuthSessionChanged } from '../services/auth/authSessionSync.ts'
 import { bindAuthSessionEpoch } from '../services/auth/sessionEpoch.ts'
 import type { AuthUser } from '../services/auth/types'
 import { getContinuationSession } from '../services/continuation/ContinuationSession.ts'
@@ -73,6 +74,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             user,
             status: user ? 'authenticated' : 'anonymous',
           })
+          notifyAuthSessionChanged()
         })
         .catch(() => {
           tasteProfileCache.invalidate()
@@ -81,6 +83,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           clearContinuousRuntimeOnAuthChange()
           bindPlaybackSessionsSafe(null)
           set({ user: null, status: 'anonymous' })
+          notifyAuthSessionChanged()
         })
         .finally(() => {
           restorePromise = null
@@ -97,6 +100,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     clearContinuousRuntimeOnAuthChange()
     bindPlaybackSessionsSafe(user.id)
     set({ user, status: 'authenticated' })
+    notifyAuthSessionChanged()
   },
 
   login: async (input) => {
@@ -107,6 +111,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     clearContinuousRuntimeOnAuthChange()
     bindPlaybackSessionsSafe(user.id)
     set({ user, status: 'authenticated' })
+    notifyAuthSessionChanged()
   },
 
   logout: async () => {
@@ -117,5 +122,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     clearContinuousRuntimeOnAuthChange()
     bindPlaybackSessionsSafe(null)
     set({ user: null, status: 'anonymous' })
+    notifyAuthSessionChanged()
   },
 }))

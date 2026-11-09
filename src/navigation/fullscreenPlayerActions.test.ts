@@ -168,6 +168,7 @@ test('FullscreenPlayer wires race-safe catalog/like and does not own playback en
   )?.[0]
   assert.ok(partialBlock)
   assert.equal(partialBlock.includes('removeSortedCanonicalFromSwipesQueue'), false)
+  assert.equal(partialBlock.includes('clearCatalogSheet()'), false)
   assert.match(source, /mini-player-open-fullscreen/)
   assert.equal(source.includes('switchTo('), false)
   assert.equal(source.includes('new AudioPlayer'), false)
