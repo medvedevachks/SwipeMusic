@@ -86,6 +86,30 @@ async function loadRemoteCategories(
   }
 }
 
+type CategoryReconcileResult =
+  | { status: 'found'; category: Category }
+  | { status: 'missing' }
+  | { status: 'unknown' }
+
+async function reconcileCategoryById(
+  session: AuthSessionSnapshot,
+  id: string,
+): Promise<CategoryReconcileResult> {
+  const remote = await loadRemoteCategories(session)
+  if (!isAuthSessionCurrent(session)) {
+    throw new StaleLibrarySessionError()
+  }
+  if (!remote) {
+    return { status: 'unknown' }
+  }
+  const found = remote.find((row) => row.id === id)
+  return found ? { status: 'found', category: found } : { status: 'missing' }
+}
+
+function isCategoryConflictError(error: unknown): boolean {
+  return error instanceof LibraryHttpError && error.status === 409
+}
+
 function mergeCategoryLocal(category: Category): void {
   const categories = useCollectionStore.getState().categories
   const index = categories.findIndex((row) => row.id === category.id)
@@ -158,18 +182,34 @@ export async function createCategoryConfirmed(
   }
 
   const pending = (async () => {
+    // Стабильный id (retry / UI pending): сначала сверка, чтобы не слать лишний POST
+    // после уже сохранённого, но потерянного ответа.
+    if (input.id?.trim()) {
+      const beforePost = await reconcileCategoryById(session, category.id)
+      if (beforePost.status === 'found') {
+        mergeCategoryLocal(beforePost.category)
+        return beforePost.category
+      }
+    }
+
     try {
       await libraryClient.createCategory(category)
     } catch (error) {
+      if (isCategoryConflictError(error)) {
+        // Backend 409 CATEGORY_EXISTS: POST мог уже пройти ранее (потерянный ответ).
+        const afterConflict = await reconcileCategoryById(session, category.id)
+        if (afterConflict.status === 'found') {
+          mergeCategoryLocal(afterConflict.category)
+          return afterConflict.category
+        }
+        // Без подтверждения именно этого id — не считать успехом.
+        throw new CatalogSyncAmbiguousError(category.id)
+      }
       if (isAmbiguousCatalogTransportError(error)) {
-        const remote = await loadRemoteCategories(session)
-        const found = remote?.find((row) => row.id === category.id)
-        if (found) {
-          if (!isAuthSessionCurrent(session)) {
-            throw new StaleLibrarySessionError()
-          }
-          mergeCategoryLocal(found)
-          return found
+        const afterTransport = await reconcileCategoryById(session, category.id)
+        if (afterTransport.status === 'found') {
+          mergeCategoryLocal(afterTransport.category)
+          return afterTransport.category
         }
         throw new CatalogSyncAmbiguousError(category.id)
       }

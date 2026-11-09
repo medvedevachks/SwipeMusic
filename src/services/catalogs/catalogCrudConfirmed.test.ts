@@ -80,6 +80,46 @@ function seedMembership(catalogId: string, canonicalId: string): void {
   useCanonicalLibraryStore.getState().replaceForUser('user-a', [item])
 }
 
+function emptyLibraryStateResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      categories: [],
+      tracks: [],
+      categoryAssignments: [],
+      history: [],
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  )
+}
+
+function libraryStateWithCategory(category: {
+  id: string
+  name: string
+}): Response {
+  return new Response(
+    JSON.stringify({
+      categories: [
+        {
+          id: category.id,
+          name: category.name,
+          color: '#2563eb',
+          icon: 'star',
+          description: '',
+          createdAt: NOW,
+          updatedAt: NOW,
+          sortOrder: 0,
+          favorite: false,
+          system: false,
+        },
+      ],
+      tracks: [],
+      categoryAssignments: [],
+      history: [],
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  )
+}
+
 test('CREATE success merges only after 204', async () => {
   resetSession('user-a')
   const originalFetch = globalThis.fetch
@@ -88,10 +128,14 @@ test('CREATE success merges only after 204', async () => {
     resolvePost = resolve
   })
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).includes('/api/me/categories') && init?.method === 'POST') {
+    const url = String(input)
+    if (url.includes('/api/me/library-state')) {
+      return emptyLibraryStateResponse()
+    }
+    if (url.includes('/api/me/categories') && init?.method === 'POST') {
       return gate
     }
-    throw new Error(`unexpected ${String(input)}`)
+    throw new Error(`unexpected ${url}`)
   }) as typeof fetch
 
   try {
@@ -116,8 +160,16 @@ test('CREATE success merges only after 204', async () => {
 test('CREATE 500 does not merge locally', async () => {
   resetSession('user-a')
   const originalFetch = globalThis.fetch
-  globalThis.fetch = (async () =>
-    new Response(JSON.stringify({ error: 'SERVER' }), { status: 500 })) as typeof fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/api/me/library-state')) {
+      return emptyLibraryStateResponse()
+    }
+    if (url.includes('/api/me/categories') && init?.method === 'POST') {
+      return new Response(JSON.stringify({ error: 'SERVER' }), { status: 500 })
+    }
+    throw new Error(`unexpected ${url}`)
+  }) as typeof fetch
   try {
     await assert.rejects(
       () =>
@@ -145,12 +197,7 @@ test('CREATE network failure without server proof stays ambiguous and keeps loca
       throw new TypeError('Failed to fetch')
     }
     if (url.includes('/api/me/library-state')) {
-      return new Response(JSON.stringify({
-        categories: [],
-        tracks: [],
-        categoryAssignments: [],
-        history: [],
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      return emptyLibraryStateResponse()
     }
     throw new Error(`unexpected ${url}`)
   }) as typeof fetch
@@ -176,34 +223,19 @@ test('CREATE network failure without server proof stays ambiguous and keeps loca
 test('CREATE ambiguous recovers when library-state already has the id', async () => {
   resetSession('user-a')
   const originalFetch = globalThis.fetch
+  let stateReads = 0
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.includes('/api/me/categories') && init?.method === 'POST') {
       throw new TypeError('Failed to fetch')
     }
     if (url.includes('/api/me/library-state')) {
-      return new Response(
-        JSON.stringify({
-          categories: [
-            {
-              id: 'cat_net',
-              name: 'Net',
-              color: '#2563eb',
-              icon: 'star',
-              description: '',
-              createdAt: NOW,
-              updatedAt: NOW,
-              sortOrder: 0,
-              favorite: false,
-              system: false,
-            },
-          ],
-          tracks: [],
-          categoryAssignments: [],
-          history: [],
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      )
+      stateReads += 1
+      // Preflight: missing. After lost transport: server already has the row.
+      if (stateReads === 1) {
+        return emptyLibraryStateResponse()
+      }
+      return libraryStateWithCategory({ id: 'cat_net', name: 'Net' })
     }
     throw new Error(`unexpected ${url}`)
   }) as typeof fetch
@@ -232,11 +264,15 @@ test('CREATE double-click shares one in-flight request', async () => {
     resolvePost = resolve
   })
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).includes('/api/me/categories') && init?.method === 'POST') {
+    const url = String(input)
+    if (url.includes('/api/me/library-state')) {
+      return emptyLibraryStateResponse()
+    }
+    if (url.includes('/api/me/categories') && init?.method === 'POST') {
       posts += 1
       return gate
     }
-    throw new Error('unexpected')
+    throw new Error(`unexpected ${url}`)
   }) as typeof fetch
 
   try {
@@ -271,7 +307,20 @@ test('CREATE stale session after POST does not merge for B', async () => {
     resolvePost = resolve
   })
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).includes('/api/me/categories') && init?.method === 'POST') {
+    const url = String(input)
+    // Preflight library-state for stable id — empty before POST.
+    if (url.includes('/api/me/library-state')) {
+      return new Response(
+        JSON.stringify({
+          categories: [],
+          tracks: [],
+          categoryAssignments: [],
+          history: [],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      )
+    }
+    if (url.includes('/api/me/categories') && init?.method === 'POST') {
       return gate
     }
     throw new Error('unexpected')
@@ -287,6 +336,220 @@ test('CREATE stale session after POST does not merge for B', async () => {
     bindAuthSessionEpoch('user-b')
     useCollectionStore.getState().clearUserLibrary()
     resolvePost(new Response(null, { status: 204 }))
+    await assert.rejects(() => pending, StaleLibrarySessionError)
+    assert.equal(useCollectionStore.getState().categories.length, 0)
+  } finally {
+    globalThis.fetch = originalFetch
+    resetSession(null)
+  }
+})
+
+test('CREATE lost HTTP then retry 409 reconciles same id as success', async () => {
+  resetSession('user-a')
+  const originalFetch = globalThis.fetch
+  let posts = 0
+  let stateReads = 0
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/api/me/library-state')) {
+      stateReads += 1
+      // 1: preflight first attempt (missing)
+      // 2: after lost transport (still unknown / empty → ambiguous)
+      // 3: preflight retry (still missing → POST)
+      // 4: after 409 reconcile (found)
+      if (stateReads >= 4) {
+        return libraryStateWithCategory({ id: 'cat_lost', name: 'Lost' })
+      }
+      return emptyLibraryStateResponse()
+    }
+    if (url.includes('/api/me/categories') && init?.method === 'POST') {
+      posts += 1
+      if (posts === 1) {
+        throw new TypeError('Failed to fetch')
+      }
+      return new Response(JSON.stringify({ error: 'CATEGORY_EXISTS' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    throw new Error(`unexpected ${url}`)
+  }) as typeof fetch
+
+  try {
+    await assert.rejects(
+      () =>
+        createCategoryConfirmed({
+          name: 'Lost',
+          color: '#2563eb',
+          icon: 'star',
+          id: 'cat_lost',
+        }),
+      (error: unknown) =>
+        error instanceof CatalogSyncAmbiguousError &&
+        error.catalogId === 'cat_lost',
+    )
+    assert.equal(useCollectionStore.getState().categories.length, 0)
+
+    const created = await createCategoryConfirmed({
+      name: 'Lost',
+      color: '#2563eb',
+      icon: 'star',
+      id: 'cat_lost',
+    })
+    assert.equal(created.id, 'cat_lost')
+    assert.equal(posts, 2)
+    assert.equal(useCollectionStore.getState().categories.length, 1)
+    assert.equal(useCollectionStore.getState().categories[0]?.id, 'cat_lost')
+  } finally {
+    globalThis.fetch = originalFetch
+    resetSession(null)
+  }
+})
+
+test('CREATE 409 with unavailable reconcile stays ambiguous without local merge', async () => {
+  resetSession('user-a')
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/api/me/library-state')) {
+      throw new TypeError('Failed to fetch')
+    }
+    if (url.includes('/api/me/categories') && init?.method === 'POST') {
+      return new Response(JSON.stringify({ error: 'CATEGORY_EXISTS' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    throw new Error(`unexpected ${url}`)
+  }) as typeof fetch
+
+  try {
+    await assert.rejects(
+      () =>
+        createCategoryConfirmed({
+          name: 'Conflict',
+          color: '#2563eb',
+          icon: 'star',
+          id: 'cat_conflict',
+        }),
+      (error: unknown) =>
+        error instanceof CatalogSyncAmbiguousError &&
+        error.catalogId === 'cat_conflict',
+    )
+    assert.equal(useCollectionStore.getState().categories.length, 0)
+  } finally {
+    globalThis.fetch = originalFetch
+    resetSession(null)
+  }
+})
+
+test('CREATE 409 reconcile missing id is not false success', async () => {
+  resetSession('user-a')
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/api/me/library-state')) {
+      return emptyLibraryStateResponse()
+    }
+    if (url.includes('/api/me/categories') && init?.method === 'POST') {
+      return new Response(JSON.stringify({ error: 'CATEGORY_EXISTS' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    throw new Error(`unexpected ${url}`)
+  }) as typeof fetch
+
+  try {
+    await assert.rejects(
+      () =>
+        createCategoryConfirmed({
+          name: 'Ghost',
+          color: '#2563eb',
+          icon: 'star',
+          id: 'cat_ghost',
+        }),
+      CatalogSyncAmbiguousError,
+    )
+    assert.equal(useCollectionStore.getState().categories.length, 0)
+  } finally {
+    globalThis.fetch = originalFetch
+    resetSession(null)
+  }
+})
+
+test('CREATE preflight finds existing id without second POST', async () => {
+  resetSession('user-a')
+  const originalFetch = globalThis.fetch
+  let posts = 0
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/api/me/library-state')) {
+      return libraryStateWithCategory({ id: 'cat_pre', name: 'Pre' })
+    }
+    if (url.includes('/api/me/categories') && init?.method === 'POST') {
+      posts += 1
+      return new Response(null, { status: 204 })
+    }
+    throw new Error(`unexpected ${url}`)
+  }) as typeof fetch
+
+  try {
+    const created = await createCategoryConfirmed({
+      name: 'Pre',
+      color: '#2563eb',
+      icon: 'star',
+      id: 'cat_pre',
+    })
+    assert.equal(created.id, 'cat_pre')
+    assert.equal(posts, 0)
+    assert.equal(useCollectionStore.getState().categories.length, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+    resetSession(null)
+  }
+})
+
+test('CREATE account switch during 409 reconcile does not merge for B', async () => {
+  resetSession('user-a')
+  const originalFetch = globalThis.fetch
+  let resolveState!: (value: Response) => void
+  const stateGate = new Promise<Response>((resolve) => {
+    resolveState = resolve
+  })
+  let stateCalls = 0
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.includes('/api/me/library-state')) {
+      stateCalls += 1
+      if (stateCalls === 1) {
+        return emptyLibraryStateResponse()
+      }
+      return stateGate
+    }
+    if (url.includes('/api/me/categories') && init?.method === 'POST') {
+      return new Response(JSON.stringify({ error: 'CATEGORY_EXISTS' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    throw new Error(`unexpected ${url}`)
+  }) as typeof fetch
+
+  try {
+    const pending = createCategoryConfirmed({
+      name: 'Switch',
+      color: '#2563eb',
+      icon: 'star',
+      id: 'cat_switch',
+    })
+    for (let i = 0; i < 20 && stateCalls < 2; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    assert.equal(stateCalls, 2)
+    bindAuthSessionEpoch('user-b')
+    useCollectionStore.getState().clearUserLibrary()
+    resolveState(libraryStateWithCategory({ id: 'cat_switch', name: 'Switch' }))
     await assert.rejects(() => pending, StaleLibrarySessionError)
     assert.equal(useCollectionStore.getState().categories.length, 0)
   } finally {
@@ -567,10 +830,23 @@ test('applyCategoryDeletedLocally drops membership but keeps canonical item', ()
 test('UI wiring uses confirmed catalog CRUD helpers', () => {
   const list = readFileSync(new URL('../../components/catalog/CatalogList.tsx', import.meta.url), 'utf8')
   const detail = readFileSync(new URL('../../pages/CatalogDetail.tsx', import.meta.url), 'utf8')
+  const picker = readFileSync(
+    new URL('../../components/CategoryPickerSheet.tsx', import.meta.url),
+    'utf8',
+  )
   assert.match(list, /createCategoryConfirmed/)
+  assert.match(list, /pendingCreateIdRef/)
   assert.equal(list.includes('useCollectionStore((state) => state.createCategory)'), false)
   assert.match(detail, /updateCategoryConfirmed/)
   assert.match(detail, /deleteCategoryConfirmed/)
   assert.equal(detail.includes('deleteCategory(catalog.id)'), false)
   assert.equal(detail.includes('updateCategory(catalog.id'), false)
+  assert.match(picker, /pendingCreateIdRef/)
+  assert.match(picker, /CatalogSyncAmbiguousError/)
+  assert.match(picker, /id: pendingId/)
+  assert.match(picker, /Результат не подтверждён/)
+  assert.doesNotMatch(
+    picker.split('CatalogSyncAmbiguousError')[1] ?? '',
+    /Каталог не создан/,
+  )
 })
