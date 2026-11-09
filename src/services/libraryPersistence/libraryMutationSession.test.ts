@@ -3,6 +3,8 @@ import test from 'node:test'
 import { useAuthStore } from '../../store/authStore.ts'
 import {
   bindAuthSessionEpoch,
+  captureAuthSession,
+  isAuthSessionCurrent,
   resetAuthSessionEpochForTests,
 } from '../auth/sessionEpoch.ts'
 import { LibraryHttpError } from './client.ts'
@@ -78,6 +80,28 @@ test('stale HTTP 500 after logout does not SAVE_FAILED for B', async () => {
     SAVE_FAILED_MESSAGE,
   )
   assert.equal(useLibraryPersistenceStore.getState().status, 'saving')
+})
+
+test('current-session HTTP 401 bumps auth epoch', async () => {
+  reset()
+  bindAuthSessionEpoch('user-a')
+  useAuthStore.setState({
+    user: { id: 'user-a', email: 'a@test' } as never,
+    status: 'authenticated',
+  })
+  useLibraryPersistenceStore.setState({
+    armed: true,
+    status: 'ready',
+    message: null,
+  })
+  const before = captureAuthSession()
+  const result = await runLibraryMutation(async () => {
+    throw new LibraryHttpError(401)
+  })
+  assert.equal(result, null)
+  assert.equal(isAuthSessionCurrent(before), false)
+  assert.equal(useAuthStore.getState().status, 'anonymous')
+  assert.equal(useAuthStore.getState().user, null)
 })
 
 test('stale HTTP 401 after logout does not anonymous B', async () => {
