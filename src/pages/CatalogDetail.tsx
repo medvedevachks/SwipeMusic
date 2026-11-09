@@ -37,8 +37,11 @@ import { getSourceDisplayName } from '../utils/sourceDisplay'
 import {
   applyCatalogRemoveResult,
   beginCatalogTrackRemove,
-  createEmptyCatalogRemoveBusyState,
+  createCatalogRemoveBusyState,
+  getCatalogRemoveContext,
+  switchCatalogRemoveBusyState,
   type CatalogRemoveBusyState,
+  type CatalogRemoveContext,
 } from './catalogDetailRemoveBusy'
 
 export default function CatalogDetail() {
@@ -58,8 +61,8 @@ export default function CatalogDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [removed, setRemoved] = useState(false)
   const [busyKey, setBusyKey] = useState<string | null>(null)
-  const [removeBusy, setRemoveBusy] = useState<CatalogRemoveBusyState>(
-    createEmptyCatalogRemoveBusyState,
+  const [removeBusy, setRemoveBusy] = useState<CatalogRemoveBusyState>(() =>
+    createCatalogRemoveBusyState(catalogId),
   )
   const [crudBusy, setCrudBusy] = useState(false)
   const [crudError, setCrudError] = useState<string | null>(null)
@@ -72,16 +75,29 @@ export default function CatalogDetail() {
   /** Синхронный Set busy-id: React state отстаёт при concurrent DELETE. */
   const removeBusyIdsRef = useRef<Set<string>>(new Set())
   const removeMountedRef = useRef(true)
+  const removeContextRef = useRef<CatalogRemoveContext>(
+    getCatalogRemoveContext(removeBusy),
+  )
+
+  if (removeBusy.catalogId !== catalogId) {
+    const next = switchCatalogRemoveBusyState(removeBusy, catalogId)
+    setRemoveBusy(next)
+    removeContextRef.current = getCatalogRemoveContext(next)
+    removeBusyIdsRef.current = new Set()
+  }
 
   useEffect(() => {
     removeMountedRef.current = true
-    removeBusyIdsRef.current = new Set()
-    setRemoveBusy(createEmptyCatalogRemoveBusyState())
+    return () => {
+      removeMountedRef.current = false
+      removeBusyIdsRef.current = new Set()
+    }
+  }, [])
+
+  useEffect(() => {
     return () => {
       playGeneration.current += 1
       playBusyRef.current = false
-      removeMountedRef.current = false
-      removeBusyIdsRef.current = new Set()
       cancelCatalogPlaybackGate()
     }
   }, [catalogId])
@@ -508,8 +524,10 @@ export default function CatalogDetail() {
                     if (removeBusyIdsRef.current.has(id)) {
                       return
                     }
+                    const contextAtStart = removeContextRef.current
                     const started = beginCatalogTrackRemove(
                       {
+                        ...contextAtStart,
                         busyIds: removeBusyIdsRef.current,
                         error: removeBusy.error,
                       },
@@ -522,16 +540,20 @@ export default function CatalogDetail() {
                     setRemoveBusy(started.state)
                     const sessionAtStart = captureAuthSession()
                     void removeCanonicalFromCatalog(id, catalog.id).then((ok) => {
-                      removeBusyIdsRef.current.delete(id)
-                      setRemoveBusy((current) =>
-                        applyCatalogRemoveResult(current, {
+                      setRemoveBusy((current) => {
+                        const next = applyCatalogRemoveResult(current, {
                           canonicalTrackId: id,
                           ok,
                           mounted: removeMountedRef.current,
                           sessionAtStart,
+                          contextAtStart,
                           failureMessage: `${SAVE_FAILED_MESSAGE} Не удалось убрать из каталога — можно повторить.`,
-                        }),
-                      )
+                        })
+                        if (next !== current) {
+                          removeBusyIdsRef.current = new Set(next.busyIds)
+                        }
+                        return next
+                      })
                     })
                   }}
                 >

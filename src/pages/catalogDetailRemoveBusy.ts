@@ -3,19 +3,49 @@ import {
   type AuthSessionSnapshot,
 } from '../services/auth/sessionEpoch.ts'
 
-export type CatalogRemoveBusyState = {
+export type CatalogRemoveContext = {
+  catalogId: string
+  generation: number
+}
+
+export type CatalogRemoveBusyState = CatalogRemoveContext & {
   busyIds: ReadonlySet<string>
   error: string | null
 }
 
-export function createEmptyCatalogRemoveBusyState(): CatalogRemoveBusyState {
+export function createCatalogRemoveBusyState(
+  catalogId: string,
+  generation = 0,
+): CatalogRemoveBusyState {
   return {
+    catalogId,
+    generation,
     busyIds: new Set(),
     error: null,
   }
 }
 
-/** Начать DELETE для id. Повтор того же id игнорируется. */
+/** Смена каталога без unmount: новый generation, пустой busy. */
+export function switchCatalogRemoveBusyState(
+  state: CatalogRemoveBusyState,
+  catalogId: string,
+): CatalogRemoveBusyState {
+  if (state.catalogId === catalogId) {
+    return state
+  }
+  return createCatalogRemoveBusyState(catalogId, state.generation + 1)
+}
+
+export function getCatalogRemoveContext(
+  state: CatalogRemoveBusyState,
+): CatalogRemoveContext {
+  return {
+    catalogId: state.catalogId,
+    generation: state.generation,
+  }
+}
+
+/** Начать DELETE для id. Повтор того же id в том же контексте игнорируется. */
 export function beginCatalogTrackRemove(
   state: CatalogRemoveBusyState,
   canonicalTrackId: string,
@@ -31,6 +61,7 @@ export function beginCatalogTrackRemove(
   return {
     started: true,
     state: {
+      ...state,
       busyIds,
       error: null,
     },
@@ -48,18 +79,30 @@ export function finishCatalogTrackRemove(
   const busyIds = new Set(state.busyIds)
   busyIds.delete(canonicalTrackId)
   return {
+    ...state,
     busyIds,
-    error: state.error,
   }
 }
 
 export function canApplyCatalogRemoveUiResult(input: {
   mounted: boolean
   sessionAtStart: AuthSessionSnapshot
+  contextAtStart: CatalogRemoveContext
+  current: CatalogRemoveContext
 }): boolean {
-  return input.mounted && isAuthSessionCurrent(input.sessionAtStart)
+  return (
+    input.mounted &&
+    isAuthSessionCurrent(input.sessionAtStart) &&
+    input.contextAtStart.catalogId === input.current.catalogId &&
+    input.contextAtStart.generation === input.current.generation
+  )
 }
 
+/**
+ * Применить результат DELETE.
+ * Устаревший контекст (другой catalog / generation / session / unmount)
+ * возвращает state без изменений — busy и error нового контекста не трогаем.
+ */
 export function applyCatalogRemoveResult(
   state: CatalogRemoveBusyState,
   input: {
@@ -67,25 +110,29 @@ export function applyCatalogRemoveResult(
     ok: boolean
     mounted: boolean
     sessionAtStart: AuthSessionSnapshot
+    contextAtStart: CatalogRemoveContext
     failureMessage: string
   },
 ): CatalogRemoveBusyState {
-  const next = finishCatalogTrackRemove(state, input.canonicalTrackId)
-  if (!canApplyCatalogRemoveUiResult(input)) {
-    return {
-      busyIds: next.busyIds,
-      // Устаревший ответ не пишет ошибку в новый контекст.
-      error: state.error,
-    }
+  if (
+    !canApplyCatalogRemoveUiResult({
+      mounted: input.mounted,
+      sessionAtStart: input.sessionAtStart,
+      contextAtStart: input.contextAtStart,
+      current: getCatalogRemoveContext(state),
+    })
+  ) {
+    return state
   }
+  const next = finishCatalogTrackRemove(state, input.canonicalTrackId)
   if (input.ok) {
     return {
-      busyIds: next.busyIds,
+      ...next,
       error: null,
     }
   }
   return {
-    busyIds: next.busyIds,
+    ...next,
     error: input.failureMessage,
   }
 }
