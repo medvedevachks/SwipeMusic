@@ -82,13 +82,13 @@ export default function CatalogDetail() {
   const removeBusyIdsRef = useRef<Set<string>>(new Set())
   const removeMountedRef = useRef(true)
 
-  const authUserIdRef = useRef(authUserId)
+  const [busyAuthUserId, setBusyAuthUserId] = useState(authUserId)
   if (removeBusy.catalogId !== catalogId) {
     setRemoveBusy(switchCatalogRemoveBusyState(removeBusy, catalogId))
   }
   // LIB-06: смена аккаунта не оставляет залипшие busy на DELETE прошлого пользователя.
-  if (authUserIdRef.current !== authUserId) {
-    authUserIdRef.current = authUserId
+  if (busyAuthUserId !== authUserId) {
+    setBusyAuthUserId(authUserId)
     setRemoveBusy(createCatalogRemoveBusyState(catalogId))
     removeBusyIdsRef.current = new Set()
     setCrudBusy(false)
