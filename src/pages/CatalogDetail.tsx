@@ -70,6 +70,8 @@ export default function CatalogDetail() {
   const playGeneration = useRef(0)
   /** Синхронный gate: React busyKey ещё не успевает при быстрых повторных Play. */
   const playBusyRef = useRef(false)
+  const playMountedRef = useRef(true)
+  const fullscreenOpenedForPlayRef = useRef(false)
   const crudBusyRef = useRef(false)
   /**
    * Синхронный gate in-flight: ключ `${generation}:${trackId}`,
@@ -91,9 +93,12 @@ export default function CatalogDetail() {
   }, [])
 
   useEffect(() => {
+    playMountedRef.current = true
     return () => {
+      playMountedRef.current = false
       playGeneration.current += 1
       playBusyRef.current = false
+      fullscreenOpenedForPlayRef.current = false
       cancelCatalogPlaybackGate()
     }
   }, [catalogId])
@@ -206,36 +211,60 @@ export default function CatalogDetail() {
     }
     playBusyRef.current = true
     const generation = ++playGeneration.current
+    fullscreenOpenedForPlayRef.current = false
     const key = startCanonicalTrackId ?? 'catalog'
     setBusyKey(key)
     setPlayError(null)
     setPlayHint(null)
+
+    const openFullscreenIfCurrent = (needsUserPlayGesture?: boolean) => {
+      if (generation !== playGeneration.current || !playMountedRef.current) {
+        return
+      }
+      if (fullscreenOpenedForPlayRef.current) {
+        return
+      }
+      fullscreenOpenedForPlayRef.current = true
+      setPlayError(null)
+      if (needsUserPlayGesture) {
+        setPlayHint(CATALOG_PLAYBACK_MESSAGE.NEEDS_USER_PLAY)
+      }
+      // Сразу после принятия первого playback intent — не ждать prepare всей очереди.
+      openFullscreenPlayer(navigate, location)
+    }
+
     try {
-      const result = await playUserCatalog({
-        catalog: { id: catalog.id, name: catalog.name },
-        items: tracks,
-        startCanonicalTrackId,
-      })
-      if (generation !== playGeneration.current) {
+      const result = await playUserCatalog(
+        {
+          catalog: { id: catalog.id, name: catalog.name },
+          items: tracks,
+          startCanonicalTrackId,
+        },
+        {
+          onPlaybackAccepted: (info) => {
+            openFullscreenIfCurrent(info.needsUserPlayGesture)
+          },
+        },
+      )
+      if (generation !== playGeneration.current || !playMountedRef.current) {
         return
       }
       if (
         result.status === 'played' &&
         shouldOpenFullscreenAfterCatalogPlay(result)
       ) {
-        setPlayError(null)
         if (result.needsUserPlayGesture) {
           setPlayHint(CATALOG_PLAYBACK_MESSAGE.NEEDS_USER_PLAY)
         }
-        // После успешного CATALOG intent — overlay на текущем маршруте каталога.
-        openFullscreenPlayer(navigate, location)
+        // Fallback: early-path без callback или повторный open no-op.
+        openFullscreenIfCurrent(result.needsUserPlayGesture)
         return
       }
       if (result.status !== 'played') {
         setPlayError(result.message)
       }
     } catch {
-      if (generation === playGeneration.current) {
+      if (generation === playGeneration.current && playMountedRef.current) {
         setPlayError(CATALOG_PLAYBACK_MESSAGE.FAILED)
       }
     } finally {
