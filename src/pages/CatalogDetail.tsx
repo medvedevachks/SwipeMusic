@@ -90,9 +90,7 @@ export default function CatalogDetail() {
   if (busyAuthUserId !== authUserId) {
     setBusyAuthUserId(authUserId)
     setRemoveBusy(createCatalogRemoveBusyState(catalogId))
-    removeBusyIdsRef.current = new Set()
     setCrudBusy(false)
-    crudBusyRef.current = false
     setCrudError(null)
   }
 
@@ -103,6 +101,11 @@ export default function CatalogDetail() {
       removeBusyIdsRef.current = new Set()
     }
   }, [])
+
+  useEffect(() => {
+    removeBusyIdsRef.current = new Set()
+    crudBusyRef.current = false
+  }, [authUserId])
 
   useEffect(() => {
     playMountedRef.current = true
