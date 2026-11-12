@@ -25,6 +25,8 @@ export default function Search() {
   const results = useSearchStore((state) => state.results)
   const artists = useSearchStore((state) => state.artists)
   const artistsLoading = useSearchStore((state) => state.artistsLoading)
+  const artistsLoadingMore = useSearchStore((state) => state.artistsLoadingMore)
+  const artistsHasMore = useSearchStore((state) => state.artistsHasMore)
   const catalogWarnings = useSearchStore((state) => state.catalogWarnings)
   const error = useSearchStore((state) => state.error)
   const providerWarnings = useSearchStore((state) => state.providerWarnings)
@@ -33,6 +35,7 @@ export default function Search() {
   const setQuery = useSearchStore((state) => state.setQuery)
   const search = useSearchStore((state) => state.search)
   const searchNext = useSearchStore((state) => state.searchNext)
+  const searchArtistsNext = useSearchStore((state) => state.searchArtistsNext)
   const clear = useSearchStore((state) => state.clear)
   const removeRecentSearch = useSearchStore((state) => state.removeRecentSearch)
   const clearHistory = useSearchStore((state) => state.clearHistory)
@@ -274,6 +277,23 @@ export default function Search() {
                 </li>
               ))}
             </ul>
+          ) : null}
+          {artistsLoadingMore ? (
+            <p className="text-sm text-[var(--color-muted)]" role="status">
+              Загружаем ещё исполнителей…
+            </p>
+          ) : null}
+          {artistsHasMore && !artistsLoadingMore && artists.length > 0 ? (
+            <button
+              type="button"
+              data-testid="search-artists-load-more"
+              className="flex min-h-11 w-full items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm font-medium text-[var(--color-fg)]"
+              onClick={() => {
+                void searchArtistsNext()
+              }}
+            >
+              Ещё исполнители
+            </button>
           ) : null}
         </div>
       )}

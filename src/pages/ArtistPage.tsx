@@ -143,12 +143,22 @@ export default function ArtistPage() {
   }, [albumsCursor, loadingAlbums, albums.length])
 
   const playTrack = (trackId: string) => {
-    void getPlaybackIntent().playSearchTrack({
-      track: tracks.find((item) => item.id === trackId) ?? tracks[0]!,
-      query: artist?.name ?? '',
-      searchHits: tracks,
-    })
-    navigate('/')
+    const track = tracks.find((item) => item.id === trackId) ?? tracks[0]
+    if (!track) {
+      return
+    }
+    void (async () => {
+      try {
+        await getPlaybackIntent().playSearchTrack({
+          track,
+          query: artist?.name ?? '',
+          searchHits: tracks,
+        })
+      } catch {
+        // resolve / autoplay — BottomPlayer; seed уже в SEARCH-слоте при SessionSwitch.
+      }
+      navigate('/')
+    })()
   }
 
   if (loading) {

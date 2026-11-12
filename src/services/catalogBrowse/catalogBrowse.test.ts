@@ -139,4 +139,82 @@ test('searchArtists returns available port hits', async () => {
   const result = await service.searchArtists('alpha')
   assert.equal(result.artists.length, 1)
   assert.equal(result.artists[0]?.name, 'Alpha')
+  assert.equal(result.hasMore, false)
+  assert.equal(result.sourceCursors['mock-src'], null)
+})
+
+test('searchArtists paginates via provider source cursors', async () => {
+  const page1: CatalogArtist[] = [
+    {
+      id: 'mock-src:artist:1',
+      sourceId: 'mock-src',
+      externalId: '1',
+      name: 'Alpha',
+    },
+  ]
+  const page2: CatalogArtist[] = [
+    {
+      id: 'mock-src:artist:2',
+      sourceId: 'mock-src',
+      externalId: '2',
+      name: 'Beta',
+    },
+  ]
+  const service = createCatalogBrowseServiceForTests([
+    mockPort({
+      async searchArtists(_query, input) {
+        if (!input.cursor) {
+          return { items: page1, nextCursor: 'page-2' }
+        }
+        if (input.cursor === 'page-2') {
+          return { items: page2, nextCursor: null }
+        }
+        return { items: [], nextCursor: null }
+      },
+    }),
+  ])
+
+  const first = await service.searchArtists('a')
+  assert.equal(first.artists.length, 1)
+  assert.equal(first.artists[0]?.name, 'Alpha')
+  assert.equal(first.hasMore, true)
+  assert.equal(first.sourceCursors['mock-src'], 'page-2')
+
+  const second = await service.searchArtists('a', {
+    sourceCursors: first.sourceCursors,
+  })
+  assert.equal(second.artists.length, 1)
+  assert.equal(second.artists[0]?.name, 'Beta')
+  assert.equal(second.hasMore, false)
+  assert.equal(second.sourceCursors['mock-src'], null)
+})
+
+test('searchArtists next page skips sources without cursor', async () => {
+  let calls = 0
+  const service = createCatalogBrowseServiceForTests([
+    mockPort({
+      sourceId: 'mock-src',
+      async searchArtists() {
+        calls += 1
+        return {
+          items: [
+            {
+              id: 'mock-src:artist:1',
+              sourceId: 'mock-src',
+              externalId: '1',
+              name: 'Alpha',
+            },
+          ],
+          nextCursor: null,
+        }
+      },
+    }),
+  ])
+
+  const next = await service.searchArtists('a', {
+    sourceCursors: { 'mock-src': null },
+  })
+  assert.equal(calls, 0)
+  assert.deepEqual(next.artists, [])
+  assert.equal(next.hasMore, false)
 })

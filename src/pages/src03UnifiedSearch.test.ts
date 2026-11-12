@@ -6,6 +6,10 @@ const search = readFileSync(new URL('./Search.tsx', import.meta.url), 'utf8')
 const artistPage = readFileSync(new URL('./ArtistPage.tsx', import.meta.url), 'utf8')
 const albumPage = readFileSync(new URL('./AlbumPage.tsx', import.meta.url), 'utf8')
 const app = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8')
+const searchStore = readFileSync(
+  new URL('../store/searchStore.ts', import.meta.url),
+  'utf8',
+)
 const yandexApi = readFileSync(
   new URL('../sources/adapters/yandex-music/api.ts', import.meta.url),
   'utf8',
@@ -39,6 +43,34 @@ test('artist page paginates tracks and albums via catalog browse', () => {
   assert.match(artistPage, /Ещё альбомы/)
   assert.match(artistPage, /IntersectionObserver/)
   assert.match(artistPage, /playSearchTrack/)
+})
+
+test('artist page navigates home only after await playSearchTrack', () => {
+  const playTrackBlock = artistPage.match(
+    /const playTrack =[\s\S]*?navigate\('\/'\)/,
+  )?.[0]
+  assert.ok(playTrackBlock, 'playTrack handler must exist')
+  assert.match(playTrackBlock, /await getPlaybackIntent\(\)\.playSearchTrack/)
+  assert.match(playTrackBlock, /navigate\('\/'\)/)
+  const awaitIndex = playTrackBlock.indexOf('await getPlaybackIntent().playSearchTrack')
+  const navigateIndex = playTrackBlock.indexOf("navigate('/')")
+  assert.ok(awaitIndex >= 0 && navigateIndex > awaitIndex)
+})
+
+test('search store guards artists against stale responses and supports cursor paging', () => {
+  assert.match(searchStore, /bumpArtistSearchGeneration/)
+  assert.match(searchStore, /isCurrentArtistSearchGeneration/)
+  assert.match(searchStore, /AbortController/)
+  assert.match(searchStore, /searchArtistsNext/)
+  assert.match(searchStore, /sourceCursors/)
+  assert.match(searchStore, /artistsAbort\?\.abort/)
+})
+
+test('unified search exposes artists load-more via provider cursors', () => {
+  assert.match(search, /searchArtistsNext/)
+  assert.match(search, /search-artists-load-more/)
+  assert.match(search, /artistsHasMore/)
+  assert.match(search, /Ещё исполнители/)
 })
 
 test('album page plays through PlaybackIntent.playAlbum', () => {

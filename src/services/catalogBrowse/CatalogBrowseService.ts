@@ -95,40 +95,74 @@ export class CatalogBrowseService {
     return out
   }
 
+  /**
+   * Поиск исполнителей.
+   * - без `sourceCursors` — первая страница всех доступных источников;
+   * - с `sourceCursors` — только источники с ненулевым cursor (догрузка).
+   */
   async searchArtists(
     query: string,
-    options?: { signal?: AbortSignal },
+    options?: {
+      signal?: AbortSignal
+      sourceCursors?: Record<string, string | null>
+    },
   ): Promise<{
     artists: CatalogArtist[]
     warnings: string[]
+    sourceCursors: Record<string, string | null>
+    hasMore: boolean
   }> {
     const normalized = query.trim()
     if (!normalized) {
-      return { artists: [], warnings: [] }
+      return { artists: [], warnings: [], sourceCursors: {}, hasMore: false }
     }
     const ports = await this.listAvailablePorts()
     const warnings: string[] = []
     const ranked: CatalogArtist[] = []
+    const isNextPage = options?.sourceCursors != null
+    const sourceCursors: Record<string, string | null> = {
+      ...(options?.sourceCursors ?? {}),
+    }
 
     await Promise.all(
       ports.map(async (port) => {
+        if (options?.signal?.aborted) {
+          return
+        }
+        if (isNextPage) {
+          const cursor = sourceCursors[port.sourceId]
+          if (cursor == null || cursor === '') {
+            return
+          }
+        }
+
+        const requestCursor = isNextPage
+          ? (sourceCursors[port.sourceId] ?? null)
+          : null
+
         try {
           const page = await port.searchArtists(normalized, {
-            cursor: null,
+            cursor: requestCursor,
             signal: options?.signal,
           })
           ranked.push(...page.items)
+          sourceCursors[port.sourceId] = page.nextCursor
         } catch (error) {
+          if (options?.signal?.aborted) {
+            return
+          }
           warnings.push(
             `${port.sourceName}: ${
               error instanceof Error ? error.message : String(error)
             }`,
           )
+          if (!isNextPage) {
+            sourceCursors[port.sourceId] = null
+          }
         }
       }),
     )
 
-    // Стабильный порядок: по имени, затем sourceId.
     ranked.sort((a, b) => {
       const byName = a.name.localeCompare(b.name, 'ru')
       if (byName !== 0) {
@@ -137,7 +171,11 @@ export class CatalogBrowseService {
       return a.sourceId.localeCompare(b.sourceId)
     })
 
-    return { artists: ranked, warnings }
+    const hasMore = Object.values(sourceCursors).some(
+      (cursor) => cursor != null && cursor !== '',
+    )
+
+    return { artists: ranked, warnings, sourceCursors, hasMore }
   }
 
   async getArtist(
