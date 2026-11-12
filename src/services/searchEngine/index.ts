@@ -1,4 +1,8 @@
-export { SearchEngine, getSearchEngine } from './SearchEngine'
+export {
+  SearchEngine,
+  getSearchEngine,
+  resetSearchEngineForTests,
+} from './SearchEngine'
 export {
   beginDevSearchSession,
   clearDevSearchLog,

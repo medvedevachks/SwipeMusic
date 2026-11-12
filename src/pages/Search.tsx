@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { DevSearchLogPanel } from '../components/DevSearchLogPanel'
 import {
@@ -17,17 +17,22 @@ export default function Search() {
   const navigate = useNavigate()
   const query = useSearchStore((state) => state.query)
   const loading = useSearchStore((state) => state.loading)
+  const loadingMore = useSearchStore((state) => state.loadingMore)
+  const hasMore = useSearchStore((state) => state.hasMore)
   const results = useSearchStore((state) => state.results)
   const error = useSearchStore((state) => state.error)
+  const activeSources = useSearchStore((state) => state.activeSources)
   const recentSearches = useSearchStore((state) => state.recentSearches)
   const setQuery = useSearchStore((state) => state.setQuery)
   const search = useSearchStore((state) => state.search)
+  const searchNext = useSearchStore((state) => state.searchNext)
   const clear = useSearchStore((state) => state.clear)
   const removeRecentSearch = useSearchStore((state) => state.removeRecentSearch)
   const clearHistory = useSearchStore((state) => state.clearHistory)
   const applySearchDeck = useSwipeDeckSessionStore((state) => state.applySearchDeck)
 
   const [draft, setDraft] = useState(query)
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null)
 
   /**
    * Play из строки поиска → SEARCH seed-сессия + UI колоды на /.
@@ -72,6 +77,7 @@ export default function Search() {
   /**
    * Явное «в свайпы»: только UI-колода Home + маршрут /.
    * Воспроизведение не стартует — иначе подменялась бы очередь/сессия без жеста Play.
+   * Берёт уже загруженные results (включая догруженные страницы).
    */
   const openAllInSwipes = (tracks: Track[], selectedTrackId?: string, q?: string) => {
     applySearchDeck(tracks, {
@@ -91,6 +97,25 @@ export default function Search() {
     await search(next)
   }
 
+  useEffect(() => {
+    const node = loadMoreSentinelRef.current
+    if (!node || !hasMore || loading || loadingMore || results.length === 0) {
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) {
+          return
+        }
+        void searchNext()
+      },
+      { root: null, rootMargin: '240px 0px', threshold: 0 },
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [hasMore, loading, loadingMore, results.length, searchNext])
+
   return (
     <section className="space-y-5 pb-4">
       <div className="space-y-1">
@@ -98,7 +123,7 @@ export default function Search() {
           Поиск
         </h1>
         <p className="text-sm text-[var(--color-muted)]">
-          Поиск сразу по всем активным источникам
+          Поиск композиций сразу по всем активным источникам
         </p>
       </div>
 
@@ -106,7 +131,7 @@ export default function Search() {
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="Исполнитель или трек"
+          placeholder="Песня, исполнитель или альбом"
           className="min-w-0 flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5 text-sm text-[var(--color-fg)] outline-none ring-[var(--color-accent)] focus:ring-2"
           aria-label="Поисковый запрос"
         />
@@ -193,10 +218,18 @@ export default function Search() {
 
       {results.length > 0 && (
         <div className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-medium text-[var(--color-fg)]">
-              Найдено: {results.length}
-            </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0 space-y-0.5">
+              <h2 className="text-sm font-medium text-[var(--color-fg)]">
+                Найдено: {results.length}
+                {hasMore ? '+' : ''}
+              </h2>
+              {activeSources.length > 0 ? (
+                <p className="truncate text-xs text-[var(--color-muted)]">
+                  Источники: {activeSources.join(', ')}
+                </p>
+              ) : null}
+            </div>
             <button
               type="button"
               className="rounded-xl border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-fg)]"
@@ -215,10 +248,15 @@ export default function Search() {
                   onClick={() => playSearchResult(results, track.id, query)}
                 >
                   <span
-                    className="h-12 w-12 shrink-0 rounded-lg"
-                    style={{
-                      backgroundColor: track.coverColor ?? 'var(--color-accent)',
-                    }}
+                    className="h-12 w-12 shrink-0 rounded-lg bg-cover bg-center"
+                    style={
+                      track.coverUrl
+                        ? { backgroundImage: `url(${track.coverUrl})` }
+                        : {
+                            backgroundColor:
+                              track.coverColor ?? 'var(--color-accent)',
+                          }
+                    }
                     aria-hidden
                   />
                   <span className="min-w-0 flex-1">
@@ -227,12 +265,39 @@ export default function Search() {
                     </span>
                     <span className="block truncate text-xs text-[var(--color-muted)]">
                       {track.artist}
+                      {track.album ? ` · ${track.album}` : ''}
                     </span>
                   </span>
                 </button>
               </li>
             ))}
           </ul>
+
+          <div ref={loadMoreSentinelRef} className="h-1 w-full" aria-hidden />
+
+          {loadingMore ? (
+            <p className="text-center text-sm text-[var(--color-muted)]" role="status">
+              Загружаем ещё…
+            </p>
+          ) : null}
+
+          {hasMore && !loadingMore ? (
+            <button
+              type="button"
+              className="flex min-h-11 w-full items-center justify-center rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-sm font-medium text-[var(--color-fg)]"
+              onClick={() => {
+                void searchNext()
+              }}
+            >
+              Загрузить ещё
+            </button>
+          ) : null}
+
+          {!hasMore && !loadingMore ? (
+            <p className="text-center text-xs text-[var(--color-muted)]">
+              Больше результатов нет
+            </p>
+          ) : null}
         </div>
       )}
     </section>

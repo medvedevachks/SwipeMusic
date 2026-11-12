@@ -156,18 +156,30 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
       return { tracks: [], nextCursor: null }
     }
     try {
+      const pageNum = params?.cursor
+        ? Number.parseInt(params.cursor, 10) || 0
+        : 0
       const page = await this.api.searchTracks(normalized, {
-        page: params?.cursor ? Number.parseInt(params.cursor, 10) || 0 : 0,
+        page: Number.isFinite(pageNum) && pageNum > 0 ? pageNum : 0,
         signal: params?.signal,
       })
       const tracks = page.tracks.map((item) => mapYandexTrackToTrack(item))
       pushYandexDevLog({
         stage: 'search',
         message: `Tracks received: ${tracks.length}`,
+        detail: `page=${pageNum};total=${page.total}`,
       })
-      const nextPage =
-        page.tracks.length > 0 ? String((params?.cursor ? Number(params.cursor) : 0) + 1) : null
-      return { tracks, nextCursor: nextPage }
+      // Неофициальный /search: page ~фиксированный размер (~20). total — ориентир конца.
+      // Это не API полной дискографии артиста: выдача ограничена поисковым индексом.
+      const pageSizeHint = 20
+      const exhausted =
+        tracks.length === 0 ||
+        tracks.length < pageSizeHint ||
+        (page.total > 0 && (pageNum + 1) * pageSizeHint >= page.total)
+      return {
+        tracks,
+        nextCursor: exhausted ? null : String(pageNum + 1),
+      }
     } catch (error) {
       pushYandexDevLog({
         stage: 'error',

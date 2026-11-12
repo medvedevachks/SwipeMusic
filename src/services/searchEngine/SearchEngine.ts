@@ -1,6 +1,7 @@
 import type { SearchEngineState } from '../../types/search'
 import type { Track } from '../../types/track'
 import { bootstrapMusicSources, sourceManager } from '../../sources'
+import type { MusicSourceAdapter } from '../../sources/MusicSourceAdapter'
 import { isDemoSourceId } from '../../sources/demoSource'
 import { pluginRegistry } from '../../sdk'
 import { getMediaIndex, syncAdapterToMediaIndex } from '../mediaIndex'
@@ -10,10 +11,21 @@ import {
 } from './devSearchLog'
 import {
   mergeAndDedupeSearchResults,
+  trackDedupeKey,
   type RankedTrack,
 } from './mergeResults'
 
 type StateListener = (state: SearchEngineState) => void
+
+const PAGE_LIMIT = 20
+
+type SearchCacheEntry = {
+  results: Track[]
+  /** Курсор следующего запроса по sourceId; null = источник исчерпан. */
+  sourceCursors: Record<string, string | null>
+  hasMore: boolean
+  activeSourceIds: string[]
+}
 
 const initialState: SearchEngineState = {
   query: '',
@@ -23,6 +35,7 @@ const initialState: SearchEngineState = {
   activeSourceIds: [],
   lastSearchTime: null,
   hasMore: false,
+  loadingMore: false,
   cacheKey: null,
 }
 
@@ -34,15 +47,19 @@ const initialState: SearchEngineState = {
  * 1. SearchProvider (SDK) или capabilities.search → live adapter.search()
  * 2. иначе capabilities.library → MediaIndex
  * 3. иначе → adapter.search()
+ *
+ * Пагинация: независимые cursors на sourceId; searchNext() догружает страницы.
  */
 export class SearchEngine {
   private state: SearchEngineState = { ...initialState }
   private readonly listeners = new Set<StateListener>()
   private abortController: AbortController | null = null
-  /** Заготовка кэша query → Track[]. */
-  private readonly cache = new Map<string, Track[]>()
-  /** Заготовка курсоров для searchNext(). */
+  /** Кэш query+sources → частичная или полная выдача + cursors. */
+  private readonly cache = new Map<string, SearchCacheEntry>()
   private readonly sourceCursors = new Map<string, string | null>()
+  /** Защита от пересекающихся searchNext(). */
+  private nextInFlight = false
+  private searchGeneration = 0
 
   getState(): SearchEngineState {
     return this.state
@@ -55,6 +72,8 @@ export class SearchEngine {
   replaceResultsForHarness(query: string, tracks: readonly Track[]): void {
     this.abortController?.abort()
     this.abortController = null
+    this.nextInFlight = false
+    this.sourceCursors.clear()
     this.patchState({
       query,
       status: 'success',
@@ -63,6 +82,7 @@ export class SearchEngine {
       activeSourceIds: ['harness'],
       lastSearchTime: Date.now(),
       hasMore: false,
+      loadingMore: false,
       cacheKey: `harness:${query}`,
     })
   }
@@ -85,12 +105,14 @@ export class SearchEngine {
     }
 
     this.cancel()
+    const generation = ++this.searchGeneration
     const controller = new AbortController()
     this.abortController = controller
+    this.nextInFlight = false
 
-    const enabled = sourceManager.listEnabledSources().filter(
-      (source) => !isDemoSourceId(source.id),
-    )
+    const enabled = sourceManager
+      .listEnabledSources()
+      .filter((source) => !isDemoSourceId(source.id))
     const activeSourceIds = enabled.map((source) => source.id)
 
     beginDevSearchSession(normalized)
@@ -101,9 +123,9 @@ export class SearchEngine {
       error: null,
       activeSourceIds,
       hasMore: false,
+      loadingMore: false,
     })
 
-    // Dev: показать search-capable источники, которые выключены и не участвуют.
     if (import.meta.env.DEV) {
       const enabledIds = new Set(activeSourceIds)
       for (const config of sourceManager.listSources()) {
@@ -130,219 +152,88 @@ export class SearchEngine {
     const cached = this.cache.get(cacheKey)
     if (cached) {
       this.sourceCursors.clear()
+      for (const [id, cursor] of Object.entries(cached.sourceCursors)) {
+        this.sourceCursors.set(id, cursor)
+      }
       pushDevSearchLog({
         stage: 'merged',
         message: `Results merged (cache)`,
-        detail: `tracks=${cached.length}`,
+        detail: `tracks=${cached.results.length};hasMore=${cached.hasMore}`,
       })
       pushDevSearchLog({
         stage: 'ui',
         message: 'UI rendered',
-        detail: `results=${cached.length}`,
+        detail: `results=${cached.results.length}`,
       })
       this.patchState({
         status: 'success',
-        results: cached,
+        results: cached.results,
         lastSearchTime: Date.now(),
         cacheKey,
-        hasMore: false,
+        hasMore: cached.hasMore,
+        loadingMore: false,
+        error: null,
       })
-      return cached
+      return cached.results
     }
 
     try {
-      const ranked: RankedTrack[] = []
-      const providerErrors: string[] = []
+      const page = await this.fetchPageFromSources({
+        query: normalized,
+        enabled,
+        cursors: new Map(enabled.map((s) => [s.id, null as string | null])),
+        signal: controller.signal,
+        existingKeys: new Set(),
+      })
 
-      await Promise.all(
-        enabled.map(async (config, sourceOrder) => {
-          if (controller.signal.aborted) {
-            return
-          }
-
-          const adapter = sourceManager.getAdapter(config.id)
-          const providerLabel = config.name || config.id
-
-          pushDevSearchLog({
-            stage: 'provider',
-            message: `Provider: ${providerLabel}`,
-            providerId: config.id,
-          })
-
-          const available = await adapter.isAvailable()
-          if (!available) {
-            this.sourceCursors.set(config.id, null)
-            pushDevSearchLog({
-              stage: 'skip',
-              message: `Skipped: provider unavailable`,
-              providerId: config.id,
-              detail: 'isAvailable() === false',
-            })
-            return
-          }
-
-          const caps = pluginRegistry.getCapabilities(config.id)
-          const searchProvider = pluginRegistry.getSearchProvider(config.id)
-          const useLiveSearch =
-            Boolean(searchProvider) || caps?.search === true
-          const useIndex = !useLiveSearch && caps?.library === true
-
-          let tracks: Track[] = []
-          let nextCursor: string | null = null
-
-          try {
-            if (useLiveSearch) {
-              pushDevSearchLog({
-                stage: 'request',
-                message: searchProvider
-                  ? 'SearchProvider.search()'
-                  : 'MusicSourceAdapter.search()',
-                providerId: config.id,
-              })
-
-              // SearchProvider и adapter.search используют один live API;
-              // adapter даёт SearchResult + cursor.
-              const result = await adapter.search(normalized, {
-                signal: controller.signal,
-              })
-              tracks = result.tracks
-              nextCursor = result.nextCursor ?? null
-
-              pushDevSearchLog({
-                stage: 'tracks',
-                message: `Tracks received: ${tracks.length}`,
-                providerId: config.id,
-              })
-              pushDevSearchLog({
-                stage: 'mapped',
-                message: `Mapped Track: ${tracks.length}`,
-                providerId: config.id,
-              })
-            } else if (useIndex) {
-              pushDevSearchLog({
-                stage: 'request',
-                message: 'MediaIndex.search()',
-                providerId: config.id,
-              })
-              const index = getMediaIndex()
-              await index.whenReady()
-              let records = index.search(normalized, [config.id])
-              if (
-                records.length === 0 &&
-                index.bySource(config.id).length === 0
-              ) {
-                await syncAdapterToMediaIndex(adapter, {
-                  signal: controller.signal,
-                })
-                records = index.search(normalized, [config.id])
-              }
-              tracks = records.map((record) => record.track)
-              nextCursor = null
-              pushDevSearchLog({
-                stage: 'tracks',
-                message: `Tracks received: ${tracks.length}`,
-                providerId: config.id,
-                detail: 'via MediaIndex',
-              })
-              pushDevSearchLog({
-                stage: 'mapped',
-                message: `Mapped Track: ${tracks.length}`,
-                providerId: config.id,
-              })
-            } else {
-              pushDevSearchLog({
-                stage: 'request',
-                message: 'MusicSourceAdapter.search() (fallback)',
-                providerId: config.id,
-              })
-              const result = await adapter.search(normalized, {
-                signal: controller.signal,
-              })
-              tracks = result.tracks
-              nextCursor = result.nextCursor ?? null
-              pushDevSearchLog({
-                stage: 'tracks',
-                message: `Tracks received: ${tracks.length}`,
-                providerId: config.id,
-              })
-              pushDevSearchLog({
-                stage: 'mapped',
-                message: `Mapped Track: ${tracks.length}`,
-                providerId: config.id,
-              })
-            }
-          } catch (error) {
-            const detail =
-              error instanceof Error ? error.message : String(error)
-            pushDevSearchLog({
-              stage: 'error',
-              message: `Provider search failed`,
-              providerId: config.id,
-              detail,
-            })
-            providerErrors.push(`${providerLabel}: ${detail}`)
-            this.sourceCursors.set(config.id, null)
-            return
-          }
-
-          if (controller.signal.aborted) {
-            return
-          }
-
-          this.sourceCursors.set(config.id, nextCursor)
-
-          tracks.forEach((track, resultIndex) => {
-            ranked.push({
-              track,
-              sourcePriority: config.priority,
-              sourceOrder,
-              resultIndex,
-            })
-          })
-        }),
-      )
-
-      if (controller.signal.aborted) {
+      if (controller.signal.aborted || generation !== this.searchGeneration) {
         return this.state.results
       }
 
-      const merged = mergeAndDedupeSearchResults(ranked)
-      if (merged.length > 0) {
-        this.cache.set(cacheKey, merged)
+      this.sourceCursors.clear()
+      for (const [id, cursor] of page.cursors) {
+        this.sourceCursors.set(id, cursor)
       }
 
       const hasMore = [...this.sourceCursors.values()].some((cursor) =>
         Boolean(cursor),
       )
+      this.writeCache(cacheKey, {
+        results: page.tracks,
+        sourceCursors: Object.fromEntries(this.sourceCursors),
+        hasMore,
+        activeSourceIds,
+      })
 
       pushDevSearchLog({
         stage: 'merged',
         message: 'Results merged',
-        detail: `tracks=${merged.length}`,
+        detail: `tracks=${page.tracks.length};hasMore=${hasMore}`,
       })
       pushDevSearchLog({
         stage: 'ui',
         message: 'UI rendered',
-        detail: `results=${merged.length}`,
+        detail: `results=${page.tracks.length}`,
       })
 
       const surfaceError =
-        merged.length === 0 && providerErrors.length > 0
-          ? providerErrors[0]
+        page.tracks.length === 0 && page.providerErrors.length > 0
+          ? page.providerErrors[0]!
           : null
 
       this.patchState({
         status: surfaceError ? 'error' : 'success',
-        results: merged,
+        results: page.tracks,
         error: surfaceError,
         lastSearchTime: Date.now(),
         cacheKey,
         hasMore,
+        loadingMore: false,
       })
 
-      return merged
+      return page.tracks
     } catch (error) {
-      if (controller.signal.aborted) {
+      if (controller.signal.aborted || generation !== this.searchGeneration) {
         return this.state.results
       }
 
@@ -357,6 +248,7 @@ export class SearchEngine {
         error: error instanceof Error ? error.message : 'Search failed',
         results: [],
         hasMore: false,
+        loadingMore: false,
       })
       throw error
     } finally {
@@ -367,28 +259,150 @@ export class SearchEngine {
   }
 
   /**
-   * Заготовка постраничной / ленивой подгрузки.
-   * Пока возвращает текущие results без сетевых запросов.
+   * Следующая страница по всем источникам с живым cursor.
+   * Не сбрасывает уже загруженные results; ошибки одного провайдера изолированы.
    */
   async searchNext(): Promise<Track[]> {
-    if (!this.state.query || !this.state.hasMore) {
+    bootstrapMusicSources()
+
+    if (
+      !this.state.query ||
+      !this.state.hasMore ||
+      this.nextInFlight ||
+      this.state.status === 'loading' ||
+      this.state.loadingMore
+    ) {
       return this.state.results
     }
 
-    // Архитектура готова: cursors в sourceCursors, реализация — позже.
-    return this.state.results
+    const pending = [...this.sourceCursors.entries()].filter(
+      ([, cursor]) => cursor != null && cursor !== '',
+    )
+    if (pending.length === 0) {
+      this.patchState({ hasMore: false, loadingMore: false })
+      return this.state.results
+    }
+
+    this.nextInFlight = true
+    const generation = this.searchGeneration
+    const controller = new AbortController()
+    this.abortController?.abort()
+    this.abortController = controller
+
+    this.patchState({ loadingMore: true, error: null })
+
+    const enabled = sourceManager
+      .listEnabledSources()
+      .filter((source) => !isDemoSourceId(source.id))
+    const enabledById = new Map(enabled.map((s) => [s.id, s]))
+    const sourcesForPage = pending
+      .map(([id]) => enabledById.get(id))
+      .filter((s): s is NonNullable<typeof s> => Boolean(s))
+
+    const existingKeys = new Set(
+      this.state.results.map((track) => trackDedupeKey(track)),
+    )
+
+    try {
+      const page = await this.fetchPageFromSources({
+        query: this.state.query,
+        enabled: sourcesForPage,
+        cursors: new Map(pending),
+        signal: controller.signal,
+        existingKeys,
+      })
+
+      if (controller.signal.aborted || generation !== this.searchGeneration) {
+        return this.state.results
+      }
+
+      for (const [id, cursor] of page.cursors) {
+        this.sourceCursors.set(id, cursor)
+      }
+      // Источники, которые больше не enabled — закрываем cursor.
+      for (const [id] of pending) {
+        if (!enabledById.has(id)) {
+          this.sourceCursors.set(id, null)
+        }
+      }
+
+      // Сохраняем порядок уже показанных треков; дописываем только новые unique.
+      const priorKeys = new Set(
+        this.state.results.map((track) => trackDedupeKey(track)),
+      )
+      const appended = mergeAndDedupeSearchResults(page.ranked).filter(
+        (track) => !priorKeys.has(trackDedupeKey(track)),
+      )
+      const merged = [...this.state.results, ...appended]
+
+      const hasMore = [...this.sourceCursors.values()].some((cursor) =>
+        Boolean(cursor),
+      )
+      const cacheKey =
+        this.state.cacheKey ??
+        this.buildCacheKey(this.state.query, this.state.activeSourceIds)
+      this.writeCache(cacheKey, {
+        results: merged,
+        sourceCursors: Object.fromEntries(this.sourceCursors),
+        hasMore,
+        activeSourceIds: this.state.activeSourceIds,
+      })
+
+      pushDevSearchLog({
+        stage: 'merged',
+        message: 'Results merged (next page)',
+        detail: `tracks=${merged.length};added=${appended.length};hasMore=${hasMore}`,
+      })
+
+      this.patchState({
+        status: 'success',
+        results: merged,
+        hasMore,
+        loadingMore: false,
+        lastSearchTime: Date.now(),
+        cacheKey,
+        // Не затираем успешную выдачу ошибкой догрузки.
+        error: null,
+      })
+
+      return merged
+    } catch (error) {
+      if (controller.signal.aborted || generation !== this.searchGeneration) {
+        return this.state.results
+      }
+      pushDevSearchLog({
+        stage: 'error',
+        message: 'searchNext failed',
+        detail: error instanceof Error ? error.message : String(error),
+      })
+      this.patchState({
+        loadingMore: false,
+        // Сохраняем текущие results; hasMore оставляем — можно повторить.
+      })
+      return this.state.results
+    } finally {
+      this.nextInFlight = false
+      if (this.abortController === controller) {
+        this.abortController = null
+      }
+    }
   }
 
   cancel(): void {
     this.abortController?.abort()
     this.abortController = null
-    if (this.state.status === 'loading') {
-      this.patchState({ status: this.state.results.length ? 'success' : 'idle' })
+    this.nextInFlight = false
+    if (this.state.status === 'loading' || this.state.loadingMore) {
+      this.patchState({
+        status: this.state.results.length ? 'success' : 'idle',
+        loadingMore: false,
+      })
     }
   }
 
   clear(): void {
     this.cancel()
+    this.searchGeneration += 1
     this.sourceCursors.clear()
     this.patchState({ ...initialState })
   }
@@ -398,8 +412,188 @@ export class SearchEngine {
     this.cache.clear()
   }
 
+  private writeCache(cacheKey: string, entry: SearchCacheEntry): void {
+    this.cache.set(cacheKey, entry)
+  }
+
   private buildCacheKey(query: string, sourceIds: string[]): string {
     return `${query.toLowerCase()}::${sourceIds.join(',')}`
+  }
+
+  private async fetchPageFromSources(input: {
+    query: string
+    enabled: ReturnType<typeof sourceManager.listEnabledSources>
+    cursors: Map<string, string | null>
+    signal: AbortSignal
+    existingKeys: Set<string>
+  }): Promise<{
+    tracks: Track[]
+    ranked: RankedTrack[]
+    cursors: Map<string, string | null>
+    providerErrors: string[]
+  }> {
+    const ranked: RankedTrack[] = []
+    const providerErrors: string[] = []
+    const nextCursors = new Map(input.cursors)
+
+    await Promise.all(
+      input.enabled.map(async (config, sourceOrder) => {
+        if (input.signal.aborted) {
+          return
+        }
+
+        const adapter = sourceManager.getAdapter(config.id)
+        const providerLabel = config.name || config.id
+        const cursor = input.cursors.get(config.id) ?? null
+
+        pushDevSearchLog({
+          stage: 'provider',
+          message: `Provider: ${providerLabel}`,
+          providerId: config.id,
+          detail: cursor ? `cursor=${cursor}` : 'first page',
+        })
+
+        const available = await adapter.isAvailable()
+        if (!available) {
+          nextCursors.set(config.id, null)
+          pushDevSearchLog({
+            stage: 'skip',
+            message: `Skipped: provider unavailable`,
+            providerId: config.id,
+            detail: 'isAvailable() === false',
+          })
+          return
+        }
+
+        try {
+          const page = await this.searchOneSource({
+            adapter,
+            configId: config.id,
+            query: input.query,
+            cursor,
+            signal: input.signal,
+          })
+
+          if (input.signal.aborted) {
+            return
+          }
+
+          let nextCursor = page.nextCursor ?? null
+          if (page.tracks.length === 0) {
+            nextCursor = null
+          }
+
+          // Защита от пустых/дублирующих страниц: нет новых уникальных — стоп.
+          const uniqueNew = page.tracks.filter(
+            (track) => !input.existingKeys.has(trackDedupeKey(track)),
+          )
+          if (
+            cursor != null &&
+            page.tracks.length > 0 &&
+            uniqueNew.length === 0
+          ) {
+            nextCursor = null
+            pushDevSearchLog({
+              stage: 'skip',
+              message: 'Stopped: page had no new unique tracks',
+              providerId: config.id,
+            })
+          }
+
+          nextCursors.set(config.id, nextCursor)
+
+          page.tracks.forEach((track, resultIndex) => {
+            ranked.push({
+              track,
+              sourcePriority: config.priority,
+              sourceOrder,
+              resultIndex,
+            })
+          })
+        } catch (error) {
+          const detail =
+            error instanceof Error ? error.message : String(error)
+          pushDevSearchLog({
+            stage: 'error',
+            message: `Provider search failed`,
+            providerId: config.id,
+            detail,
+          })
+          providerErrors.push(`${providerLabel}: ${detail}`)
+          // Ошибка страницы: не крутим тот же cursor бесконечно.
+          nextCursors.set(config.id, null)
+        }
+      }),
+    )
+
+    const tracks = mergeAndDedupeSearchResults(ranked)
+    return { tracks, ranked, cursors: nextCursors, providerErrors }
+  }
+
+  private async searchOneSource(input: {
+    adapter: MusicSourceAdapter
+    configId: string
+    query: string
+    cursor: string | null
+    signal: AbortSignal
+  }): Promise<{ tracks: Track[]; nextCursor: string | null }> {
+    const caps = pluginRegistry.getCapabilities(input.configId)
+    const searchProvider = pluginRegistry.getSearchProvider(input.configId)
+    const useLiveSearch =
+      Boolean(searchProvider) || caps?.search === true
+    const useIndex = !useLiveSearch && caps?.library === true
+
+    if (useLiveSearch || !useIndex) {
+      pushDevSearchLog({
+        stage: 'request',
+        message: searchProvider
+          ? 'SearchProvider / adapter.search()'
+          : 'MusicSourceAdapter.search()',
+        providerId: input.configId,
+      })
+      const result = await input.adapter.search(input.query, {
+        limit: PAGE_LIMIT,
+        cursor: input.cursor,
+        signal: input.signal,
+      })
+      pushDevSearchLog({
+        stage: 'tracks',
+        message: `Tracks received: ${result.tracks.length}`,
+        providerId: input.configId,
+      })
+      return {
+        tracks: result.tracks,
+        nextCursor: result.nextCursor ?? null,
+      }
+    }
+
+    // MediaIndex: пагинации нет — одна «страница», дальше cursor=null.
+    if (input.cursor) {
+      return { tracks: [], nextCursor: null }
+    }
+
+    pushDevSearchLog({
+      stage: 'request',
+      message: 'MediaIndex.search()',
+      providerId: input.configId,
+    })
+    const index = getMediaIndex()
+    await index.whenReady()
+    let records = index.search(input.query, [input.configId])
+    if (records.length === 0 && index.bySource(input.configId).length === 0) {
+      await syncAdapterToMediaIndex(input.adapter, {
+        signal: input.signal,
+      })
+      records = index.search(input.query, [input.configId])
+    }
+    const tracks = records.map((record) => record.track)
+    pushDevSearchLog({
+      stage: 'tracks',
+      message: `Tracks received: ${tracks.length}`,
+      providerId: input.configId,
+      detail: 'via MediaIndex',
+    })
+    return { tracks, nextCursor: null }
   }
 
   private patchState(partial: Partial<SearchEngineState>): void {
@@ -417,4 +611,9 @@ export function getSearchEngine(): SearchEngine {
     singleton = new SearchEngine()
   }
   return singleton
+}
+
+/** Сброс singleton для unit-тестов. */
+export function resetSearchEngineForTests(): void {
+  singleton = null
 }

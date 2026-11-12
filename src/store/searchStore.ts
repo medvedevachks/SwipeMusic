@@ -7,6 +7,8 @@ const MAX_RECENT = 20
 type SearchStoreState = {
   query: string
   loading: boolean
+  loadingMore: boolean
+  hasMore: boolean
   results: Track[]
   error: string | null
   activeSources: string[]
@@ -31,6 +33,8 @@ export const useSearchStore = create<SearchStoreState>((set, get) => {
     set({
       query: engineState.query,
       loading: engineState.status === 'loading',
+      loadingMore: engineState.loadingMore,
+      hasMore: engineState.hasMore,
       results: engineState.results,
       error: engineState.error,
       activeSources: engineState.activeSourceIds,
@@ -41,6 +45,8 @@ export const useSearchStore = create<SearchStoreState>((set, get) => {
   return {
     query: '',
     loading: false,
+    loadingMore: false,
+    hasMore: false,
     results: [],
     error: null,
     activeSources: [],
@@ -79,6 +85,8 @@ export const useSearchStore = create<SearchStoreState>((set, get) => {
       set({
         query: '',
         loading: false,
+        loadingMore: false,
+        hasMore: false,
         results: [],
         error: null,
         activeSources: [],
