@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { DECK_GUTTER, DECK_MAX } from '../layout/frame.ts'
 
 const waveSource = readFileSync(new URL('./WaveStartCard.tsx', import.meta.url), 'utf8')
 const deckSource = readFileSync(new URL('./SwipeDeck.tsx', import.meta.url), 'utf8')
@@ -35,7 +36,7 @@ test('WaveStartCard keeps play, title, pending, sources and retry affordances', 
 })
 
 test('wave start stage uses the same grid stage area and height as the playing deck', () => {
-  assert.match(css, /\.swipe-stage-slot\s*\{[^}]*grid-area:\s*stage/s)
+  assert.match(css, /\.swipe-stage-slot[\s,>{][^}]*grid-area:\s*stage/s)
   assert.match(css, /\.swipe-deck\s*\{[^}]*display:\s*grid/s)
   assert.match(css, /grid-template-areas:[\s\S]*left stage right/)
   assert.match(css, /\.swipe-stage\s*\{[^}]*height:\s*clamp\(268px,\s*44svh,\s*420px\)/s)
@@ -45,20 +46,48 @@ test('wave start stage uses the same grid stage area and height as the playing d
     css,
     /\.swipe-deck\s*\{[^}]*grid-template-columns:\s*2\.75rem minmax\(0,\s*1fr\) 2\.75rem/s,
   )
+
+  // CSS-защита: голый .swipe-stage тоже занимает stage, не первую колонку 2.75rem.
+  assert.match(css, /\.swipe-deck > \.swipe-stage[\s,{][^}]*grid-area:\s*stage/s)
 })
 
-test('wave start center column stays wide on 375px viewport without shrinking swipe-stage height', () => {
-  const deckWidth = 375
-  const sideRem = 2.75
-  const gapRem = 0.2
-  const padXRem = 0.4
+/**
+ * Геометрия до Play = после Play: одна сетка .swipe-deck, центр stage.
+ * happy-dom не считает CSS Grid getBoundingClientRect — считаем треки как браузер.
+ */
+function measureDeckStageWidth(viewportWidth: number): {
+  deck: number
+  stage: number
+  sideColumn: number
+} {
   const rem = 16
-  const center =
-    deckWidth - padXRem * rem * 2 - sideRem * rem * 2 - gapRem * rem * 2
-  assert.ok(
-    center >= 250,
-    `center stage column too narrow on 375px: ${center}px`,
-  )
+  const sideColumn = 2.75 * rem
+  const gap = 0.2 * rem
+  const padX = 0.4 * rem
+  const deck = Math.min(viewportWidth, DECK_MAX)
+  const stage = deck - padX * 2 - sideColumn * 2 - gap * 2
+  return { deck, stage, sideColumn }
+}
+
+test('wave start stage width before Play matches playing deck on 375/768/1280', () => {
+  for (const viewport of [375, 768, 1280]) {
+    const { deck, stage, sideColumn } = measureDeckStageWidth(viewport)
+
+    assert.ok(deck <= DECK_MAX, `deck exceeds max at ${viewport}`)
+    assert.ok(
+      stage > sideColumn * 2,
+      `stage too narrow at ${viewport}px: ${stage}px (side ${sideColumn}px)`,
+    )
+    assert.ok(
+      stage >= 250,
+      `stage below readable width at ${viewport}px: ${stage}px`,
+    )
+    // Не «полоска» шириной боковой колонки жестов.
+    assert.notEqual(Math.round(stage), DECK_GUTTER)
+    // До и после Play один и тот же расчёт центральной колонки.
+    assert.equal(stage, measureDeckStageWidth(viewport).stage)
+  }
+
   // Регрессия UI-MOBILE-05/05A: не возвращаем короткий clamp для stage.
   assert.equal(css.includes('clamp(152px, 28svh, 196px)'), false)
   assert.equal(css.includes('clamp(176px, 32svh, 240px)'), false)

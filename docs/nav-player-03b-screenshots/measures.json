@@ -1,0 +1,13 @@
+﻿{
+  "before": {
+    "car-1024x600": { "header": 65, "mini": 95, "nav": 49, "dock": 144, "main": 391 },
+    "source": "docs/nav-player-03-screenshots (NAV-PLAYER-03A CDP)"
+  },
+  "after": {
+    "phone-390x844": { "header": 57, "mini": 91, "nav": 57, "dock": 148, "main": 639, "orb": 68 },
+    "car-1024x600": { "header": 49, "mini": 71, "nav": 49, "dock": 120, "main": 431, "orb": 68 },
+    "pc-1366x768": { "header": 65, "mini": 93, "nav": 57, "dock": 150, "main": 553, "orb": 68 }
+  },
+  "targets_car": { "header": 48, "mini": 56, "nav": 48, "note": "mini 71 retains ≥40px transport + thin progress for touch" },
+  "delta_car": { "header": -16, "mini": -24, "dock": -24, "main": 40 }
+}

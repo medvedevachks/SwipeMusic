@@ -8,9 +8,39 @@ import {
   noteContextChange,
   noteSearchFlowEvent,
 } from '../continuation/searchFlowDiag.ts'
+import {
+  buildDurableSessionState,
+  normalizeHistoryRanks,
+  validatePlaybackQueueSessionState,
+  type PlaybackQueueSessionState,
+  type SessionStateIssue,
+} from './playbackQueueSessionState.ts'
 
 export type RepeatMode = 'OFF' | 'ONE' | 'ALL'
 export type ShuffleMode = 'OFF' | 'ON'
+
+export type {
+  PlaybackQueueSessionState,
+  SessionStateIssue,
+} from './playbackQueueSessionState.ts'
+
+export type ImportSessionStateResult =
+  | { ok: true; state: PlaybackQueueSessionState }
+  | { ok: false; issues: SessionStateIssue[] }
+
+/**
+ * Разделение legacy v1 localStorage и session-aware пути (PLAYBACK-DEV-03A).
+ *
+ * - `legacy` (default): constructor restore + emit→persist в
+ *   `swipe-music-playback-queue-v1`. Текущий production через getPlaybackQueue().
+ * - `session`: без auto-restore из v1; emit не пишет в legacy-ключ.
+ *   Для очередей, питаемых PlaybackSessionStore / importSessionState.
+ */
+export type PlaybackQueuePersistenceMode = 'legacy' | 'session'
+
+export type PlaybackQueueOptions = {
+  persistenceMode?: PlaybackQueuePersistenceMode
+}
 
 export type PlaybackQueueSnapshot = {
   items: Track[]
@@ -24,6 +54,11 @@ export type PlaybackQueueSnapshot = {
   shuffleMode: ShuffleMode
   /** История фактически запущенных track id (единая для плеера и карточек). */
   history: string[]
+  /**
+   * Occurrence rank каждого history id в items на момент записи.
+   * Нужен при повторяющихся track ID (PLAYBACK-BUG-01).
+   */
+  historyRanks: number[]
   /**
    * Курсор в history: Previous/Next ходят по нему, не уничтожая «вперёд».
    * -1 = пусто. Persist для reload.
@@ -133,6 +168,8 @@ export class PlaybackQueue {
   private repeatMode: RepeatMode = 'OFF'
   private shuffleMode: ShuffleMode = 'OFF'
   private history: string[] = []
+  /** Parallel to history: occurrence rank в items на момент pushHistory. */
+  private historyRanks: number[] = []
   /** Курсор в history; не pop при Previous — иначе Next зовёт engine вместо replay. */
   private historyIndex = -1
   private context: PlaybackContext = NONE_PLAYBACK_CONTEXT
@@ -148,9 +185,36 @@ export class PlaybackQueue {
   private pendingRemovalIds = new Set<string>()
   private readonly listeners = new Set<PlaybackQueueListener>()
   private persistTimer: ReturnType<typeof setTimeout> | null = null
+  /**
+   * true = писать/читать swipe-music-playback-queue-v1.
+   * false после detachLegacyPersistence / mode=session.
+   */
+  private legacyPersistenceEnabled: boolean
 
-  constructor() {
-    this.restore()
+  constructor(options: PlaybackQueueOptions = {}) {
+    const mode = options.persistenceMode ?? 'legacy'
+    this.legacyPersistenceEnabled = mode === 'legacy'
+    if (this.legacyPersistenceEnabled) {
+      this.restore()
+    }
+  }
+
+  /** Текущий режим persist (для тестов / будущей интеграции). */
+  getPersistenceMode(): PlaybackQueuePersistenceMode {
+    return this.legacyPersistenceEnabled ? 'legacy' : 'session'
+  }
+
+  /**
+   * Отключает чтение/запись legacy v1 для этого экземпляра.
+   * Не удаляет ключ и не меняет содержимое очереди.
+   * Production singleton не вызывает это, пока SessionStore не подключён.
+   */
+  detachLegacyPersistence(): void {
+    this.legacyPersistenceEnabled = false
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = null
+    }
   }
 
   subscribe(listener: PlaybackQueueListener): () => void {
@@ -170,6 +234,7 @@ export class PlaybackQueue {
       repeatMode: this.repeatMode,
       shuffleMode: this.shuffleMode,
       history: [...this.history],
+      historyRanks: [...this.historyRanks],
       historyIndex: this.historyIndex,
       context: this.context,
     }
@@ -234,6 +299,7 @@ export class PlaybackQueue {
       this.playOrder = []
       this.playOrderIndex = -1
       this.history = []
+      this.historyRanks = []
       this.historyIndex = -1
       noteSearchFlowEvent({
         source: 'PlaybackQueue.setQueue',
@@ -252,6 +318,7 @@ export class PlaybackQueue {
     this.currentIndex = index
     this.rebuildPlayOrder(index)
     this.history = []
+    this.historyRanks = []
     this.historyIndex = -1
     this.pushHistory(cleaned[index]!.id)
     noteSearchFlowEvent({
@@ -514,6 +581,134 @@ export class PlaybackQueue {
     return [...this.pendingRemovalIds]
   }
 
+  /** Provenance insertNext / continuation tail. */
+  getSessionTailIds(): readonly string[] {
+    return [...this.sessionTailIds]
+  }
+
+  /**
+   * Полный durable-экспорт для PlaybackSessionStore (PLAYBACK-DEV-03).
+   * Не мутирует live-очередь. Не трогает AudioPlayer.
+   *
+   * pendingRemovalIds: runtime-only. В экспорт попадают только треки,
+   * которые должны остаться в будущей очереди после восстановления —
+   * «призраки» (удалены из каталога, но ещё играют) исключаются.
+   */
+  exportSessionState(): PlaybackQueueSessionState {
+    return buildDurableSessionState({
+      items: this.items,
+      currentIndex: this.currentIndex,
+      playOrder: this.playOrder,
+      playOrderIndex: this.playOrderIndex,
+      repeatMode: this.repeatMode,
+      shuffleMode: this.shuffleMode,
+      history: this.history,
+      historyRanks: this.historyRanks,
+      historyIndex: this.historyIndex,
+      context: this.context,
+      sessionTailIds: this.sessionTailIds,
+      pendingRemovalIds: this.pendingRemovalIds,
+    })
+  }
+
+  /**
+   * Runtime-снимок для отката mid-play (DEV-04A).
+   * Включает pending-removal «призраков» — в отличие от exportSessionState().
+   */
+  exportRuntimeSessionState(): {
+    state: PlaybackQueueSessionState
+    pendingRemovalIds: string[]
+  } {
+    return {
+      state: {
+        items: this.items.map(stripPreview),
+        currentIndex: this.currentIndex,
+        playOrder: [...this.playOrder],
+        playOrderIndex: this.playOrderIndex,
+        repeatMode: this.repeatMode,
+        shuffleMode: this.shuffleMode,
+        history: [...this.history],
+        historyRanks: [...this.historyRanks],
+        historyIndex: this.historyIndex,
+        context: this.context,
+        sessionTailIds: [...this.sessionTailIds],
+      },
+      pendingRemovalIds: [...this.pendingRemovalIds],
+    }
+  }
+
+  /**
+   * Восстановление runtime-снимка после неудачного Commit (включая pending).
+   * Не пишет в legacy (как importSessionState).
+   */
+  importRuntimeSessionState(
+    state: PlaybackQueueSessionState,
+    pendingRemovalIds: readonly string[] = [],
+  ): ImportSessionStateResult {
+    const result = this.importSessionState(state)
+    if (!result.ok) {
+      return result
+    }
+    this.pendingRemovalIds.clear()
+    const known = new Set(this.items.map((track) => track.id))
+    for (const id of pendingRemovalIds) {
+      if (typeof id === 'string' && known.has(id)) {
+        this.pendingRemovalIds.add(id)
+      }
+    }
+    return { ok: true, state: this.exportSessionState() }
+  }
+
+  /**
+   * Атомарное восстановление полного состояния без setQueue().
+   * Валидация до мутации: при ошибке очередь не меняется.
+   * Один emit() подписчикам. Не запускает / не останавливает AudioPlayer.
+   * pendingRemovalIds после импорта пусты (durable).
+   *
+   * DEV-03A: импорт всегда отключает legacy persist для экземпляра и
+   * не планирует запись в swipe-music-playback-queue-v1 — иначе
+   * пользовательская v2-сессия утекла бы в общий ключ без userId.
+   */
+  importSessionState(raw: unknown): ImportSessionStateResult {
+    const validated = validatePlaybackQueueSessionState(raw)
+    if (!validated.ok) {
+      return validated
+    }
+    const next = validated.value
+    const contextBefore = this.context.type
+    const lengthBefore = this.items.length
+
+    // До мутации: отменить отложенный legacy persist и запретить новые записи.
+    this.detachLegacyPersistence()
+
+    this.items = next.items.map(stripPreview)
+    this.currentIndex = next.currentIndex
+    this.playOrder = [...next.playOrder]
+    this.playOrderIndex = next.playOrderIndex
+    this.repeatMode = next.repeatMode
+    this.shuffleMode = next.shuffleMode
+    this.history = [...next.history]
+    this.historyRanks = [...next.historyRanks]
+    this.historyIndex = next.historyIndex
+    this.context = next.context
+    this.sessionTailIds = new Set(next.sessionTailIds)
+    this.pendingRemovalIds.clear()
+
+    noteSearchFlowEvent({
+      source: 'PlaybackQueue.importSessionState',
+      contextBefore,
+      contextAfter: this.context.type,
+      queueLengthBefore: lengthBefore,
+      queueLengthAfter: this.items.length,
+      currentIndex: this.currentIndex,
+      trackId: this.items[this.currentIndex]?.id ?? null,
+      detail: 'session-state-import',
+    })
+
+    this.emit({ persist: false })
+    return { ok: true, state: this.exportSessionState() }
+  }
+
   move(from: number, to: number): void {
     if (
       from < 0 ||
@@ -546,6 +741,7 @@ export class PlaybackQueue {
     this.playOrder = []
     this.playOrderIndex = -1
     this.history = []
+    this.historyRanks = []
     this.historyIndex = -1
     this.sessionTailIds.clear()
     this.pendingRemovalIds.clear()
@@ -631,8 +827,7 @@ export class PlaybackQueue {
 
     if (this.historyIndex > 0) {
       this.historyIndex -= 1
-      const prevId = this.history[this.historyIndex]
-      const prevIndex = this.items.findIndex((track) => track.id === prevId)
+      const prevIndex = this.resolveHistoryEntryIndex(this.historyIndex)
       if (prevIndex >= 0) {
         this.currentIndex = prevIndex
         this.playOrderIndex = Math.max(0, this.playOrder.indexOf(prevIndex))
@@ -672,8 +867,8 @@ export class PlaybackQueue {
 
   peekPrevious(): Track | null {
     if (this.historyIndex > 0) {
-      const prevId = this.history[this.historyIndex - 1]
-      return this.items.find((track) => track.id === prevId) ?? null
+      const prevIndex = this.resolveHistoryEntryIndex(this.historyIndex - 1)
+      return prevIndex >= 0 ? (this.items[prevIndex] ?? null) : null
     }
     const prev = this.peekPreviousIndex()
     if (prev == null) {
@@ -749,14 +944,35 @@ export class PlaybackQueue {
   }
 
   private stripTrackFromHistory(trackId: string): void {
-    const removedHistoryAt = this.history.lastIndexOf(trackId)
-    this.history = this.history.filter((id) => id !== trackId)
-    if (removedHistoryAt >= 0 && this.historyIndex >= removedHistoryAt) {
-      this.historyIndex = Math.max(-1, this.historyIndex - 1)
+    const nextHistory: string[] = []
+    const nextRanks: number[] = []
+    let removedBeforeOrAtCursor = 0
+    for (let i = 0; i < this.history.length; i += 1) {
+      if (this.history[i] === trackId) {
+        if (i <= this.historyIndex) {
+          removedBeforeOrAtCursor += 1
+        }
+        continue
+      }
+      nextHistory.push(this.history[i]!)
+      nextRanks.push(this.historyRanks[i] ?? 0)
     }
+    this.history = nextHistory
+    this.historyRanks = nextRanks
+    this.historyIndex = Math.max(-1, this.historyIndex - removedBeforeOrAtCursor)
     if (this.historyIndex >= this.history.length) {
       this.historyIndex = this.history.length - 1
     }
+  }
+
+  /** Индекс items для слота history (id + occurrence rank). */
+  private resolveHistoryEntryIndex(historyPos: number): number {
+    const id = this.history[historyPos]
+    if (!id) {
+      return -1
+    }
+    const rank = this.historyRanks[historyPos] ?? 0
+    return indexOfOccurrence(this.items, id, rank)
   }
 
   /**
@@ -859,14 +1075,23 @@ export class PlaybackQueue {
   }
 
   private pushHistory(trackId: string): void {
-    if (this.historyIndex >= 0 && this.history[this.historyIndex] === trackId) {
+    const rank =
+      this.currentIndex >= 0 && this.items[this.currentIndex]?.id === trackId
+        ? occurrenceRank(this.items, this.currentIndex)
+        : 0
+    if (
+      this.historyIndex >= 0 &&
+      this.history[this.historyIndex] === trackId &&
+      (this.historyRanks[this.historyIndex] ?? 0) === rank
+    ) {
       return
     }
     // Replay уже известного следующего слота истории (после Previous).
     if (
       this.historyIndex >= 0 &&
       this.historyIndex < this.history.length - 1 &&
-      this.history[this.historyIndex + 1] === trackId
+      this.history[this.historyIndex + 1] === trackId &&
+      (this.historyRanks[this.historyIndex + 1] ?? 0) === rank
     ) {
       this.historyIndex += 1
       return
@@ -874,25 +1099,34 @@ export class PlaybackQueue {
     // Новая ветка: обрезаем «вперёд» от курсора, затем append.
     if (this.historyIndex >= 0 && this.historyIndex < this.history.length - 1) {
       this.history = this.history.slice(0, this.historyIndex + 1)
+      this.historyRanks = this.historyRanks.slice(0, this.historyIndex + 1)
     }
     this.history.push(trackId)
+    this.historyRanks.push(rank)
     this.historyIndex = this.history.length - 1
     if (this.history.length > 200) {
       const overflow = this.history.length - 200
       this.history = this.history.slice(-200)
+      this.historyRanks = this.historyRanks.slice(-200)
       this.historyIndex = Math.max(0, this.historyIndex - overflow)
     }
   }
 
-  private emit(): void {
+  private emit(options?: { persist?: boolean }): void {
     const snapshot = this.getSnapshot()
     for (const listener of this.listeners) {
       listener(snapshot)
+    }
+    if (options?.persist === false) {
+      return
     }
     this.schedulePersist()
   }
 
   private schedulePersist(): void {
+    if (!this.legacyPersistenceEnabled) {
+      return
+    }
     if (this.persistTimer) {
       clearTimeout(this.persistTimer)
     }
@@ -902,6 +1136,9 @@ export class PlaybackQueue {
   }
 
   private persist(): void {
+    if (!this.legacyPersistenceEnabled) {
+      return
+    }
     try {
       const payload: PersistedPlaybackQueue = {
         ...this.getSnapshot(),
@@ -916,6 +1153,9 @@ export class PlaybackQueue {
   }
 
   private restore(): void {
+    if (!this.legacyPersistenceEnabled) {
+      return
+    }
     try {
       const raw = localStorage.getItem(PLAYBACK_QUEUE_STORAGE_KEY)
       if (!raw) {
@@ -936,6 +1176,12 @@ export class PlaybackQueue {
       this.repeatMode = data.repeatMode ?? 'OFF'
       this.shuffleMode = data.shuffleMode ?? 'OFF'
       this.history = Array.isArray(data.history) ? data.history : []
+      this.historyRanks = normalizeHistoryRanks(
+        this.history,
+        Array.isArray((data as { historyRanks?: unknown }).historyRanks)
+          ? ((data as { historyRanks: unknown[] }).historyRanks as number[])
+          : undefined,
+      )
       const rawHistoryIndex =
         typeof data.historyIndex === 'number' ? data.historyIndex : -1
       if (this.history.length === 0) {
@@ -1028,9 +1274,18 @@ export class PlaybackQueue {
 
 let singleton: PlaybackQueue | null = null
 
+/**
+ * Production singleton — всегда legacy mode (прежнее поведение).
+ * Не вызывать importSessionState на нём до явного session wiring.
+ */
 export function getPlaybackQueue(): PlaybackQueue {
   if (!singleton) {
-    singleton = new PlaybackQueue()
+    singleton = new PlaybackQueue({ persistenceMode: 'legacy' })
   }
   return singleton
+}
+
+/** Очередь без legacy restore/persist — для SessionStore / тестов DEV-03+. */
+export function createSessionPlaybackQueue(): PlaybackQueue {
+  return new PlaybackQueue({ persistenceMode: 'session' })
 }

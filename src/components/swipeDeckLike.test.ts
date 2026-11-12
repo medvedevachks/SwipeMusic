@@ -269,6 +269,9 @@ function installRemote(): void {
     async unassignCanonical() {
       return undefined
     },
+    async loadCanonicalLibrary() {
+      return { items: Object.values(canonicalStore.getState().itemsById) }
+    },
   })
   persistence.setState({ armed: true, status: 'ready', message: null })
 }

@@ -55,6 +55,22 @@ export type PlayUserCatalogDeps = {
     context: PlaylistPlayContext
   }) => boolean | void | Promise<boolean | void>
   onInFlight?: (count: number) => void
+  /**
+   * Сразу после успешного принятия первого playback intent (ранний старт),
+   * до завершения buildCatalogPlaybackQueue / expand и не дожидаясь
+   * окончания adapter.load/play (UI может открыть Fullscreen на «Загрузка…»).
+   * Не вызывается при empty / unavailable / busy / error до intent.
+   */
+  onPlaybackAccepted?: (info: {
+    track: Track
+    entry: CatalogQueueEntry
+    needsUserPlayGesture: boolean
+  }) => void
+  /** Для тестов: состояние плеера без реального AudioPlayer. */
+  getPlayerState?: () => {
+    pendingTrack: Track | null
+    currentTrack: Track | null
+  }
 }
 
 export type PlayUserCatalogResult =
@@ -163,28 +179,142 @@ export async function playUserCatalog(
     /** Canonical id раннего старта (выбранный трек или первая доступная). */
     let earlyStartCanonicalId: string | null = preferredId
 
-    const playEarlyTrack = async (entry: CatalogQueueEntry): Promise<'ok' | 'error'> => {
-      const playSelection =
-        deps.playSelection ??
-        (await import('../playbackIntent/PlaybackIntent.ts')).playLibrarySelection
-      try {
-        await playSelection({
-          tracks: [entry.track],
-          startIndex: 0,
-          context,
-        })
-      } catch (error) {
-        if (isAutoplayBlockedError(error)) {
-          needsUserPlayGesture = true
-        } else {
-          return 'error'
+    const resolvePlaySelection = async () => {
+      if (deps.playSelection) {
+        return deps.playSelection
+      }
+      const { isSessionSwitchIntegrationEnabled } = await import(
+        '../sessionSwitch/featureFlag.ts'
+      )
+      if (isSessionSwitchIntegrationEnabled()) {
+        const { playCatalogViaSessionSwitch } = await import(
+          '../sessionSwitch/integration/playCatalogSession.ts'
+        )
+        return async (options: {
+          tracks: Track[]
+          startIndex: number
+          context: PlaylistPlayContext
+        }) => {
+          const switched = await playCatalogViaSessionSwitch({
+            tracks: options.tracks,
+            startIndex: options.startIndex,
+            catalogId: options.context.id,
+            catalogTitle: options.context.title,
+          })
+          if (switched.ok) {
+            return
+          }
+          if (switched.reason === 'user_gesture_required') {
+            const err = new Error('NotAllowedError')
+            err.name = 'NotAllowedError'
+            throw err
+          }
+          throw new Error(switched.message ?? switched.reason)
         }
       }
-      startedEarly = true
-      earlyStartCanonicalId = entry.canonicalTrackId
-      // Новая явная сессия Play — не late expand.
-      beginCatalogLoopSession(input.catalog.id)
-      return 'ok'
+      return (await import('../playbackIntent/PlaybackIntent.ts'))
+        .playLibrarySelection
+    }
+
+    const readPlayerState = async () => {
+      if (deps.getPlayerState) {
+        return deps.getPlayerState()
+      }
+      const { getAudioPlayer } = await import('../audioPlayer/index.ts')
+      return getAudioPlayer().getState()
+    }
+
+    const playEarlyTrack = async (entry: CatalogQueueEntry): Promise<'ok' | 'error'> => {
+      const playSelection = await resolvePlaySelection()
+      let notified = false
+      let resolveNotified: (() => void) | null = null
+      const notifiedPromise = new Promise<void>((resolve) => {
+        resolveNotified = resolve
+      })
+
+      const notifyAccepted = () => {
+        if (notified || !isCurrent(generation)) {
+          return
+        }
+        notified = true
+        startedEarly = true
+        earlyStartCanonicalId = entry.canonicalTrackId
+        // Новая явная сессия Play — не late expand.
+        beginCatalogLoopSession(input.catalog.id)
+        deps.onPlaybackAccepted?.({
+          track: entry.track,
+          entry,
+          needsUserPlayGesture,
+        })
+        resolveNotified?.()
+      }
+
+      let playSettled: 'ok' | 'error' | null = null
+      const playTask = (async (): Promise<'ok' | 'error'> => {
+        try {
+          await playSelection({
+            tracks: [entry.track],
+            startIndex: 0,
+            context,
+          })
+          playSettled = 'ok'
+          // Синхронно после playSelection — как раньше для Repeat policy / тестов.
+          notifyAccepted()
+          return 'ok'
+        } catch (error) {
+          if (isAutoplayBlockedError(error)) {
+            needsUserPlayGesture = true
+            playSettled = 'ok'
+            notifyAccepted()
+            return 'ok'
+          }
+          playSettled = 'error'
+          return 'error'
+        }
+      })()
+
+      // Intent принят, когда плеер уже держит этот трек (onPending/current),
+      // даже если adapter.load/play ещё идёт — Fullscreen/queue prepare не ждут звук.
+      void (async () => {
+        const trackId = entry.track.id
+        const deadline = Date.now() + 15_000
+        while (Date.now() < deadline && isCurrent(generation) && !notified) {
+          try {
+            const state = await readPlayerState()
+            if (
+              state.pendingTrack?.id === trackId ||
+              state.currentTrack?.id === trackId
+            ) {
+              notifyAccepted()
+              return
+            }
+          } catch {
+            // AudioPlayer может быть недоступен в unit-тестах без getPlayerState.
+          }
+          await new Promise((resolve) => setTimeout(resolve, 16))
+        }
+      })()
+
+      await Promise.race([playTask, notifiedPromise])
+
+      if (playSettled === 'error' && !notified) {
+        return 'error'
+      }
+
+      if (notified) {
+        if (playSettled === null) {
+          // load/play ещё идёт — очередь готовим параллельно.
+          void playTask
+        }
+        return 'ok'
+      }
+
+      const playResult = await playTask
+      if (playResult === 'ok') {
+        notifyAccepted()
+        return 'ok'
+      }
+      return 'error'
     }
 
     if (preferredId) {
@@ -357,6 +487,20 @@ export async function playUserCatalog(
       const replaceQueue =
         deps.replaceQueue ??
         (async (options) => {
+          const { isSessionSwitchIntegrationEnabled } = await import(
+            '../sessionSwitch/featureFlag.ts'
+          )
+          if (isSessionSwitchIntegrationEnabled()) {
+            const { expandCatalogSessionQueue } = await import(
+              '../sessionSwitch/integration/playCatalogSession.ts'
+            )
+            return expandCatalogSessionQueue({
+              tracks: options.tracks,
+              startIndex: options.startIndex,
+              catalogId: options.context.id,
+              catalogTitle: options.context.title,
+            })
+          }
           const { getPlaybackQueue } = await import('../playbackQueue/PlaybackQueue.ts')
           return getPlaybackQueue().replacePlaylistItemsPreservingPlayback(
             options.tracks,
@@ -405,9 +549,7 @@ export async function playUserCatalog(
 
     // На случай если early-path не сработал (не должно при штатном потоке).
     try {
-      const playSelection =
-        deps.playSelection ??
-        (await import('../playbackIntent/PlaybackIntent.ts')).playLibrarySelection
+      const playSelection = await resolvePlaySelection()
       if (!isCurrent(generation)) {
         return { status: 'busy', message: CATALOG_PLAYBACK_MESSAGE.BUSY }
       }

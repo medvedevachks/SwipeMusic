@@ -7,8 +7,13 @@ export const CONTINUOUS_LIMITS = {
   apiPageSize: 20,
   /** Локальный candidate pool (не PlaybackQueue). */
   maxPoolSize: 48,
-  /** Prefetch buffer следующих metadata-кандидатов. */
-  bufferTarget: 8,
+  /**
+   * Prefetch buffer playable metadata (после probe), не raw discovery.
+   * Target 10 / low-watermark 5 — PLAYBACK-CME-01.
+   */
+  bufferTarget: 10,
+  /** Запуск refill, когда в буфере осталось ≤ этого числа. */
+  bufferLowWatermark: 5,
   /** Скользящее окно недавних (не вечный blacklist). */
   recentWindow: 80,
   /** Макс. поисковых/feed страниц за одну refill-операцию (вкл. excluded-only pages). */
@@ -29,5 +34,10 @@ export const CONTINUOUS_LIMITS = {
   backoffBaseMs: 400,
   backoffMaxMs: 8_000,
   /** Сколько playable пытаемся собрать за один batch refill. */
-  batchPlayableTarget: 8,
+  batchPlayableTarget: 10,
+  /**
+   * Мягкая доля familiar (canonical liked/favorite/in-catalog) в SWIPES batch.
+   * Нехватка новых → допускается больше familiar (без голодания).
+   */
+  swipeFamiliarTargetRatio: 0.3,
 } as const

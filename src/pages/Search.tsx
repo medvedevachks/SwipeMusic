@@ -29,14 +29,12 @@ export default function Search() {
 
   const [draft, setDraft] = useState(query)
 
-  const openInSwipeDeck = (tracks: Track[], selectedTrackId?: string, q?: string) => {
-    // Search results → только колода карточек. PlaybackQueue заполняет playSearchTrack / plan.
-    applySearchDeck(tracks, {
-      selectedTrackId,
-      query: q ?? query,
-    })
-
-    // Seed: исходная выдача минус demo (кроме harness). Не обходим withoutDemoTracks в user-mode.
+  /**
+   * Play из строки поиска → SEARCH seed-сессия + UI колоды на /.
+   * Не трогает SWIPES SessionStore; не dump'ит hits в PlaybackQueue / applySearchDeck.
+   * NAV-SEARCH-01: экран «Свайпы» показывает карточки активной SEARCH session.
+   */
+  const playSearchResult = (tracks: Track[], selectedTrackId?: string, q?: string) => {
     const playbackTracks = selectSearchPlaybackTracks({
       tracks,
       allowDemo: isSearchFlowHarnessEnabled(),
@@ -47,26 +45,39 @@ export default function Search() {
       selectedTrackId,
       query: q ?? query,
     })
-    // ON: один seed-трек. OFF: legacy — выдача как swipe-очередь (уже без demo в store).
-    const legacyDeck = useSwipeDeckSessionStore.getState().tracks ?? []
-    const playback =
+    const track =
       plan.mode === 'single-track'
-        ? getPlaybackIntent().playSearchTrack({
-            track: plan.track,
-            query: plan.query,
-            searchHits: playbackTracks,
-          })
-        : legacyDeck.length > 0
-          ? getPlaybackIntent().playFromSwipe({
-              tracks: [...legacyDeck],
-              startIndex: 0,
-              explicitUserPlay: true,
-            })
-          : Promise.resolve()
-    void playback.catch(() => {
-      // resolve / autoplay — BottomPlayer
-    })
+        ? plan.track
+        : (playbackTracks.find((item) => item.id === selectedTrackId) ??
+          playbackTracks[0])
+    if (!track) {
+      return
+    }
+    const seedQuery = plan.mode === 'single-track' ? plan.query : (q ?? query)
+    void (async () => {
+      try {
+        await getPlaybackIntent().playSearchTrack({
+          track,
+          query: seedQuery,
+          searchHits: playbackTracks,
+        })
+      } catch {
+        // resolve / autoplay — BottomPlayer; seed уже в SEARCH-слоте при SessionSwitch.
+      }
+      // После commit SEARCH: Home читает playback deck (search-seed), не SWIPES browse.
+      navigate('/')
+    })()
+  }
 
+  /**
+   * Явное «в свайпы»: только UI-колода Home + маршрут /.
+   * Воспроизведение не стартует — иначе подменялась бы очередь/сессия без жеста Play.
+   */
+  const openAllInSwipes = (tracks: Track[], selectedTrackId?: string, q?: string) => {
+    applySearchDeck(tracks, {
+      selectedTrackId,
+      query: q ?? query,
+    })
     navigate('/')
   }
 
@@ -189,7 +200,7 @@ export default function Search() {
             <button
               type="button"
               className="rounded-xl border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-fg)]"
-              onClick={() => openInSwipeDeck(results, results[0]?.id, query)}
+              onClick={() => openAllInSwipes(results, results[0]?.id, query)}
             >
               Открыть все в свайпах
             </button>
@@ -200,8 +211,8 @@ export default function Search() {
               <li key={track.id}>
                 <button
                   type="button"
-                  className="flex w-full items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
-                  onClick={() => openInSwipeDeck(results, track.id, query)}
+                  className="flex w-full min-h-11 items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
+                  onClick={() => playSearchResult(results, track.id, query)}
                 >
                   <span
                     className="h-12 w-12 shrink-0 rounded-lg"

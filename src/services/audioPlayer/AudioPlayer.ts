@@ -27,6 +27,7 @@ import {
 import { enqueueRecommendationAdvance } from '../recommendation/sessionRuntime.ts'
 import { reportPlayback } from '../playbackAnalytics/report.ts'
 import { getPlaybackQueue } from '../playbackQueue'
+import { isSessionSwitchIntegrationEnabled } from '../sessionSwitch/featureFlag.ts'
 import {
   beginQueueTransport,
   cancelActiveFallback,
@@ -37,6 +38,14 @@ import { attachMediaSession } from './mediaSession.ts'
 import type { PlayerAdapter } from './PlayerAdapter'
 import { getPlayerManager } from './PlayerManager'
 import { settlePlayGeneration } from './stalePlaySettlement.ts'
+import {
+  commitPreparedPlayback,
+  rollbackPreparedPlayback,
+} from '../sessionSwitch/integration/sessionPhysicalEngine.ts'
+import type {
+  CommitPlayResult,
+  RollbackPlayResult,
+} from '../sessionSwitch/ports.ts'
 
 type StateListener = (state: PlayerState) => void
 
@@ -627,6 +636,278 @@ export class AudioPlayer {
     this.patchState({ error: null })
   }
 
+  /**
+   * Сброс identity плеера при logout / смене пользователя.
+   * Очередь очищает вызывающий код (handoff/teardown) — здесь только физический UI state.
+   */
+  clearPlaybackIdentity(): void {
+    cancelActiveFallback('stop')
+    this.playGeneration += 1
+    this.adapter.stop()
+    this.patchState({
+      currentTrack: null,
+      pendingTrack: null,
+      activeCandidate: null,
+      playing: false,
+      paused: true,
+      currentTime: 0,
+      duration: 0,
+      progress: 0,
+      buffering: false,
+      loading: false,
+      error: null,
+      queue: getPlaybackQueue().getItems(),
+      queueIndex: getPlaybackQueue().getSnapshot().currentIndex,
+    })
+  }
+
+  /**
+   * DEV-07: показать трек в мини-плеере после restore сессии без autoplay.
+   * Не вызывает adapter.play / load URL (нет stream в SessionTrack).
+   */
+  restorePausedIdentity(
+    track: Track | null,
+    positionSeconds: number,
+  ): void {
+    cancelActiveFallback('stop')
+    this.playGeneration += 1
+    this.adapter.stop()
+    const queue = getPlaybackQueue()
+    const currentTime =
+      Number.isFinite(positionSeconds) && positionSeconds > 0
+        ? positionSeconds
+        : 0
+    const duration = track?.durationMs ? track.durationMs / 1000 : 0
+    this.patchState({
+      currentTrack: track,
+      pendingTrack: null,
+      activeCandidate: null,
+      playing: false,
+      paused: true,
+      currentTime,
+      duration,
+      progress: computeProgress(currentTime, duration),
+      buffering: false,
+      loading: false,
+      error: null,
+      queue: queue.getItems(),
+      queueIndex: queue.getSnapshot().currentIndex,
+    })
+  }
+
+  /** Текущее playGeneration (session-switch PhysicalPlayerPort). */
+  getPlayGeneration(): number {
+    return this.playGeneration
+  }
+
+  /**
+   * DEV-05 Prepare: только resolve URL.
+   * Не вызывает pause/stop/load и не мутирует очередь / currentTrack.
+   */
+  async resolveForSessionPrepare(
+    track: Track,
+    signal?: AbortSignal,
+  ): Promise<{ url: string; candidate: PlaybackCandidate } | null> {
+    if (signal?.aborted) {
+      return null
+    }
+    const resolver = getPlaybackResolver()
+    const resolution = await resolver.resolve(track)
+    if (signal?.aborted) {
+      return null
+    }
+    if (!resolution?.url) {
+      return null
+    }
+    return { url: resolution.url, candidate: resolution.candidate }
+  }
+
+  /**
+   * DEV-05 Commit: claim generation → pause → load → play.
+   * currentTrack обновляется только после успешного load.
+   * Не вызывает playResolved (там pause параллельно с resolve).
+   */
+  async commitSessionPlay(input: {
+    track: Track
+    url: string
+    candidate: PlaybackCandidate | null
+  }): Promise<CommitPlayResult> {
+    return commitPreparedPlayback({
+      track: input.track,
+      url: input.url,
+      candidate: input.candidate,
+      adapter: this.adapter,
+      generation: {
+        getGeneration: () => this.playGeneration,
+        claimGeneration: () => {
+          this.playGeneration += 1
+          return this.playGeneration
+        },
+      },
+      callbacks: {
+        onPending: (track) => {
+          const queue = getPlaybackQueue()
+          this.patchState({
+            pendingTrack: track,
+            loading: true,
+            buffering: true,
+            playing: false,
+            paused: true,
+            error: null,
+            queue: queue.getItems(),
+            queueIndex: queue.getSnapshot().currentIndex,
+          })
+        },
+        onCommitted: (track, candidate) => {
+          const queue = getPlaybackQueue()
+          this.patchState({
+            currentTrack: track,
+            pendingTrack: null,
+            activeCandidate: candidate,
+            currentTime: 0,
+            duration: track.durationMs ? track.durationMs / 1000 : 0,
+            progress: 0,
+            error: null,
+            loading: true,
+            buffering: true,
+            queue: queue.getItems(),
+            queueIndex: queue.getSnapshot().currentIndex,
+          })
+        },
+        onPlaying: () => {
+          this.patchState({
+            playing: true,
+            paused: false,
+            loading: false,
+            buffering: false,
+            pendingTrack: null,
+            error: null,
+          })
+        },
+        onUserGestureRequired: () => {
+          this.patchState({
+            pendingTrack: null,
+            playing: false,
+            paused: true,
+            loading: false,
+            buffering: false,
+            error: null,
+          })
+        },
+        onFailed: (message) => {
+          this.patchState({
+            pendingTrack: null,
+            playing: false,
+            paused: true,
+            loading: false,
+            buffering: false,
+            error: message,
+          })
+        },
+        onRollbackUnavailable: () => {
+          this.patchState({
+            pendingTrack: null,
+            playing: false,
+            paused: true,
+            loading: false,
+            buffering: false,
+          })
+        },
+        onRollbackRestored: (track) => {
+          const queue = getPlaybackQueue()
+          this.patchState({
+            currentTrack: track,
+            pendingTrack: null,
+            error: null,
+            queue: queue.getItems(),
+            queueIndex: queue.getSnapshot().currentIndex,
+          })
+        },
+      },
+    })
+  }
+
+  /** DEV-05 Rollback к runtime-якорю предыдущего sounding трека. */
+  async rollbackSessionPlay(input: {
+    track: Track | null
+    url: string | null
+    positionSeconds: number
+    commitClaimGeneration?: number
+  }): Promise<RollbackPlayResult> {
+    return rollbackPreparedPlayback({
+      track: input.track,
+      url: input.url,
+      positionSeconds: input.positionSeconds,
+      adapter: this.adapter,
+      generation: {
+        getGeneration: () => this.playGeneration,
+        claimGeneration: () => {
+          this.playGeneration += 1
+          return this.playGeneration
+        },
+      },
+      commitClaimGeneration: input.commitClaimGeneration,
+      callbacks: {
+        onPending: () => {
+          /* rollback не ставит pending целевого трека */
+        },
+        onCommitted: () => {
+          /* unused in rollback */
+        },
+        onPlaying: () => {
+          this.patchState({
+            playing: true,
+            paused: false,
+            loading: false,
+            buffering: false,
+            pendingTrack: null,
+            error: null,
+          })
+        },
+        onUserGestureRequired: () => {
+          this.patchState({
+            pendingTrack: null,
+            playing: false,
+            paused: true,
+            loading: false,
+            buffering: false,
+            error: null,
+          })
+        },
+        onFailed: (message) => {
+          this.patchState({
+            pendingTrack: null,
+            playing: false,
+            paused: true,
+            loading: false,
+            buffering: false,
+            error: message,
+          })
+        },
+        onRollbackUnavailable: () => {
+          this.patchState({
+            pendingTrack: null,
+            playing: false,
+            paused: true,
+            loading: false,
+            buffering: false,
+          })
+        },
+        onRollbackRestored: (track) => {
+          const queue = getPlaybackQueue()
+          this.patchState({
+            currentTrack: track,
+            pendingTrack: null,
+            currentTime: this.adapter.getCurrentTime(),
+            error: null,
+            queue: queue.getItems(),
+            queueIndex: queue.getSnapshot().currentIndex,
+          })
+        },
+      },
+    })
+  }
+
   stop(): void {
     reportPlayback({
       type: 'skip',
@@ -816,6 +1097,54 @@ export class AudioPlayer {
     }
     const track = getPlaybackQueue().next({ fromEnded: true })
     if (!track) {
+      // PLAYBACK-CME-01: album end → related (same-artist library) или stop.
+      const endedContext = before.context
+      if (
+        endedContext.type === 'album' &&
+        isSessionSwitchIntegrationEnabled()
+      ) {
+        try {
+          const { ensureAlbumRelatedContinuationPort } = await import(
+            '../sessionSwitch/integration/albumRelatedContinuation.ts'
+          )
+          ensureAlbumRelatedContinuationPort()
+          const { resolveAlbumExhaustedContinuation } = await import(
+            '../sessionSwitch/integration/albumContinuationContract.ts'
+          )
+          const { getSessionSwitchAppRuntime } = await import(
+            '../sessionSwitch/integration/sessionSwitchAppRuntime.ts'
+          )
+          const runtime = getSessionSwitchAppRuntime()
+          const meta =
+            runtime?.store.getSlot('album').meta ??
+            ({
+              kind: 'album' as const,
+              albumId: endedContext.id,
+              title: endedContext.title,
+              ...(endedContext.artist
+                ? { artist: endedContext.artist }
+                : {}),
+              phase: 'album' as const,
+            })
+          if (meta.kind === 'album') {
+            const decision = await resolveAlbumExhaustedContinuation({
+              meta,
+              lastTrack: this.state.currentTrack,
+            })
+            if (decision.action === 'related') {
+              const { applyAlbumRelatedContinuation } = await import(
+                '../sessionSwitch/integration/albumRelatedContinuation.ts'
+              )
+              const applied = await applyAlbumRelatedContinuation(decision)
+              if (applied) {
+                return
+              }
+            }
+          }
+        } catch {
+          // contract optional
+        }
+      }
       this.stop()
       this.patchState({
         currentTrack: null,

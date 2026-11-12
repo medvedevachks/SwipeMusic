@@ -96,3 +96,26 @@ test('stale expand queue drops tracks that left sys_swipes', () => {
   )
   useCanonicalLibraryStore.getState().clear()
 })
+
+test('sys_my_music live queue keeps liked/user-catalog and drops orphan identity', () => {
+  const orphan = item('can_orphan', [])
+  orphan.state = { ...orphan.state, liked: false }
+  const liked = item('can_liked', ['sys_swipes'])
+  const catalogOnly = item('can_catalog', ['cat_party'])
+  catalogOnly.state = { ...catalogOnly.state, liked: false }
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [
+    orphan,
+    liked,
+    catalogOnly,
+  ])
+  const live = filterQueueToLiveCatalogMembership('sys_my_music', [
+    entry('can_orphan'),
+    entry('can_liked'),
+    entry('can_catalog'),
+  ])
+  assert.deepEqual(
+    live.map((row) => row.canonicalTrackId),
+    ['can_liked', 'can_catalog'],
+  )
+  useCanonicalLibraryStore.getState().clear()
+})

@@ -8,6 +8,7 @@ import { noteSearchFlowEvent } from '../continuation/searchFlowDiag.ts'
 import { ensureSearchRecommendation } from '../continuation/searchContinuationRuntime.ts'
 import { getAudioPlayer } from '../audioPlayer'
 import { getPlaybackQueue } from '../playbackQueue'
+import { releaseCatalogSessionForLegacyIntent } from '../sessionSwitch/integration/legacyQueueClaim.ts'
 import type {
   ExitAlbumModeInput,
   PlayAlbumInput,
@@ -37,6 +38,33 @@ export class PlaybackIntent {
       return
     }
 
+    const { isSessionSwitchIntegrationEnabled } = await import(
+      '../sessionSwitch/featureFlag.ts'
+    )
+    if (isSessionSwitchIntegrationEnabled()) {
+      const { playAlbumViaSessionSwitch } = await import(
+        '../sessionSwitch/integration/playAlbumSession.ts'
+      )
+      const switched = await playAlbumViaSessionSwitch({
+        tracks,
+        startIndex,
+        albumId: album.id,
+        albumTitle: album.title,
+        ...(album.artist ? { artist: album.artist } : {}),
+      })
+      if (switched.ok) {
+        return
+      }
+      if (
+        switched.reason !== 'flag_off' &&
+        switched.reason !== 'no_runtime'
+      ) {
+        // Prepare/commit fail: coordinator rollback — не затирать live legacy-путём.
+        return
+      }
+    }
+
+    releaseCatalogSessionForLegacyIntent('album')
     const track = tracks[startIndex]!
     const player = getAudioPlayer()
     player.setQueue(tracks, startIndex, {
@@ -68,7 +96,6 @@ export class PlaybackIntent {
     }
 
     const track = tracks[startIndex]!
-    const player = getAudioPlayer()
     const before = getPlaybackQueue().getSnapshot()
     noteSearchFlowEvent({
       source: 'PlaybackIntent.playFromSwipe',
@@ -79,6 +106,34 @@ export class PlaybackIntent {
       nextSource: 'search-result',
       detail: `explicit=${Boolean(input.explicitUserPlay)};list=${tracks.length}`,
     })
+
+    const { isSessionSwitchIntegrationEnabled } = await import(
+      '../sessionSwitch/featureFlag.ts'
+    )
+    if (isSessionSwitchIntegrationEnabled()) {
+      // Home/CME path: один seed. Dump ленты (Search OFF) — тоже seed выбранного трека.
+      const { commitRecommendationSeed } = await import(
+        '../recommendation/sessionRuntime.ts'
+      )
+      const seeded = await commitRecommendationSeed({
+        mode: 'swipe',
+        track,
+      })
+      if (seeded.ok) {
+        const player = getAudioPlayer()
+        if (
+          !input.explicitUserPlay &&
+          player.getState().currentTrack?.id === track.id
+        ) {
+          return
+        }
+        await player.playTrack(track)
+        return
+      }
+    }
+
+    releaseCatalogSessionForLegacyIntent('swipe')
+    const player = getAudioPlayer()
     player.setQueue(tracks, startIndex, { type: 'swipe' })
 
     if (
@@ -88,11 +143,12 @@ export class PlaybackIntent {
       return
     }
 
-    // Явный Play: всегда playTrack (resume/switch), даже если id совпал.
     await player.playTrack(track)
   }
 
   async playFromLibrary(input: PlayFromLibraryInput): Promise<void> {
+    // User catalog идёт через playUserCatalog → session-switch; остальной library — legacy.
+    releaseCatalogSessionForLegacyIntent('library')
     const { tracks } = input
     const startIndex = clampIndex(tracks.length, input.startIndex)
     if (startIndex < 0) {
@@ -114,7 +170,6 @@ export class PlaybackIntent {
     if (!input.track.id) {
       return
     }
-    const player = getAudioPlayer()
     const before = getPlaybackQueue().getSnapshot()
     noteSearchFlowEvent({
       source: 'PlaybackIntent.playSearchTrack',
@@ -126,6 +181,40 @@ export class PlaybackIntent {
       detail: 'commit-search-seed',
     })
     ensureSearchRecommendation()
+
+    const { isSessionSwitchIntegrationEnabled } = await import(
+      '../sessionSwitch/featureFlag.ts'
+    )
+    if (isSessionSwitchIntegrationEnabled()) {
+      const { playSearchViaSessionSwitch } = await import(
+        '../sessionSwitch/integration/playSearchSession.ts'
+      )
+      const { invalidateRecommendationAdvance } = await import(
+        '../recommendation/advanceEpoch.ts'
+      )
+      const switched = await playSearchViaSessionSwitch({
+        track: input.track,
+        query: input.query,
+        searchHits: input.searchHits,
+      })
+      if (switched.ok) {
+        invalidateRecommendationAdvance()
+        const ctx = getPlaybackQueue().getPlaybackContext()
+        if (ctx.type === 'search-seed') {
+          getContinuationSession().prepare(input.track, ctx, { force: true })
+        }
+        return
+      }
+      if (
+        switched.reason !== 'flag_off' &&
+        switched.reason !== 'no_runtime'
+      ) {
+        return
+      }
+    }
+
+    releaseCatalogSessionForLegacyIntent('search')
+    const player = getAudioPlayer()
     commitSearchSeedQueue(getPlaybackQueue(), getContinuationSession(), {
       track: input.track,
       query: input.query,
@@ -148,6 +237,25 @@ export class PlaybackIntent {
       return
     }
     const track = input.tracks[startIndex]!
+
+    const { isSessionSwitchIntegrationEnabled } = await import(
+      '../sessionSwitch/featureFlag.ts'
+    )
+    if (isSessionSwitchIntegrationEnabled()) {
+      const { commitRecommendationSeed } = await import(
+        '../recommendation/sessionRuntime.ts'
+      )
+      const seeded = await commitRecommendationSeed({
+        mode: 'wave',
+        track,
+      })
+      if (seeded.ok) {
+        await getAudioPlayer().playTrack(track)
+        return
+      }
+    }
+
+    releaseCatalogSessionForLegacyIntent('wave')
     const player = getAudioPlayer()
     player.setQueue(input.tracks, startIndex, {
       type: 'radio',
@@ -163,6 +271,7 @@ export class PlaybackIntent {
    * Anchor: если current нет в deck — [current, ...deck].
    */
   exitAlbumMode(input: ExitAlbumModeInput): void {
+    releaseCatalogSessionForLegacyIntent('swipe')
     const { swipeTracks, currentTrack: playing } = input
     const player = getAudioPlayer()
     const queue = getPlaybackQueue()

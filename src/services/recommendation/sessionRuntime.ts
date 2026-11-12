@@ -147,14 +147,101 @@ export async function pickRecommendationStart(input: {
   return result
 }
 
-/** Пишет seed в очередь swipe/wave и готовит continuation. */
-export function commitRecommendationSeed(input: {
+/**
+ * Пишет seed в очередь swipe/wave и готовит continuation.
+ * Flag ON → SessionSwitch (swipes|wave) + CME ownership; иначе legacy setQueue.
+ * `autoplay: false` — только очередь/слот (холодный старт Home без звука).
+ * `requireIdleQueue` — cold seed: no-op без invalidate, если очередь/сессия заняты.
+ */
+export async function commitRecommendationSeed(input: {
   mode: Exclude<ActiveRecommendationMode, 'search'>
   track: Track
-}): void {
+  autoplay?: boolean
+  requireIdleQueue?: boolean
+  expectedAdvanceEpoch?: number
+}): Promise<{ ok: boolean }> {
+  const autoplay = input.autoplay !== false
+  const { isRecommendationSeedIdle } = await import(
+    './recommendationSeedIdle.ts'
+  )
+
+  if (input.requireIdleQueue) {
+    if (!isRecommendationSeedIdle()) {
+      return { ok: false }
+    }
+    if (
+      typeof input.expectedAdvanceEpoch === 'number' &&
+      input.expectedAdvanceEpoch !== getRecommendationAdvanceEpoch()
+    ) {
+      return { ok: false }
+    }
+  }
+
   // Новый seed (wave/swipe) отменяет inflight advance предыдущей сессии.
   invalidateRecommendationAdvance()
   invalidateContinuousBuffer(`seed:${input.mode}`)
+
+  if (input.requireIdleQueue && !isRecommendationSeedIdle()) {
+    return { ok: false }
+  }
+
+  const { isSessionSwitchIntegrationEnabled } = await import(
+    '../sessionSwitch/featureFlag.ts'
+  )
+  if (isSessionSwitchIntegrationEnabled()) {
+    if (autoplay) {
+      const switched =
+        input.mode === 'wave'
+          ? await (
+              await import('../sessionSwitch/integration/playWaveSession.ts')
+            ).playWaveViaSessionSwitch({ track: input.track })
+          : await (
+              await import('../sessionSwitch/integration/playSwipeSession.ts')
+            ).playSwipeViaSessionSwitch({ track: input.track })
+      if (switched.ok) {
+        ensureContinuousDiscoverySession(input.mode, { resetLanes: true })
+        activateRecommendationSession(input.mode, { forceProvider: true })
+        getContinuationSession().prepare(input.track, {
+          type: 'search-seed',
+          query: input.mode === 'wave' ? 'my-wave' : 'swipe',
+          seedTrackId: input.track.id,
+        })
+        return { ok: true }
+      }
+      if (
+        switched.reason !== 'flag_off' &&
+        switched.reason !== 'no_runtime'
+      ) {
+        return { ok: false }
+      }
+    } else {
+      if (input.requireIdleQueue && !isRecommendationSeedIdle()) {
+        return { ok: false }
+      }
+      const { seedSwipeOrWaveSessionWithoutPlay } = await import(
+        '../sessionSwitch/integration/seedSwipeWaveWithoutPlay.ts'
+      )
+      const seeded = seedSwipeOrWaveSessionWithoutPlay({
+        mode: input.mode,
+        track: input.track,
+      })
+      if (seeded.ok) {
+        ensureContinuousDiscoverySession(input.mode, { resetLanes: true })
+        activateRecommendationSession(input.mode, { forceProvider: true })
+        getContinuationSession().prepare(input.track, {
+          type: 'search-seed',
+          query: input.mode === 'wave' ? 'my-wave' : 'swipe',
+          seedTrackId: input.track.id,
+        })
+        return { ok: true }
+      }
+    }
+  }
+
+  if (input.requireIdleQueue && !isRecommendationSeedIdle()) {
+    return { ok: false }
+  }
+
   ensureContinuousDiscoverySession(input.mode, { resetLanes: true })
   activateRecommendationSession(input.mode, { forceProvider: true })
   const queue = getPlaybackQueue()
@@ -173,6 +260,7 @@ export function commitRecommendationSeed(input: {
     query: input.mode === 'wave' ? 'my-wave' : 'swipe',
     seedTrackId: input.track.id,
   })
+  return { ok: true }
 }
 
 export function enqueueRecommendationAdvance<T>(run: () => Promise<T>): Promise<T> {

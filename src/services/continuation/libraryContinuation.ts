@@ -16,6 +16,10 @@ export type ContinuationLibraryTrack = {
   liked: boolean
   disliked: boolean
   hidden: boolean
+  /** Уже в избранном пользователя. */
+  favorite: boolean
+  /** Есть membership хотя бы в одном пользовательском каталоге. */
+  inCatalog: boolean
   score: number
   lastPlayed: string | null
 }
@@ -263,6 +267,8 @@ export function mapCanonicalContinuationLibrary(
       liked: item.state.liked,
       disliked: item.state.disliked,
       hidden: item.state.hidden,
+      favorite: item.state.favorite,
+      inCatalog: item.catalogIds.length > 0,
       score: taste?.score ?? 0,
       lastPlayed: item.state.lastPlayed ?? taste?.lastPlayed ?? null,
     })

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { authClient } from '../services/auth/authClient.ts'
+import { notifyAuthSessionChanged } from '../services/auth/authSessionSync.ts'
 import { bindAuthSessionEpoch } from '../services/auth/sessionEpoch.ts'
 import type { AuthUser } from '../services/auth/types'
 import { getContinuationSession } from '../services/continuation/ContinuationSession.ts'
@@ -12,6 +13,26 @@ function clearContinuousRuntimeOnAuthChange(): void {
   getContinuationSession().cancel()
   invalidateContinuousBuffer('auth-change')
   clearContinuousDiscoveryRuntime('auth-change')
+}
+
+/** Dynamic import: не тянуть AudioPlayer в node:test graph authStore. */
+function bindPlaybackSessionsSafe(userId: string | null): void {
+  void import('../services/sessionSwitch/featureFlag.ts')
+    .then((flag) => flag.refreshSessionSwitchFromServer())
+    .catch(() => false)
+    .then(() =>
+      import('../services/sessionSwitch/integration/playbackSessionBootstrap.ts'),
+    )
+    .then(async (mod) => {
+      if (!userId) {
+        await mod.teardownPlaybackSessionsForAuth()
+        return
+      }
+      await mod.bindPlaybackSessionsForAuth(userId)
+    })
+    .catch(() => {
+      // Session bootstrap не должен ломать login / restore
+    })
 }
 
 export type AuthStatus = 'loading' | 'authenticated' | 'anonymous'
@@ -48,17 +69,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           bindSessionTasteUser(user?.id ?? null)
           bindAuthSessionEpoch(user?.id ?? null)
           clearContinuousRuntimeOnAuthChange()
+          bindPlaybackSessionsSafe(user?.id ?? null)
           set({
             user,
             status: user ? 'authenticated' : 'anonymous',
           })
+          notifyAuthSessionChanged()
         })
         .catch(() => {
           tasteProfileCache.invalidate()
           bindSessionTasteUser(null)
           bindAuthSessionEpoch(null)
           clearContinuousRuntimeOnAuthChange()
+          bindPlaybackSessionsSafe(null)
           set({ user: null, status: 'anonymous' })
+          notifyAuthSessionChanged()
         })
         .finally(() => {
           restorePromise = null
@@ -73,7 +98,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     bindSessionTasteUser(user.id)
     bindAuthSessionEpoch(user.id)
     clearContinuousRuntimeOnAuthChange()
+    bindPlaybackSessionsSafe(user.id)
     set({ user, status: 'authenticated' })
+    notifyAuthSessionChanged()
   },
 
   login: async (input) => {
@@ -82,7 +109,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     bindSessionTasteUser(user.id)
     bindAuthSessionEpoch(user.id)
     clearContinuousRuntimeOnAuthChange()
+    bindPlaybackSessionsSafe(user.id)
     set({ user, status: 'authenticated' })
+    notifyAuthSessionChanged()
   },
 
   logout: async () => {
@@ -91,6 +120,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     bindSessionTasteUser(null)
     bindAuthSessionEpoch(null)
     clearContinuousRuntimeOnAuthChange()
+    bindPlaybackSessionsSafe(null)
     set({ user: null, status: 'anonymous' })
+    notifyAuthSessionChanged()
   },
 }))

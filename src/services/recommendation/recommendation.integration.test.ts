@@ -79,6 +79,8 @@ function lib(
     liked: partial.liked ?? false,
     disliked: false,
     hidden: false,
+    favorite: false,
+    inCatalog: false,
     score: partial.score ?? 0,
     lastPlayed: null,
     ...partial,
@@ -254,7 +256,7 @@ test('UX-10: Play A → LIKE → A stays → UP → B; A remains liked in sys_sw
   const { getPlaybackQueue } = await import('../playbackQueue/PlaybackQueue.ts')
   const queue = getPlaybackQueue()
   queue.clear()
-  commitRecommendationSeed({ mode: 'swipe', track: seed })
+  await commitRecommendationSeed({ mode: 'swipe', track: seed })
   assert.equal(queue.getItems().length, 1)
   assert.equal(queue.current()?.id, seed.id)
 
@@ -452,14 +454,14 @@ test('F: Search → Wave → Swipe меняет mode без search dump в оч�
   assert.ok(live.getItems().length >= 3)
 
   activateRecommendationSession('wave', { forceProvider: true })
-  commitRecommendationSeed({ mode: 'wave', track: rec1 })
+  await commitRecommendationSeed({ mode: 'wave', track: rec1 })
   assert.equal(live.getPlaybackContext().type, 'radio')
   assert.equal(live.getItems().length, 1)
   assert.equal(live.current()?.id, rec1.id)
   assert.equal(getRecommendationSessionMode(), 'wave')
 
   activateRecommendationSession('swipe', { forceProvider: true })
-  commitRecommendationSeed({ mode: 'swipe', track: rec2 })
+  await commitRecommendationSeed({ mode: 'swipe', track: rec2 })
   assert.equal(live.getPlaybackContext().type, 'swipe')
   assert.equal(live.getItems().length, 1)
   assert.equal(live.current()?.id, rec2.id)

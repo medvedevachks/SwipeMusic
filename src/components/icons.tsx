@@ -23,6 +23,29 @@ export function HomeIcon(props: IconProps) {
   )
 }
 
+/** Карточка свайпа — вкладка «Свайпы». */
+export function SwipesIcon(props: IconProps) {
+  return (
+    <svg {...iconProps(props)}>
+      <rect x="5" y="4" width="11" height="16" rx="2.5" />
+      <path d="M17.5 7.5 20 12l-2.5 4.5" />
+    </svg>
+  )
+}
+
+/** Радиоволны — вкладка «Моя волна». */
+export function WaveIcon(props: IconProps) {
+  return (
+    <svg {...iconProps(props)}>
+      <path d="M12 6v12" />
+      <path d="M8 9v6" />
+      <path d="M16 9v6" />
+      <path d="M4.5 11v2" />
+      <path d="M19.5 11v2" />
+    </svg>
+  )
+}
+
 export function SearchIcon(props: IconProps) {
   return (
     <svg {...iconProps(props)}>
@@ -121,6 +144,37 @@ export function MoreIcon(props: IconProps) {
       <circle cx="6" cy="12" r="1.15" fill="currentColor" stroke="none" />
       <circle cx="12" cy="12" r="1.15" fill="currentColor" stroke="none" />
       <circle cx="18" cy="12" r="1.15" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+export function CloseIcon(props: IconProps) {
+  return (
+    <svg {...iconProps(props)}>
+      <path d="M6 6 18 18M18 6 6 18" />
+    </svg>
+  )
+}
+
+export function HeartIcon(props: IconProps & { filled?: boolean }) {
+  const { filled = false, ...rest } = props
+  return (
+    <svg
+      {...iconProps({
+        ...rest,
+        fill: filled ? 'currentColor' : 'none',
+        stroke: 'currentColor',
+      })}
+    >
+      <path d="M12 19.2 5.8 13.4a4.2 4.2 0 0 1 6-5.9l.2.2.2-.2a4.2 4.2 0 0 1 6 5.9L12 19.2Z" />
+    </svg>
+  )
+}
+
+export function QueueListIcon(props: IconProps) {
+  return (
+    <svg {...iconProps(props)}>
+      <path d="M5 7h14M5 12h14M5 17h10" />
     </svg>
   )
 }

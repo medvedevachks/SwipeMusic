@@ -16,6 +16,7 @@ import {
   type YandexRouteContext,
 } from './yandexRoutes.ts'
 import { evaluateOrigin } from './originPolicy.ts'
+import { handleRuntimeConfig, RUNTIME_CONFIG_PATH } from './runtimeConfig.ts'
 import { handleHealth, handleYandexFetchProxy, handleYandexOauthProxy } from './yandexEdge.ts'
 import type { HostResolver } from './yandexFetchPolicy.ts'
 import type { YandexUpstream } from '../providers/yandexSession.ts'
@@ -57,7 +58,9 @@ export function createAuthServer(options: AuthServerOptions): Server {
 
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
     const { pathname } = url
-    const handler = pathname === '/api/health'
+    const handler = pathname === RUNTIME_CONFIG_PATH
+      ? Promise.resolve(handleRuntimeConfig(req, res))
+      : pathname === '/api/health'
       ? Promise.resolve(handleHealth(req, res))
       : pathname.startsWith('/api/yandex-oauth')
         ? handleYandexOauthProxy(req, res, options)

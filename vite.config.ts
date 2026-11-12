@@ -79,7 +79,21 @@ export default defineConfig(({ mode }) => ({
         ],
       },
       workbox: {
+        /*
+         * injectRegister: false отключает авто-проставление этих флагов при
+         * registerType: 'autoUpdate'. Без skipWaiting новый SW остаётся waiting,
+         * и обычный Reload продолжает получать старый precache index.html.
+         */
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        /*
+         * Сохраняем SPA offline shell (как до hotfix). Stale Reload чинится
+         * skipWaiting+clientsClaim: после activate precache уже новый.
+         * NetworkFirst для navigate не ставим — NavigationRoute его перекрывал бы.
+         */
+        navigateFallback: 'index.html',
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
           {
@@ -112,6 +126,10 @@ export default defineConfig(({ mode }) => ({
         target: 'http://127.0.0.1:8787',
         changeOrigin: true,
       },
+      '/api/runtime-config': {
+        target: 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
       '/api/yandex-music': {
         target: 'http://127.0.0.1:8787',
         changeOrigin: true,
@@ -135,6 +153,10 @@ export default defineConfig(({ mode }) => ({
         changeOrigin: true,
       },
       '/api/me': {
+        target: 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
+      '/api/runtime-config': {
         target: 'http://127.0.0.1:8787',
         changeOrigin: true,
       },

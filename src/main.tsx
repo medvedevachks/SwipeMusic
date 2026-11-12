@@ -1,13 +1,13 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-import { registerSW } from 'virtual:pwa-register'
 import {
   installSearchPlaybackDebugBridge,
   isSearchSeedPlaybackEnabled,
 } from './services/continuation/index.ts'
 import { installSearchFlowDiagBridge } from './services/continuation/searchFlowDiag.ts'
 import { getPlaybackQueue } from './services/playbackQueue'
+import { registerAppServiceWorker } from './pwa/registerAppServiceWorker.ts'
 import { bootstrapMusicSources } from './sources'
 import { applyStoredTheme } from './theme/theme.ts'
 import './index.css'
@@ -43,19 +43,27 @@ if (import.meta.env.VITE_SEARCH_FLOW_HARNESS === 'true') {
     module.installSearchFlowHarnessBridge()
   })
 }
+// PLAYBACK-DEV-05A browser gate — не production UI / не PlaybackIntent.
+if (import.meta.env.DEV && import.meta.env.VITE_SESSION_SWITCH_GATE === 'true') {
+  void import('./services/sessionSwitch/integration/browserGateHarness.ts').then(
+    (module) => {
+      module.installSessionSwitchBrowserGate()
+    },
+  )
+  void import(
+    './services/sessionSwitch/integration/htmlAudioAcceptanceHarness.ts'
+  ).then((module) => {
+    module.installHtmlAudioAcceptanceHarness()
+  })
+}
 // Контролируемый DEV-каталог для UI acceptance (не production, не Yandex).
 if (import.meta.env.DEV && import.meta.env.VITE_DEV_ACCEPTANCE === 'true') {
   void import('./sources/adapters/dev-acceptance/install.ts').then((module) => {
     module.installDevAcceptanceSource()
   })
 }
-// autoUpdate: новый SW забирает клиентов; update() ловит OFF→ON без ожидания срока кэша.
-registerSW({
-  immediate: true,
-  onRegisteredSW(_url, registration) {
-    void registration?.update()
-  },
-})
+// PWA: skipWaiting/clientsClaim в vite workbox; reload только если музыка не играет.
+registerAppServiceWorker()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

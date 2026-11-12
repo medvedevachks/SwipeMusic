@@ -7,9 +7,11 @@ import {
   captureAuthSession,
   isAuthSessionCurrent,
   StaleLibrarySessionError,
+  type AuthSessionSnapshot,
 } from '../auth/sessionEpoch.ts'
+import { isAmbiguousCatalogTransportError } from '../catalogs/catalogCrudConfirmed.ts'
 import { SYS_SWIPES_ID } from '../catalogs/systemFolders.ts'
-import { libraryClient } from '../libraryPersistence/client.ts'
+import { LibraryHttpError, libraryClient } from '../libraryPersistence/client.ts'
 import { runLibraryMutation } from '../libraryPersistence/mutations.ts'
 import { sourceTrackKeyOf, snapshotFromTrack } from './mapCanonical.ts'
 import { isSourceCopyLiked } from './selectors.ts'
@@ -30,6 +32,8 @@ export type CanonicalRemote = {
     canonicalTrackId: string,
   ) => Promise<{ membership: CanonicalMembership }>
   unassignCanonical: (catalogId: string, canonicalTrackId: string) => Promise<void>
+  /** Сверка membership при 404 / потерянном ответе DELETE. */
+  loadCanonicalLibrary: () => Promise<{ items: CanonicalLibraryItem[] }>
 }
 
 const defaultRemote: CanonicalRemote = {
@@ -40,11 +44,16 @@ const defaultRemote: CanonicalRemote = {
     libraryClient.assignCanonical(catalogId, canonicalTrackId),
   unassignCanonical: (catalogId, canonicalTrackId) =>
     libraryClient.unassignCanonical(catalogId, canonicalTrackId),
+  loadCanonicalLibrary: () => libraryClient.loadCanonicalLibrary(),
 }
 
 let remote: CanonicalRemote = defaultRemote
 const identityFlights = new Map<string, Promise<CanonicalLibraryItem>>()
 const likeFlights = new Map<string, Promise<boolean>>()
+/** Один DELETE на пару catalog+canonical в рамках поколения auth-сессии. */
+const unassignFlights = new Map<string, Promise<boolean>>()
+/** Один PUT assign на пару catalog+canonical в рамках поколения auth-сессии. */
+const assignFlights = new Map<string, Promise<boolean>>()
 
 export function setCanonicalRemote(next: CanonicalRemote | null): void {
   remote = next ?? defaultRemote
@@ -53,8 +62,46 @@ export function setCanonicalRemote(next: CanonicalRemote | null): void {
 export function clearCanonicalIdentityFlights(): void {
   identityFlights.clear()
   likeFlights.clear()
+  unassignFlights.clear()
+  assignFlights.clear()
   // UX-10B: pending LEFT intent не переживает logout / смену аккаунта.
   clearPendingSwipeLikes()
+}
+
+function membershipFlightKey(
+  generation: number,
+  catalogId: string,
+  canonicalTrackId: string,
+): string {
+  return `${generation}\0${catalogId}\0${canonicalTrackId}`
+}
+
+type MembershipReconcile = 'absent' | 'present' | 'unknown'
+
+async function reconcileCatalogMembershipAbsent(
+  session: AuthSessionSnapshot,
+  canonicalTrackId: string,
+  catalogId: string,
+): Promise<MembershipReconcile> {
+  if (!isAuthSessionCurrent(session)) {
+    throw new StaleLibrarySessionError()
+  }
+  try {
+    const { items } = await remote.loadCanonicalLibrary()
+    if (!isAuthSessionCurrent(session)) {
+      throw new StaleLibrarySessionError()
+    }
+    const item = items.find((row) => row.canonicalTrack.id === canonicalTrackId)
+    if (!item) {
+      return 'absent'
+    }
+    return item.catalogIds.includes(catalogId) ? 'present' : 'absent'
+  } catch (error) {
+    if (error instanceof StaleLibrarySessionError) {
+      throw error
+    }
+    return 'unknown'
+  }
 }
 
 export async function ensureCanonicalForTrack(track: Track): Promise<CanonicalLibraryItem> {
@@ -119,21 +166,70 @@ export async function assignSourceToCatalog(
   catalogId: string,
 ): Promise<boolean> {
   const session = captureAuthSession()
-  const saved = await runLibraryMutation(async () => {
-    const current = await ensureCanonicalForTrack(track)
-    if (!isAuthSessionCurrent(session)) {
-      throw new StaleLibrarySessionError()
-    }
-    const response = await remote.assignCanonical(catalogId, current.canonicalTrack.id)
-    if (!isAuthSessionCurrent(session)) {
-      throw new StaleLibrarySessionError()
-    }
-    useCanonicalLibraryStore
-      .getState()
-      .addCatalog(current.canonicalTrack.id, response.membership.catalogId)
+  let current: CanonicalLibraryItem
+  try {
+    current = await ensureCanonicalForTrack(track)
+  } catch {
+    return false
+  }
+  if (!isAuthSessionCurrent(session)) {
+    return false
+  }
+  if (current.catalogIds.includes(catalogId)) {
     return true
+  }
+
+  const canonicalTrackId = current.canonicalTrack.id
+  const key = membershipFlightKey(session.generation, catalogId, canonicalTrackId)
+  const existing = assignFlights.get(key)
+  if (existing) {
+    return existing
+  }
+
+  const pending = (async () => {
+    const saved = await runLibraryMutation(async () => {
+      if (!isAuthSessionCurrent(session)) {
+        throw new StaleLibrarySessionError()
+      }
+      try {
+        const response = await remote.assignCanonical(catalogId, canonicalTrackId)
+        if (!isAuthSessionCurrent(session)) {
+          throw new StaleLibrarySessionError()
+        }
+        useCanonicalLibraryStore
+          .getState()
+          .addCatalog(canonicalTrackId, response.membership.catalogId)
+        return true
+      } catch (error) {
+        if (!isAuthSessionCurrent(session)) {
+          throw new StaleLibrarySessionError()
+        }
+        // Потерянный ответ / обрыв: сверить membership, без ложного локального add.
+        if (!isAmbiguousCatalogTransportError(error)) {
+          throw error
+        }
+        const membership = await reconcileCatalogMembershipAbsent(
+          session,
+          canonicalTrackId,
+          catalogId,
+        )
+        if (membership === 'present') {
+          useCanonicalLibraryStore.getState().addCatalog(canonicalTrackId, catalogId)
+          return true
+        }
+        // absent / unknown — не считать успехом, UI может повторить.
+        throw error
+      }
+    })
+    return saved === true
+  })().finally(() => {
+    if (assignFlights.get(key) === pending) {
+      assignFlights.delete(key)
+    }
   })
-  return saved === true
+
+  assignFlights.set(key, pending)
+  return pending
 }
 
 export async function removeCanonicalFromCatalog(
@@ -141,15 +237,52 @@ export async function removeCanonicalFromCatalog(
   catalogId: string,
 ): Promise<boolean> {
   const session = captureAuthSession()
-  const saved = await runLibraryMutation(async () => {
-    await remote.unassignCanonical(catalogId, canonicalTrackId)
-    if (!isAuthSessionCurrent(session)) {
-      throw new StaleLibrarySessionError()
+  const key = membershipFlightKey(session.generation, catalogId, canonicalTrackId)
+  const existing = unassignFlights.get(key)
+  if (existing) {
+    return existing
+  }
+
+  const pending = (async () => {
+    const saved = await runLibraryMutation(async () => {
+      try {
+        await remote.unassignCanonical(catalogId, canonicalTrackId)
+      } catch (error) {
+        if (!isAuthSessionCurrent(session)) {
+          throw new StaleLibrarySessionError()
+        }
+        const needsReconcile =
+          (error instanceof LibraryHttpError && error.status === 404) ||
+          isAmbiguousCatalogTransportError(error)
+        if (!needsReconcile) {
+          throw error
+        }
+        const membership = await reconcileCatalogMembershipAbsent(
+          session,
+          canonicalTrackId,
+          catalogId,
+        )
+        if (membership !== 'absent') {
+          // present / unknown: без ложного успеха и без локального drop.
+          throw error
+        }
+        // Сервер подтвердил отсутствие membership — можно синхронизировать локально.
+      }
+      if (!isAuthSessionCurrent(session)) {
+        throw new StaleLibrarySessionError()
+      }
+      useCanonicalLibraryStore.getState().removeCatalog(canonicalTrackId, catalogId)
+      return true
+    })
+    return saved === true
+  })().finally(() => {
+    if (unassignFlights.get(key) === pending) {
+      unassignFlights.delete(key)
     }
-    useCanonicalLibraryStore.getState().removeCatalog(canonicalTrackId, catalogId)
-    return true
   })
-  return saved === true
+
+  unassignFlights.set(key, pending)
+  return pending
 }
 
 async function persistSwipeLike(track: Track): Promise<boolean> {

@@ -1,7 +1,12 @@
 /**
- * Ставит контролируемый DEV-каталог в SourceManager.
+ * Ставит контролируемый DEV-каталог в SourceManager + LibraryProvider.
  * Recommendation Engine / AudioPlayer / UI остаются штатными.
  */
+import {
+  bootstrapProviderPlugins,
+  pluginFromAdapter,
+  registerPlugin,
+} from '../../../sdk/index.ts'
 import { sourceManager } from '../../SourceManager.ts'
 import { musicSourceRegistry } from '../../registry.ts'
 import { createDevAcceptanceAdapter } from './devAcceptanceAdapter.ts'
@@ -15,23 +20,16 @@ export function installDevAcceptanceSource(): void {
   }
   installed = true
 
+  bootstrapProviderPlugins()
   const adapter = createDevAcceptanceAdapter()
-  try {
-    sourceManager.addSource(
-      {
-        id: DEV_ACCEPTANCE_SOURCE_ID,
-        name: 'DEV Acceptance Catalog',
-        type: 'api',
-        enabled: true,
-        priority: 1,
-        settings: { acceptance: true },
-      },
-      adapter,
-    )
-  } catch {
-    // Уже добавлен (HMR) — включаем.
-    sourceManager.enableSource(DEV_ACCEPTANCE_SOURCE_ID)
-  }
+  // Plugin-first: SourceManager + LibraryProvider (Albums tree → ALBUM session).
+  registerPlugin(
+    pluginFromAdapter(adapter, {
+      name: 'DEV Acceptance Catalog',
+      defaultEnabled: true,
+      defaultPriority: 1,
+    }),
+  )
 
   // Демо mock не участвует в Recommendation Engine; оставляем выключенным если можно.
   try {

@@ -5,6 +5,7 @@ import type { HistoryEntry } from '../../types/history'
 import type { Track } from '../../types/track'
 import { useAuthStore } from '../../store/authStore.ts'
 import {
+  bindAuthSessionEpoch,
   captureAuthSession,
   isAuthSessionCurrent,
   StaleLibrarySessionError,
@@ -68,6 +69,8 @@ function applyFailureIfCurrent(
 
 export function handleLibraryFailure(error: unknown, kind: 'load' | 'save'): void {
   if (error instanceof LibraryHttpError && error.status === 401) {
+    // Soft logout: bump epoch so delayed ops of this tab cannot merge under a new cookie.
+    bindAuthSessionEpoch(null)
     useLibraryPersistenceStore.getState().setArmed(false)
     useLibraryPersistenceStore.getState().setStatus('idle', null)
     useAuthStore.setState({ user: null, status: 'anonymous' })

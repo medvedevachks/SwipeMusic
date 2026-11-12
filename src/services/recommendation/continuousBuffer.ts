@@ -8,6 +8,8 @@ import { CONTINUOUS_LIMITS } from './continuousLimits.ts'
 import { copyIdentity, titleIdentity } from './identity.ts'
 
 export const CONTINUOUS_BUFFER_TARGET = CONTINUOUS_LIMITS.bufferTarget
+export const CONTINUOUS_BUFFER_LOW_WATERMARK =
+  CONTINUOUS_LIMITS.bufferLowWatermark
 
 let buffer: Track[] = []
 let generation = 0
@@ -56,6 +58,10 @@ export function takeContinuousBufferedTrack(excludeIds: ReadonlySet<string>): Tr
       trackId: next.id,
       bufferSize: buffer.length,
     })
+    // Low-watermark: пополнить playable-запас, не дожидаясь пустого буфера.
+    if (buffer.length <= CONTINUOUS_BUFFER_LOW_WATERMARK) {
+      requestContinuousBufferRefill(next)
+    }
     return next
   }
   return null
@@ -102,6 +108,7 @@ export function pushContinuousBufferedTracks(
 export function beginContinuousBufferFill(
   run: (generation: number) => Promise<void>,
 ): void {
+  // Уже у цели — не стартуем; ниже watermark / между watermark и target — refill.
   if (buffer.length >= CONTINUOUS_BUFFER_TARGET) {
     return
   }

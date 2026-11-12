@@ -36,7 +36,7 @@ function libraryProviderForAdapter(adapter: MusicSourceAdapter) {
   if (adapter.type === 'filesystem') {
     return new HierarchicalPathLibraryProvider(adapter)
   }
-  if (adapter.id === 'mock') {
+  if (adapter.id === 'mock' || adapter.kind === 'mock') {
     return new AdapterLibraryProvider(adapter)
   }
   return createStubLibraryProvider({

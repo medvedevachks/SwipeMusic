@@ -23,6 +23,8 @@ type CatalogSeed = {
   file: string
   durationMs: number
   coverColor: string
+  /** Альбом для LibraryBrowse / ALBUM session (PLAYBACK-FIX-02). */
+  album?: string
 }
 
 /**
@@ -74,60 +76,77 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     coverColor: '#365314',
   },
   // --- Персональные / вне выдачи «Сплин» ---
+  // Длительность ≥8s: UI успевает Next до ended (PLAYBACK-FIX-01).
   {
     externalId: 'kino-blood',
     title: 'Группа крови',
     artist: 'Кино',
     file: 'kino1.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#7c2d12',
+    album: 'Группа крови',
   },
   {
     externalId: 'kino-star',
     title: 'Звезда по имени Солнце',
     artist: 'Кино',
     file: 'kino2.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#9a3412',
+    album: 'Группа крови',
   },
   {
     externalId: 'zem-iskala',
     title: 'Искала',
     artist: 'Земфира',
     file: 'zem1.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#4c1d95',
+    album: 'Прости меня моя любовь',
   },
   {
     externalId: 'zem-snow',
     title: 'Хочешь',
     artist: 'Земфира',
     file: 'zem2.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#5b21b6',
+    album: 'Прости меня моя любовь',
   },
   {
     externalId: 'bi2-polkovnik',
     title: 'Полковнику никто не пишет',
     artist: 'Би-2',
     file: 'bi2-1.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#0e7490',
+    album: 'Нечётный воин',
   },
   {
     externalId: 'bi2-serebro',
     title: 'Серебро',
     artist: 'Би-2',
     file: 'bi2-2.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#155e75',
+    album: 'Нечётный воин',
+  },
+  {
+    /** Вне «Нечётный воин» — для ALBUM related continuation (PLAYBACK-FIX-02B). */
+    externalId: 'bi2-varvara',
+    title: 'Варвара',
+    artist: 'Би-2',
+    file: 'bi2-1.wav',
+    durationMs: 8_000,
+    coverColor: '#0f766e',
+    album: 'Горизонт событий',
   },
   {
     externalId: 'mt-vlad',
     title: 'Владивосток 2000',
     artist: 'Мумий Тролль',
     file: 'mt1.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#166534',
   },
   {
@@ -135,7 +154,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Утекай',
     artist: 'Мумий Тролль',
     file: 'mt2.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#15803d',
   },
   {
@@ -143,7 +162,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Что такое осень',
     artist: 'ДДТ',
     file: 'ddt1.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#1e40af',
   },
   {
@@ -151,7 +170,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Дождь',
     artist: 'ДДТ',
     file: 'ddt2.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#1d4ed8',
   },
   {
@@ -159,7 +178,7 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Скованные одной цепью',
     artist: 'Наутилус Помпилиус',
     file: 'nau1.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#831843',
   },
   {
@@ -167,8 +186,48 @@ const CATALOG_SEEDS: readonly CatalogSeed[] = [
     title: 'Other Hit',
     artist: 'Другой',
     file: 'other1.wav',
-    durationMs: 3_000,
+    durationMs: 8_000,
     coverColor: '#334155',
+  },
+  {
+    externalId: 'flow-01',
+    title: 'Flow One',
+    artist: 'Acceptance Band',
+    file: 'flow1.wav',
+    durationMs: 8_000,
+    coverColor: '#0f766e',
+  },
+  {
+    externalId: 'flow-02',
+    title: 'Flow Two',
+    artist: 'Acceptance Band',
+    file: 'flow2.wav',
+    durationMs: 8_000,
+    coverColor: '#115e59',
+  },
+  {
+    externalId: 'flow-03',
+    title: 'Flow Three',
+    artist: 'Acceptance Band',
+    file: 'flow3.wav',
+    durationMs: 8_000,
+    coverColor: '#134e4a',
+  },
+  {
+    externalId: 'flow-04',
+    title: 'Flow Four',
+    artist: 'Acceptance Band',
+    file: 'flow4.wav',
+    durationMs: 8_000,
+    coverColor: '#042f2e',
+  },
+  {
+    externalId: 'flow-05',
+    title: 'Flow Five',
+    artist: 'Acceptance Band',
+    file: 'flow5.wav',
+    durationMs: 8_000,
+    coverColor: '#164e63',
   },
 ]
 
@@ -182,7 +241,7 @@ export function buildDevAcceptanceCatalog(): Track[] {
       coverColor: seed.coverColor,
       previewUrl: resolveDevAcceptanceAssetUrl(seed.file),
       durationMs: seed.durationMs,
-      album: 'DEV Acceptance',
+      album: seed.album ?? 'DEV Acceptance',
     }),
   )
 }
