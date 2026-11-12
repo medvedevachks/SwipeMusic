@@ -8,8 +8,14 @@ import {
 import { getSearchEngine } from '../services/searchEngine'
 import type { CatalogArtist } from '../types/catalog'
 import type { Track } from '../types/track'
+import {
+  bindSearchHistoryUser,
+  persistSearchHistory,
+  registerSearchHistoryHost,
+} from './searchHistoryBind.ts'
+import { SEARCH_HISTORY_MAX } from './searchHistoryPersistence.ts'
 
-const MAX_RECENT = 20
+const MAX_RECENT = SEARCH_HISTORY_MAX
 
 type SearchStoreState = {
   query: string
@@ -283,20 +289,33 @@ export const useSearchStore = create<SearchStoreState>((set, get) => {
         const without = state.recentSearches.filter(
           (item) => item.toLowerCase() !== normalized.toLowerCase(),
         )
-        return {
-          recentSearches: [normalized, ...without].slice(0, MAX_RECENT),
-        }
+        const recentSearches = [normalized, ...without].slice(0, MAX_RECENT)
+        persistSearchHistory(recentSearches)
+        return { recentSearches }
       })
     },
 
     removeRecentSearch: (query) => {
-      set((state) => ({
-        recentSearches: state.recentSearches.filter((item) => item !== query),
-      }))
+      set((state) => {
+        const recentSearches = state.recentSearches.filter(
+          (item) => item !== query,
+        )
+        persistSearchHistory(recentSearches)
+        return { recentSearches }
+      })
     },
 
     clearHistory: () => {
+      persistSearchHistory([])
       set({ recentSearches: [] })
     },
   }
 })
+
+registerSearchHistoryHost({
+  setRecentSearches: (items) => {
+    useSearchStore.setState({ recentSearches: items })
+  },
+})
+// Гостевой bucket до /me; login/logout/restore переключат владельца.
+bindSearchHistoryUser(null)

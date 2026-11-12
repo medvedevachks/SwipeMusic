@@ -8,6 +8,7 @@ import { clearContinuousDiscoveryRuntime } from '../services/recommendation/cont
 import { invalidateContinuousBuffer } from '../services/recommendation/continuousBuffer.ts'
 import { bindSessionTasteUser } from '../services/taste/loadSessionTasteProfile.ts'
 import { tasteProfileCache } from '../services/taste/profileCache.ts'
+import { bindSearchHistoryUser } from './searchHistoryBind.ts'
 
 function clearContinuousRuntimeOnAuthChange(): void {
   getContinuationSession().cancel()
@@ -67,6 +68,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         .then((user) => {
           tasteProfileCache.invalidate()
           bindSessionTasteUser(user?.id ?? null)
+          bindSearchHistoryUser(user?.id ?? null)
           bindAuthSessionEpoch(user?.id ?? null)
           clearContinuousRuntimeOnAuthChange()
           bindPlaybackSessionsSafe(user?.id ?? null)
@@ -79,6 +81,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         .catch(() => {
           tasteProfileCache.invalidate()
           bindSessionTasteUser(null)
+          bindSearchHistoryUser(null)
           bindAuthSessionEpoch(null)
           clearContinuousRuntimeOnAuthChange()
           bindPlaybackSessionsSafe(null)
@@ -96,6 +99,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const user = await authClient.register(input)
     tasteProfileCache.invalidate()
     bindSessionTasteUser(user.id)
+    bindSearchHistoryUser(user.id)
     bindAuthSessionEpoch(user.id)
     clearContinuousRuntimeOnAuthChange()
     bindPlaybackSessionsSafe(user.id)
@@ -107,6 +111,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const user = await authClient.login(input)
     tasteProfileCache.invalidate()
     bindSessionTasteUser(user.id)
+    bindSearchHistoryUser(user.id)
     bindAuthSessionEpoch(user.id)
     clearContinuousRuntimeOnAuthChange()
     bindPlaybackSessionsSafe(user.id)
@@ -118,6 +123,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     await authClient.logout()
     tasteProfileCache.invalidate()
     bindSessionTasteUser(null)
+    bindSearchHistoryUser(null)
     bindAuthSessionEpoch(null)
     clearContinuousRuntimeOnAuthChange()
     bindPlaybackSessionsSafe(null)
