@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  bindAuthSessionEpoch,
+  resetAuthSessionEpochForTests,
+} from '../services/auth/sessionEpoch.ts'
+import {
   bindSearchHistoryUser,
+  captureSearchHistoryAuthSession,
+  commitRecentSearchIfAuthCurrent,
   getSearchHistoryUserId,
   persistSearchHistory,
   registerSearchHistoryHost,
@@ -96,6 +102,58 @@ test('bindSearchHistoryUser isolates in-memory host between users', () => {
     assert.deepEqual(loadRecentSearches('user-a', storage), ['A1', 'A2'])
   } finally {
     setSearchHistoryStorageForTests(undefined)
+    bindSearchHistoryUser(null)
+  }
+})
+
+test('completed search does not write history after auth session changes', () => {
+  const storage = memoryStorage()
+  setSearchHistoryStorageForTests(storage)
+  let recent: string[] = []
+  registerSearchHistoryHost({
+    setRecentSearches: (items) => {
+      recent = [...items]
+    },
+  })
+  resetAuthSessionEpochForTests()
+
+  try {
+    bindAuthSessionEpoch('user-a')
+    bindSearchHistoryUser('user-a')
+    persistSearchHistory(['A-before'])
+    const sessionAtSearchStart = captureSearchHistoryAuthSession()
+
+    bindAuthSessionEpoch('user-b')
+    bindSearchHistoryUser('user-b')
+    persistSearchHistory(['B-own'])
+    assert.deepEqual(loadRecentSearches('user-b', storage), ['B-own'])
+    assert.deepEqual(recent, [])
+
+    const committed = commitRecentSearchIfAuthCurrent(
+      sessionAtSearchStart,
+      () => {
+        persistSearchHistory(['leaked-from-a-search'])
+        recent = ['leaked-from-a-search']
+      },
+    )
+
+    assert.equal(committed, false)
+    assert.deepEqual(loadRecentSearches('user-a', storage), ['A-before'])
+    assert.deepEqual(loadRecentSearches('user-b', storage), ['B-own'])
+    assert.deepEqual(recent, [])
+
+    const sameSession = captureSearchHistoryAuthSession()
+    const ok = commitRecentSearchIfAuthCurrent(sameSession, () => {
+      persistSearchHistory(['B-search'])
+      recent = ['B-search']
+    })
+    assert.equal(ok, true)
+    assert.deepEqual(loadRecentSearches('user-b', storage), ['B-search'])
+    assert.deepEqual(loadRecentSearches('user-a', storage), ['A-before'])
+    assert.deepEqual(recent, ['B-search'])
+  } finally {
+    setSearchHistoryStorageForTests(undefined)
+    resetAuthSessionEpochForTests()
     bindSearchHistoryUser(null)
   }
 })

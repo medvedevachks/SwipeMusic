@@ -10,6 +10,8 @@ import type { CatalogArtist } from '../types/catalog'
 import type { Track } from '../types/track'
 import {
   bindSearchHistoryUser,
+  captureSearchHistoryAuthSession,
+  commitRecentSearchIfAuthCurrent,
   persistSearchHistory,
   registerSearchHistoryHost,
 } from './searchHistoryBind.ts'
@@ -119,6 +121,7 @@ export const useSearchStore = create<SearchStoreState>((set, get) => {
 
       abortArtistsRequest()
       const generation = bumpArtistSearchGeneration()
+      const authSession = captureSearchHistoryAuthSession()
       const controller = new AbortController()
       artistsAbort = controller
 
@@ -169,7 +172,9 @@ export const useSearchStore = create<SearchStoreState>((set, get) => {
 
       try {
         const results = await searchEngine.search(nextQuery)
-        get().addRecentSearch(nextQuery)
+        commitRecentSearchIfAuthCurrent(authSession, () => {
+          get().addRecentSearch(nextQuery)
+        })
         await artistsPromise
         return results
       } catch {

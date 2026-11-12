@@ -3,6 +3,11 @@
  * Отдельно от searchStore, чтобы auth/tests не тянули SearchEngine.
  */
 import {
+  captureAuthSession,
+  isAuthSessionCurrent,
+  type AuthSessionSnapshot,
+} from '../services/auth/sessionEpoch.ts'
+import {
   loadRecentSearches,
   saveRecentSearches,
 } from './searchHistoryPersistence.ts'
@@ -30,4 +35,24 @@ export function bindSearchHistoryUser(userId: string | null): void {
 
 export function persistSearchHistory(items: readonly string[]): void {
   saveRecentSearches(historyUserId, items)
+}
+
+/** Снимок epoch на старте поиска — для отсечения записи после login/logout. */
+export function captureSearchHistoryAuthSession(): AuthSessionSnapshot {
+  return captureAuthSession()
+}
+
+/**
+ * Завершившийся поиск не пишет историю, если auth-сессия уже сменилась.
+ * Не отдельный менеджер: тот же sessionEpoch, что login/logout/restore.
+ */
+export function commitRecentSearchIfAuthCurrent(
+  session: AuthSessionSnapshot,
+  commit: () => void,
+): boolean {
+  if (!isAuthSessionCurrent(session)) {
+    return false
+  }
+  commit()
+  return true
 }

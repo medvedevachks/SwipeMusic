@@ -37,6 +37,8 @@ test('searchStore persists recentSearches mutations without a second history man
   assert.match(store, /removeRecentSearch/)
   assert.match(store, /clearHistory/)
   assert.match(store, /bindSearchHistoryUser\(null\)/)
+  assert.match(store, /captureSearchHistoryAuthSession/)
+  assert.match(store, /commitRecentSearchIfAuthCurrent/)
   assert.equal(store.includes('createSearchHistoryManager'), false)
   assert.equal(store.includes('new SearchHistory'), false)
 })
