@@ -1,18 +1,31 @@
+import {
+  SearchEngine,
+  createSearchEngineForTests,
+  getSearchEngine,
+  registerSearchEnginePortsFactory,
+  resetSearchEngineForTests,
+} from './SearchEngine.ts'
+import { createDefaultSearchEnginePorts } from './searchEnginePorts.ts'
+
+registerSearchEnginePortsFactory(createDefaultSearchEnginePorts)
+
 export {
   SearchEngine,
+  createSearchEngineForTests,
   getSearchEngine,
   resetSearchEngineForTests,
-} from './SearchEngine'
+}
+export type { SearchEnginePorts, SearchSourceConfig } from './SearchEngine.ts'
 export {
   beginDevSearchSession,
   clearDevSearchLog,
   getDevSearchLog,
   pushDevSearchLog,
   subscribeDevSearchLog,
-} from './devSearchLog'
-export type { DevSearchLogEntry, DevSearchLogStage } from './devSearchLog'
+} from './devSearchLog.ts'
+export type { DevSearchLogEntry, DevSearchLogStage } from './devSearchLog.ts'
 export {
   mergeAndDedupeSearchResults,
   trackDedupeKey,
   type RankedTrack,
-} from './mergeResults'
+} from './mergeResults.ts'

@@ -28,6 +28,11 @@ import type { SourceType } from '../../../types/source'
 import type { Track } from '../../../types/track'
 import { YandexMusicApiClient, YandexApiError } from './api'
 import { runYandexDeviceAuth } from './auth'
+import {
+  formatYandexSearchCursor,
+  parseYandexSearchCursor,
+  resolveYandexSearchExhausted,
+} from './yandexSearchPaging.ts'
 import { pushYandexDevLog } from './devLog'
 import { mapYandexTrackToTrack } from './mapTrack'
 import { buildYandexPlaybackCandidates } from './playbackCandidates'
@@ -156,29 +161,32 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
       return { tracks: [], nextCursor: null }
     }
     try {
-      const pageNum = params?.cursor
-        ? Number.parseInt(params.cursor, 10) || 0
-        : 0
+      const { page: pageNum, fetched: fetchedBefore } = parseYandexSearchCursor(
+        params?.cursor,
+      )
       const page = await this.api.searchTracks(normalized, {
-        page: Number.isFinite(pageNum) && pageNum > 0 ? pageNum : 0,
+        page: pageNum,
         signal: params?.signal,
       })
       const tracks = page.tracks.map((item) => mapYandexTrackToTrack(item))
+      const fetchedAfter = fetchedBefore + tracks.length
       pushYandexDevLog({
         stage: 'search',
         message: `Tracks received: ${tracks.length}`,
-        detail: `page=${pageNum};total=${page.total}`,
+        detail: `page=${pageNum};total=${page.total};fetched=${fetchedAfter}`,
       })
-      // Неофициальный /search: page ~фиксированный размер (~20). total — ориентир конца.
-      // Это не API полной дискографии артиста: выдача ограничена поисковым индексом.
-      const pageSizeHint = 20
-      const exhausted =
-        tracks.length === 0 ||
-        tracks.length < pageSizeHint ||
-        (page.total > 0 && (pageNum + 1) * pageSizeHint >= page.total)
+      // Неофициальный /search — поисковый индекс, не дискография артиста.
+      // Конец: пустая страница или fetched >= total (без угадывания page size).
+      const exhausted = resolveYandexSearchExhausted({
+        tracksOnPage: tracks.length,
+        total: page.total,
+        fetchedBefore,
+      })
       return {
         tracks,
-        nextCursor: exhausted ? null : String(pageNum + 1),
+        nextCursor: exhausted
+          ? null
+          : formatYandexSearchCursor(pageNum + 1, fetchedAfter),
       }
     } catch (error) {
       pushYandexDevLog({

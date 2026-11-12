@@ -79,10 +79,17 @@ test('Spotify adapter passes cursor as API offset', () => {
   assert.match(searchFn, /page\.next/)
 })
 
-test('Yandex adapter stops using total and short pages', () => {
+test('Yandex adapter uses fetched/total paging without fixed page size', () => {
   const yandex = readFileSync(
     new URL(
       '../../sources/adapters/yandex-music/YandexMusicAdapter.ts',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+  const paging = readFileSync(
+    new URL(
+      '../../sources/adapters/yandex-music/yandexSearchPaging.ts',
       import.meta.url,
     ),
     'utf8',
@@ -91,10 +98,11 @@ test('Yandex adapter stops using total and short pages', () => {
     yandex.indexOf('async search('),
     yandex.indexOf('async getTrack('),
   )
-  assert.match(searchFn, /page\.total/)
-  assert.match(searchFn, /exhausted/)
-  assert.match(searchFn, /pageSizeHint/)
-  assert.match(searchFn, /дискографии/)
+  assert.match(searchFn, /resolveYandexSearchExhausted/)
+  assert.match(searchFn, /formatYandexSearchCursor/)
+  assert.equal(searchFn.includes('pageSizeHint'), false)
+  assert.match(paging, /fetchedBefore/)
+  assert.match(paging, /не угадываем/)
 })
 
 test('SearchEngine searchNext is real and cache keeps cursors', () => {

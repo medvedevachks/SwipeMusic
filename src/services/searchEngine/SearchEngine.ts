@@ -1,30 +1,47 @@
 import type { SearchEngineState } from '../../types/search'
 import type { Track } from '../../types/track'
-import { bootstrapMusicSources, sourceManager } from '../../sources'
-import type { MusicSourceAdapter } from '../../sources/MusicSourceAdapter'
-import { isDemoSourceId } from '../../sources/demoSource'
-import { pluginRegistry } from '../../sdk'
-import { getMediaIndex, syncAdapterToMediaIndex } from '../mediaIndex'
+import type { MusicSourceAdapter } from '../../sources/MusicSourceAdapter.ts'
+import type { ProviderCapabilities, SearchProvider } from '../../sdk/types.ts'
 import {
   beginDevSearchSession,
   pushDevSearchLog,
-} from './devSearchLog'
+} from './devSearchLog.ts'
 import {
   mergeAndDedupeSearchResults,
   trackDedupeKey,
   type RankedTrack,
-} from './mergeResults'
+} from './mergeResults.ts'
 
 type StateListener = (state: SearchEngineState) => void
 
 const PAGE_LIMIT = 20
+/** Временные ошибки провайдера: столько раз оставляем cursor для retry. */
+const MAX_PROVIDER_RETRIES = 2
+/** Подряд идущие страницы без новых unique при продвинутом cursor → стоп. */
+const MAX_DUPLICATE_STREAK = 2
+
+export type SearchSourceConfig = {
+  id: string
+  name: string
+  priority: number
+}
+
+export type SearchEnginePorts = {
+  bootstrap: () => void
+  listEnabledSources: () => SearchSourceConfig[]
+  getAdapter: (id: string) => MusicSourceAdapter
+  getCapabilities: (id: string) => ProviderCapabilities | null
+  getSearchProvider: (id: string) => SearchProvider | null
+  isDemoSourceId: (id: string) => boolean
+}
 
 type SearchCacheEntry = {
   results: Track[]
-  /** Курсор следующего запроса по sourceId; null = источник исчерпан. */
   sourceCursors: Record<string, string | null>
   hasMore: boolean
   activeSourceIds: string[]
+  providerRetries?: Record<string, number>
+  duplicateStreaks?: Record<string, number>
 }
 
 const initialState: SearchEngineState = {
@@ -41,39 +58,38 @@ const initialState: SearchEngineState = {
 
 /**
  * Универсальный поисковый движок.
- * Не знает конкретные Spotify/Yandex — только SourceManager + PluginRegistry + adapters.
- *
- * Стратегия на источник:
- * 1. SearchProvider (SDK) или capabilities.search → live adapter.search()
- * 2. иначе capabilities.library → MediaIndex
- * 3. иначе → adapter.search()
- *
- * Пагинация: независимые cursors на sourceId; searchNext() догружает страницы.
+ * Пагинация: независимые cursors; searchNext() догружает страницы.
+ * Ports обязательны — production wiring в getSearchEngine() / searchEnginePorts.
  */
 export class SearchEngine {
   private state: SearchEngineState = { ...initialState }
   private readonly listeners = new Set<StateListener>()
   private abortController: AbortController | null = null
-  /** Кэш query+sources → частичная или полная выдача + cursors. */
   private readonly cache = new Map<string, SearchCacheEntry>()
   private readonly sourceCursors = new Map<string, string | null>()
-  /** Защита от пересекающихся searchNext(). */
+  private readonly providerRetries = new Map<string, number>()
+  private readonly duplicateStreaks = new Map<string, number>()
   private nextInFlight = false
+  /** Инвалидирует in-flight searchNext при cancel/новом search. */
+  private nextFlightGeneration = 0
   private searchGeneration = 0
+  private readonly ports: SearchEnginePorts
+
+  constructor(ports: SearchEnginePorts) {
+    this.ports = ports
+  }
 
   getState(): SearchEngineState {
     return this.state
   }
 
-  /**
-   * Только SEARCH-FLOW harness: подставить контролируемую выдачу в UI поиска.
-   * Обычный search() этим путём не ходит.
-   */
   replaceResultsForHarness(query: string, tracks: readonly Track[]): void {
+    this.invalidateNextFlight()
     this.abortController?.abort()
     this.abortController = null
-    this.nextInFlight = false
     this.sourceCursors.clear()
+    this.providerRetries.clear()
+    this.duplicateStreaks.clear()
     this.patchState({
       query,
       status: 'success',
@@ -96,7 +112,7 @@ export class SearchEngine {
   }
 
   async search(query: string): Promise<Track[]> {
-    bootstrapMusicSources()
+    this.ports.bootstrap()
 
     const normalized = query.trim()
     if (!normalized) {
@@ -108,11 +124,10 @@ export class SearchEngine {
     const generation = ++this.searchGeneration
     const controller = new AbortController()
     this.abortController = controller
-    this.nextInFlight = false
 
-    const enabled = sourceManager
+    const enabled = this.ports
       .listEnabledSources()
-      .filter((source) => !isDemoSourceId(source.id))
+      .filter((source) => !this.ports.isDemoSourceId(source.id))
     const activeSourceIds = enabled.map((source) => source.id)
 
     beginDevSearchSession(normalized)
@@ -126,44 +141,14 @@ export class SearchEngine {
       loadingMore: false,
     })
 
-    if (import.meta.env.DEV) {
-      const enabledIds = new Set(activeSourceIds)
-      for (const config of sourceManager.listSources()) {
-        if (enabledIds.has(config.id) || isDemoSourceId(config.id)) {
-          continue
-        }
-        const caps = pluginRegistry.getCapabilities(config.id)
-        const hasSearch =
-          Boolean(pluginRegistry.getSearchProvider(config.id)) ||
-          caps?.search === true
-        if (!hasSearch) {
-          continue
-        }
-        pushDevSearchLog({
-          stage: 'skip',
-          message: `Skipped: source disabled`,
-          providerId: config.id,
-          detail: 'Включите на /sources (после OAuth источник должен включаться сам)',
-        })
-      }
-    }
-
     const cacheKey = this.buildCacheKey(normalized, activeSourceIds)
     const cached = this.cache.get(cacheKey)
     if (cached) {
-      this.sourceCursors.clear()
-      for (const [id, cursor] of Object.entries(cached.sourceCursors)) {
-        this.sourceCursors.set(id, cursor)
-      }
+      this.restoreCursorMaps(cached)
       pushDevSearchLog({
         stage: 'merged',
         message: `Results merged (cache)`,
         detail: `tracks=${cached.results.length};hasMore=${cached.hasMore}`,
-      })
-      pushDevSearchLog({
-        stage: 'ui',
-        message: 'UI rendered',
-        detail: `results=${cached.results.length}`,
       })
       this.patchState({
         status: 'success',
@@ -176,6 +161,10 @@ export class SearchEngine {
       })
       return cached.results
     }
+
+    this.sourceCursors.clear()
+    this.providerRetries.clear()
+    this.duplicateStreaks.clear()
 
     try {
       const page = await this.fetchPageFromSources({
@@ -195,25 +184,20 @@ export class SearchEngine {
         this.sourceCursors.set(id, cursor)
       }
 
-      const hasMore = [...this.sourceCursors.values()].some((cursor) =>
-        Boolean(cursor),
-      )
+      const hasMore = this.computeHasMore()
       this.writeCache(cacheKey, {
         results: page.tracks,
         sourceCursors: Object.fromEntries(this.sourceCursors),
         hasMore,
         activeSourceIds,
+        providerRetries: Object.fromEntries(this.providerRetries),
+        duplicateStreaks: Object.fromEntries(this.duplicateStreaks),
       })
 
       pushDevSearchLog({
         stage: 'merged',
         message: 'Results merged',
         detail: `tracks=${page.tracks.length};hasMore=${hasMore}`,
-      })
-      pushDevSearchLog({
-        stage: 'ui',
-        message: 'UI rendered',
-        detail: `results=${page.tracks.length}`,
       })
 
       const surfaceError =
@@ -258,12 +242,8 @@ export class SearchEngine {
     }
   }
 
-  /**
-   * Следующая страница по всем источникам с живым cursor.
-   * Не сбрасывает уже загруженные results; ошибки одного провайдера изолированы.
-   */
   async searchNext(): Promise<Track[]> {
-    bootstrapMusicSources()
+    this.ports.bootstrap()
 
     if (
       !this.state.query ||
@@ -283,21 +263,21 @@ export class SearchEngine {
       return this.state.results
     }
 
+    const flightId = ++this.nextFlightGeneration
     this.nextInFlight = true
     const generation = this.searchGeneration
     const controller = new AbortController()
-    this.abortController?.abort()
     this.abortController = controller
 
     this.patchState({ loadingMore: true, error: null })
 
-    const enabled = sourceManager
+    const enabled = this.ports
       .listEnabledSources()
-      .filter((source) => !isDemoSourceId(source.id))
+      .filter((source) => !this.ports.isDemoSourceId(source.id))
     const enabledById = new Map(enabled.map((s) => [s.id, s]))
     const sourcesForPage = pending
       .map(([id]) => enabledById.get(id))
-      .filter((s): s is NonNullable<typeof s> => Boolean(s))
+      .filter((s): s is SearchSourceConfig => Boolean(s))
 
     const existingKeys = new Set(
       this.state.results.map((track) => trackDedupeKey(track)),
@@ -312,21 +292,23 @@ export class SearchEngine {
         existingKeys,
       })
 
-      if (controller.signal.aborted || generation !== this.searchGeneration) {
+      if (
+        controller.signal.aborted ||
+        generation !== this.searchGeneration ||
+        flightId !== this.nextFlightGeneration
+      ) {
         return this.state.results
       }
 
       for (const [id, cursor] of page.cursors) {
         this.sourceCursors.set(id, cursor)
       }
-      // Источники, которые больше не enabled — закрываем cursor.
       for (const [id] of pending) {
         if (!enabledById.has(id)) {
           this.sourceCursors.set(id, null)
         }
       }
 
-      // Сохраняем порядок уже показанных треков; дописываем только новые unique.
       const priorKeys = new Set(
         this.state.results.map((track) => trackDedupeKey(track)),
       )
@@ -335,9 +317,7 @@ export class SearchEngine {
       )
       const merged = [...this.state.results, ...appended]
 
-      const hasMore = [...this.sourceCursors.values()].some((cursor) =>
-        Boolean(cursor),
-      )
+      const hasMore = this.computeHasMore()
       const cacheKey =
         this.state.cacheKey ??
         this.buildCacheKey(this.state.query, this.state.activeSourceIds)
@@ -346,6 +326,8 @@ export class SearchEngine {
         sourceCursors: Object.fromEntries(this.sourceCursors),
         hasMore,
         activeSourceIds: this.state.activeSourceIds,
+        providerRetries: Object.fromEntries(this.providerRetries),
+        duplicateStreaks: Object.fromEntries(this.duplicateStreaks),
       })
 
       pushDevSearchLog({
@@ -361,13 +343,16 @@ export class SearchEngine {
         loadingMore: false,
         lastSearchTime: Date.now(),
         cacheKey,
-        // Не затираем успешную выдачу ошибкой догрузки.
         error: null,
       })
 
       return merged
     } catch (error) {
-      if (controller.signal.aborted || generation !== this.searchGeneration) {
+      if (
+        controller.signal.aborted ||
+        generation !== this.searchGeneration ||
+        flightId !== this.nextFlightGeneration
+      ) {
         return this.state.results
       }
       pushDevSearchLog({
@@ -377,11 +362,12 @@ export class SearchEngine {
       })
       this.patchState({
         loadingMore: false,
-        // Сохраняем текущие results; hasMore оставляем — можно повторить.
       })
       return this.state.results
     } finally {
-      this.nextInFlight = false
+      if (flightId === this.nextFlightGeneration) {
+        this.nextInFlight = false
+      }
       if (this.abortController === controller) {
         this.abortController = null
       }
@@ -389,9 +375,9 @@ export class SearchEngine {
   }
 
   cancel(): void {
+    this.invalidateNextFlight()
     this.abortController?.abort()
     this.abortController = null
-    this.nextInFlight = false
     if (this.state.status === 'loading' || this.state.loadingMore) {
       this.patchState({
         status: this.state.results.length ? 'success' : 'idle',
@@ -404,12 +390,39 @@ export class SearchEngine {
     this.cancel()
     this.searchGeneration += 1
     this.sourceCursors.clear()
+    this.providerRetries.clear()
+    this.duplicateStreaks.clear()
     this.patchState({ ...initialState })
   }
 
-  /** Сброс кэша (для будущих настроек / смены источников). */
   clearCache(): void {
     this.cache.clear()
+  }
+
+  private invalidateNextFlight(): void {
+    this.nextFlightGeneration += 1
+    this.nextInFlight = false
+  }
+
+  private computeHasMore(): boolean {
+    return [...this.sourceCursors.values()].some(
+      (cursor) => cursor != null && cursor !== '',
+    )
+  }
+
+  private restoreCursorMaps(cached: SearchCacheEntry): void {
+    this.sourceCursors.clear()
+    for (const [id, cursor] of Object.entries(cached.sourceCursors)) {
+      this.sourceCursors.set(id, cursor)
+    }
+    this.providerRetries.clear()
+    for (const [id, count] of Object.entries(cached.providerRetries ?? {})) {
+      this.providerRetries.set(id, count)
+    }
+    this.duplicateStreaks.clear()
+    for (const [id, count] of Object.entries(cached.duplicateStreaks ?? {})) {
+      this.duplicateStreaks.set(id, count)
+    }
   }
 
   private writeCache(cacheKey: string, entry: SearchCacheEntry): void {
@@ -422,7 +435,7 @@ export class SearchEngine {
 
   private async fetchPageFromSources(input: {
     query: string
-    enabled: ReturnType<typeof sourceManager.listEnabledSources>
+    enabled: SearchSourceConfig[]
     cursors: Map<string, string | null>
     signal: AbortSignal
     existingKeys: Set<string>
@@ -442,7 +455,6 @@ export class SearchEngine {
           return
         }
 
-        const adapter = sourceManager.getAdapter(config.id)
         const providerLabel = config.name || config.id
         const cursor = input.cursors.get(config.id) ?? null
 
@@ -453,19 +465,43 @@ export class SearchEngine {
           detail: cursor ? `cursor=${cursor}` : 'first page',
         })
 
-        const available = await adapter.isAvailable()
-        if (!available) {
-          nextCursors.set(config.id, null)
-          pushDevSearchLog({
-            stage: 'skip',
-            message: `Skipped: provider unavailable`,
-            providerId: config.id,
-            detail: 'isAvailable() === false',
-          })
-          return
-        }
-
         try {
+          const adapter = this.ports.getAdapter(config.id)
+          let available = false
+          try {
+            available = Boolean(await adapter.isAvailable())
+          } catch (error) {
+            const detail =
+              error instanceof Error ? error.message : String(error)
+            pushDevSearchLog({
+              stage: 'error',
+              message: `isAvailable() failed`,
+              providerId: config.id,
+              detail,
+            })
+            this.applyTransientProviderFailure(
+              config.id,
+              cursor,
+              nextCursors,
+              providerErrors,
+              providerLabel,
+              detail,
+            )
+            return
+          }
+
+          if (!available) {
+            nextCursors.set(config.id, null)
+            this.providerRetries.delete(config.id)
+            pushDevSearchLog({
+              stage: 'skip',
+              message: `Skipped: provider unavailable`,
+              providerId: config.id,
+              detail: 'isAvailable() === false',
+            })
+            return
+          }
+
           const page = await this.searchOneSource({
             adapter,
             configId: config.id,
@@ -478,26 +514,26 @@ export class SearchEngine {
             return
           }
 
+          // Успех — сбрасываем retry-счётчик.
+          this.providerRetries.delete(config.id)
+
           let nextCursor = page.nextCursor ?? null
           if (page.tracks.length === 0) {
             nextCursor = null
-          }
-
-          // Защита от пустых/дублирующих страниц: нет новых уникальных — стоп.
-          const uniqueNew = page.tracks.filter(
-            (track) => !input.existingKeys.has(trackDedupeKey(track)),
-          )
-          if (
-            cursor != null &&
-            page.tracks.length > 0 &&
-            uniqueNew.length === 0
-          ) {
-            nextCursor = null
-            pushDevSearchLog({
-              stage: 'skip',
-              message: 'Stopped: page had no new unique tracks',
-              providerId: config.id,
-            })
+            this.duplicateStreaks.delete(config.id)
+          } else {
+            const uniqueNew = page.tracks.filter(
+              (track) => !input.existingKeys.has(trackDedupeKey(track)),
+            )
+            if (cursor != null && uniqueNew.length === 0) {
+              nextCursor = this.resolveDuplicatePageCursor({
+                sourceId: config.id,
+                requestCursor: cursor,
+                responseCursor: nextCursor,
+              })
+            } else {
+              this.duplicateStreaks.delete(config.id)
+            }
           }
 
           nextCursors.set(config.id, nextCursor)
@@ -511,6 +547,9 @@ export class SearchEngine {
             })
           })
         } catch (error) {
+          if (input.signal.aborted) {
+            return
+          }
           const detail =
             error instanceof Error ? error.message : String(error)
           pushDevSearchLog({
@@ -519,15 +558,99 @@ export class SearchEngine {
             providerId: config.id,
             detail,
           })
-          providerErrors.push(`${providerLabel}: ${detail}`)
-          // Ошибка страницы: не крутим тот же cursor бесконечно.
-          nextCursors.set(config.id, null)
+          this.applyTransientProviderFailure(
+            config.id,
+            cursor,
+            nextCursors,
+            providerErrors,
+            providerLabel,
+            detail,
+          )
         }
       }),
     )
 
     const tracks = mergeAndDedupeSearchResults(ranked)
     return { tracks, ranked, cursors: nextCursors, providerErrors }
+  }
+
+  /**
+   * Дубликат-страница: если cursor продвинулся — даём ещё попытки (streak),
+   * иначе останавливаем источник (защита от бесконечного цикла).
+   */
+  private resolveDuplicatePageCursor(input: {
+    sourceId: string
+    requestCursor: string
+    responseCursor: string | null
+  }): string | null {
+    const advanced =
+      input.responseCursor != null &&
+      input.responseCursor !== '' &&
+      input.responseCursor !== input.requestCursor
+
+    if (!advanced) {
+      this.duplicateStreaks.delete(input.sourceId)
+      pushDevSearchLog({
+        stage: 'skip',
+        message: 'Stopped: duplicate page without cursor advance',
+        providerId: input.sourceId,
+      })
+      return null
+    }
+
+    const streak = (this.duplicateStreaks.get(input.sourceId) ?? 0) + 1
+    this.duplicateStreaks.set(input.sourceId, streak)
+    if (streak >= MAX_DUPLICATE_STREAK) {
+      pushDevSearchLog({
+        stage: 'skip',
+        message: 'Stopped: duplicate pages streak',
+        providerId: input.sourceId,
+        detail: `streak=${streak}`,
+      })
+      this.duplicateStreaks.delete(input.sourceId)
+      return null
+    }
+
+    pushDevSearchLog({
+      stage: 'skip',
+      message: 'Duplicate page; cursor advanced — retry later',
+      providerId: input.sourceId,
+      detail: `streak=${streak}`,
+    })
+    return input.responseCursor
+  }
+
+  /** Временная ошибка: сохраняем cursor до MAX_PROVIDER_RETRIES, затем закрываем. */
+  private applyTransientProviderFailure(
+    sourceId: string,
+    cursor: string | null,
+    nextCursors: Map<string, string | null>,
+    providerErrors: string[],
+    providerLabel: string,
+    detail: string,
+  ): void {
+    providerErrors.push(`${providerLabel}: ${detail}`)
+    const retries = (this.providerRetries.get(sourceId) ?? 0) + 1
+    this.providerRetries.set(sourceId, retries)
+    if (retries > MAX_PROVIDER_RETRIES || cursor == null) {
+      nextCursors.set(sourceId, null)
+      this.providerRetries.delete(sourceId)
+      pushDevSearchLog({
+        stage: 'skip',
+        message: 'Provider exhausted after retries',
+        providerId: sourceId,
+        detail: `retries=${retries}`,
+      })
+      return
+    }
+    // Оставляем прежний cursor для безопасного retry.
+    nextCursors.set(sourceId, cursor)
+    pushDevSearchLog({
+      stage: 'skip',
+      message: 'Provider error; cursor kept for retry',
+      providerId: sourceId,
+      detail: `retries=${retries}/${MAX_PROVIDER_RETRIES}`,
+    })
   }
 
   private async searchOneSource(input: {
@@ -537,8 +660,8 @@ export class SearchEngine {
     cursor: string | null
     signal: AbortSignal
   }): Promise<{ tracks: Track[]; nextCursor: string | null }> {
-    const caps = pluginRegistry.getCapabilities(input.configId)
-    const searchProvider = pluginRegistry.getSearchProvider(input.configId)
+    const caps = this.ports.getCapabilities(input.configId)
+    const searchProvider = this.ports.getSearchProvider(input.configId)
     const useLiveSearch =
       Boolean(searchProvider) || caps?.search === true
     const useIndex = !useLiveSearch && caps?.library === true
@@ -567,7 +690,6 @@ export class SearchEngine {
       }
     }
 
-    // MediaIndex: пагинации нет — одна «страница», дальше cursor=null.
     if (input.cursor) {
       return { tracks: [], nextCursor: null }
     }
@@ -577,6 +699,9 @@ export class SearchEngine {
       message: 'MediaIndex.search()',
       providerId: input.configId,
     })
+    const { getMediaIndex, syncAdapterToMediaIndex } = await import(
+      '../mediaIndex/index.ts'
+    )
     const index = getMediaIndex()
     await index.whenReady()
     let records = index.search(input.query, [input.configId])
@@ -605,15 +730,32 @@ export class SearchEngine {
 }
 
 let singleton: SearchEngine | null = null
+let defaultPortsFactory: (() => SearchEnginePorts) | null = null
+
+/** Регистрация production ports из index.ts (не из unit-тестов ядра). */
+export function registerSearchEnginePortsFactory(
+  factory: () => SearchEnginePorts,
+): void {
+  defaultPortsFactory = factory
+}
 
 export function getSearchEngine(): SearchEngine {
   if (!singleton) {
-    singleton = new SearchEngine()
+    if (!defaultPortsFactory) {
+      throw new Error(
+        'SearchEngine ports are not registered. Import from services/searchEngine index.',
+      )
+    }
+    singleton = new SearchEngine(defaultPortsFactory())
   }
   return singleton
 }
 
-/** Сброс singleton для unit-тестов. */
 export function resetSearchEngineForTests(): void {
   singleton = null
+}
+
+/** Создать изолированный движок с mock ports (unit-тесты). */
+export function createSearchEngineForTests(ports: SearchEnginePorts): SearchEngine {
+  return new SearchEngine(ports)
 }

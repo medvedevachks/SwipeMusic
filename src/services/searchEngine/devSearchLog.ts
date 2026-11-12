@@ -32,6 +32,14 @@ let entries: DevSearchLogEntry[] = []
 const listeners = new Set<Listener>()
 let seq = 0
 
+function isDevMode(): boolean {
+  try {
+    return Boolean(import.meta.env?.DEV)
+  } catch {
+    return false
+  }
+}
+
 function notify(): void {
   const snapshot = [...entries]
   for (const listener of listeners) {
@@ -42,7 +50,7 @@ function notify(): void {
 export function pushDevSearchLog(
   input: Omit<DevSearchLogEntry, 'id' | 'at'> & { at?: number },
 ): void {
-  if (!import.meta.env.DEV) {
+  if (!isDevMode()) {
     return
   }
   seq += 1
@@ -61,7 +69,7 @@ export function pushDevSearchLog(
 }
 
 export function clearDevSearchLog(): void {
-  if (!import.meta.env.DEV) {
+  if (!isDevMode()) {
     return
   }
   entries = []
@@ -81,7 +89,7 @@ export function subscribeDevSearchLog(listener: Listener): () => void {
 }
 
 export function beginDevSearchSession(query: string): void {
-  if (!import.meta.env.DEV) {
+  if (!isDevMode()) {
     return
   }
   clearDevSearchLog()
