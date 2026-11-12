@@ -1,28 +1,78 @@
+import type {
+  CanonicalPlaybackAvailability,
+  PlaybackAvailabilityStatus,
+  SourceCopyAvailability,
+} from '../../types/playbackAvailability.ts'
+import { PLAYBACK_AVAILABILITY_STATUS } from '../../types/playbackAvailability.ts'
 import type { Track } from '../../types/track.ts'
-
-/** Теги, которыми адаптер помечает достоверно известную доступность. */
-export const SEARCH_PLAYABILITY_TAG = {
-  PLAYABLE: 'search-playability:playable',
-  UNAVAILABLE: 'search-playability:unavailable',
-} as const
 
 export type SearchTrackPlayability = 'playable' | 'unavailable' | 'unknown'
 
-/**
- * Только явные теги. Не угадываем по previewUrl / источнику —
- * иначе UI показывал бы «доступно» без проверки стрима.
- */
-export function resolveSearchTrackPlayability(
-  track: Pick<Track, 'tags'>,
-): SearchTrackPlayability {
-  const tags = track.tags ?? []
-  if (tags.includes(SEARCH_PLAYABILITY_TAG.UNAVAILABLE)) {
-    return 'unavailable'
+const CONFIRMED_UNAVAILABLE: ReadonlySet<PlaybackAvailabilityStatus> = new Set([
+  PLAYBACK_AVAILABILITY_STATUS.NOT_CONNECTED,
+  PLAYBACK_AVAILABILITY_STATUS.AUTH_REQUIRED,
+  PLAYBACK_AVAILABILITY_STATUS.SUBSCRIPTION_REQUIRED,
+  PLAYBACK_AVAILABILITY_STATUS.UNAVAILABLE,
+  PLAYBACK_AVAILABILITY_STATUS.UNSUPPORTED,
+])
+
+/** Ключи SourceCopy, которыми PlaybackAvailability идентифицирует копию. */
+export function searchTrackSourceKeys(
+  track: Pick<Track, 'id' | 'sourceId' | 'externalId'>,
+): string[] {
+  const keys = [track.id]
+  const composed = `${track.sourceId}:${track.externalId}`
+  if (composed !== track.id) {
+    keys.push(composed)
   }
-  if (tags.includes(SEARCH_PLAYABILITY_TAG.PLAYABLE)) {
+  return keys
+}
+
+/**
+ * Ищет уже известный результат PlaybackAvailability для трека поиска.
+ * Не запускает probe и не читает provider `available`.
+ */
+export function findPlaybackAvailabilityForSearchTrack(
+  track: Pick<Track, 'id' | 'sourceId' | 'externalId'>,
+  byCanonicalId: Record<string, CanonicalPlaybackAvailability>,
+): SourceCopyAvailability | null {
+  const keys = new Set(searchTrackSourceKeys(track))
+  for (const entry of Object.values(byCanonicalId)) {
+    for (const copy of entry.copies) {
+      if (keys.has(copy.sourceTrackKey)) {
+        return copy
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Достоверный статус только из PlaybackAvailability.
+ * UNKNOWN / отсутствие записи → unknown (индикатор скрыт).
+ */
+export function resolveSearchTrackPlayabilityFromAvailability(
+  copy: Pick<SourceCopyAvailability, 'status'> | null | undefined,
+): SearchTrackPlayability {
+  if (!copy) {
+    return 'unknown'
+  }
+  if (copy.status === PLAYBACK_AVAILABILITY_STATUS.PLAYABLE) {
     return 'playable'
   }
+  if (CONFIRMED_UNAVAILABLE.has(copy.status)) {
+    return 'unavailable'
+  }
   return 'unknown'
+}
+
+export function resolveSearchTrackPlayability(
+  track: Pick<Track, 'id' | 'sourceId' | 'externalId'>,
+  byCanonicalId: Record<string, CanonicalPlaybackAvailability>,
+): SearchTrackPlayability {
+  return resolveSearchTrackPlayabilityFromAvailability(
+    findPlaybackAvailabilityForSearchTrack(track, byCanonicalId),
+  )
 }
 
 export function searchPlayabilityLabel(
@@ -35,27 +85,6 @@ export function searchPlayabilityLabel(
     return 'Недоступно'
   }
   return null
-}
-
-/** Добавляет/заменяет playability-тег только при булевом флаге провайдера. */
-export function withSearchPlayabilityTags(
-  tags: string[] | undefined,
-  available: boolean | null | undefined,
-): string[] | undefined {
-  if (available !== true && available !== false) {
-    return tags
-  }
-  const cleaned = (tags ?? []).filter(
-    (tag) =>
-      tag !== SEARCH_PLAYABILITY_TAG.PLAYABLE &&
-      tag !== SEARCH_PLAYABILITY_TAG.UNAVAILABLE,
-  )
-  cleaned.push(
-    available
-      ? SEARCH_PLAYABILITY_TAG.PLAYABLE
-      : SEARCH_PLAYABILITY_TAG.UNAVAILABLE,
-  )
-  return cleaned
 }
 
 export function mergeProviderWarnings(

@@ -3,6 +3,7 @@ import {
   resolveSearchTrackPlayability,
   searchPlayabilityLabel,
 } from '../../services/searchEngine/searchPlayability.ts'
+import { usePlaybackAvailabilityStore } from '../../store/playbackAvailabilityStore.ts'
 import type { Track } from '../../types/track'
 
 type SearchResultRowProps = {
@@ -11,7 +12,8 @@ type SearchResultRowProps = {
 }
 
 export function SearchResultRow({ track, onPlay }: SearchResultRowProps) {
-  const playability = resolveSearchTrackPlayability(track)
+  const byCanonicalId = usePlaybackAvailabilityStore((state) => state.byCanonicalId)
+  const playability = resolveSearchTrackPlayability(track, byCanonicalId)
   const playabilityLabel = searchPlayabilityLabel(playability)
   const sourceLabel = getSourceDisplayName(track.sourceId)
   const album = track.album?.trim() || null

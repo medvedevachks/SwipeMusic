@@ -11,6 +11,10 @@ const yandexMap = readFileSync(
   new URL('../sources/adapters/yandex-music/mapTrack.ts', import.meta.url),
   'utf8',
 )
+const playability = readFileSync(
+  new URL('../services/searchEngine/searchPlayability.ts', import.meta.url),
+  'utf8',
+)
 
 test('search UI is a single track list without artist/album pages', () => {
   assert.match(searchPage, /SearchResultRow/)
@@ -30,11 +34,21 @@ test('search result row shows cover, title, artist, album, source', () => {
   assert.match(row, /getSourceDisplayName/)
 })
 
-test('search result row shows playability only when known', () => {
+test('search result row uses PlaybackAvailability store, not track tags', () => {
+  assert.match(row, /usePlaybackAvailabilityStore/)
   assert.match(row, /resolveSearchTrackPlayability/)
   assert.match(row, /searchPlayabilityLabel/)
-  assert.match(row, /data-playability/)
   assert.match(row, /playabilityLabel \?/)
+  assert.equal(row.includes('track.tags'), false)
+  assert.equal(row.includes('withSearchPlayabilityTags'), false)
+})
+
+test('search playability ignores provider available and search tags', () => {
+  assert.match(playability, /PLAYBACK_AVAILABILITY_STATUS/)
+  assert.match(playability, /findPlaybackAvailabilityForSearchTrack/)
+  assert.equal(playability.includes('SEARCH_PLAYABILITY_TAG'), false)
+  assert.equal(playability.includes('withSearchPlayabilityTags'), false)
+  assert.equal(playability.includes('track.available'), false)
 })
 
 test('search keeps infinite scroll and load-more control', () => {
@@ -58,7 +72,9 @@ test('Play and swipe entry points remain on Search page', () => {
   assert.match(searchPage, /Открыть все в свайпах/)
 })
 
-test('Yandex mapper attaches playability only from available flag', () => {
-  assert.match(yandexMap, /withSearchPlayabilityTags/)
-  assert.match(yandexMap, /track\.available/)
+test('Yandex mapper does not write search playability into track tags', () => {
+  assert.equal(yandexMap.includes('withSearchPlayabilityTags'), false)
+  assert.equal(yandexMap.includes('search-playability'), false)
+  assert.equal(yandexMap.includes('track.available'), false)
+  assert.match(yandexMap, /tags,/)
 })

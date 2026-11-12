@@ -30,10 +30,11 @@ export {
   type RankedTrack,
 } from './mergeResults.ts'
 export {
-  SEARCH_PLAYABILITY_TAG,
+  findPlaybackAvailabilityForSearchTrack,
   mergeProviderWarnings,
   resolveSearchTrackPlayability,
+  resolveSearchTrackPlayabilityFromAvailability,
   searchPlayabilityLabel,
-  withSearchPlayabilityTags,
+  searchTrackSourceKeys,
 } from './searchPlayability.ts'
 export type { SearchTrackPlayability } from './searchPlayability.ts'

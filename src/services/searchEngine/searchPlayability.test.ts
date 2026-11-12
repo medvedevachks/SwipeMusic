@@ -1,60 +1,93 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { PLAYBACK_AVAILABILITY_STATUS } from '../../types/playbackAvailability.ts'
+import type { CanonicalPlaybackAvailability } from '../../types/playbackAvailability.ts'
 import {
-  SEARCH_PLAYABILITY_TAG,
+  findPlaybackAvailabilityForSearchTrack,
   mergeProviderWarnings,
   resolveSearchTrackPlayability,
+  resolveSearchTrackPlayabilityFromAvailability,
   searchPlayabilityLabel,
-  withSearchPlayabilityTags,
 } from './searchPlayability.ts'
 
-test('resolveSearchTrackPlayability stays unknown without tags', () => {
-  assert.equal(resolveSearchTrackPlayability({}), 'unknown')
-  assert.equal(resolveSearchTrackPlayability({ tags: [] }), 'unknown')
-  assert.equal(resolveSearchTrackPlayability({ tags: ['genre:pop'] }), 'unknown')
-})
+const track = {
+  id: 'yandex-music:42',
+  sourceId: 'yandex-music',
+  externalId: '42',
+}
 
-test('resolveSearchTrackPlayability reads explicit tags only', () => {
-  assert.equal(
-    resolveSearchTrackPlayability({
-      tags: [SEARCH_PLAYABILITY_TAG.PLAYABLE],
-    }),
-    'playable',
-  )
-  assert.equal(
-    resolveSearchTrackPlayability({
-      tags: [SEARCH_PLAYABILITY_TAG.UNAVAILABLE],
-    }),
-    'unavailable',
-  )
-  // unavailable wins if both somehow present
-  assert.equal(
-    resolveSearchTrackPlayability({
-      tags: [
-        SEARCH_PLAYABILITY_TAG.PLAYABLE,
-        SEARCH_PLAYABILITY_TAG.UNAVAILABLE,
-      ],
-    }),
-    'unavailable',
-  )
-})
+function availability(
+  status: (typeof PLAYBACK_AVAILABILITY_STATUS)[keyof typeof PLAYBACK_AVAILABILITY_STATUS],
+): CanonicalPlaybackAvailability {
+  const copy = {
+    sourceTrackKey: 'yandex-music:42',
+    sourceId: 'yandex-music',
+    canonicalTrackId: 'canonical-1',
+    status,
+  }
+  return {
+    canonicalTrackId: 'canonical-1',
+    copies: [copy],
+    playableCopies:
+      status === PLAYBACK_AVAILABILITY_STATUS.PLAYABLE ? [copy] : [],
+    hasPlayableCopy: status === PLAYBACK_AVAILABILITY_STATUS.PLAYABLE,
+  }
+}
 
-test('searchPlayabilityLabel hides unknown', () => {
-  assert.equal(searchPlayabilityLabel('playable'), 'Доступно')
-  assert.equal(searchPlayabilityLabel('unavailable'), 'Недоступно')
+test('without PlaybackAvailability entry indicator stays unknown', () => {
+  assert.equal(resolveSearchTrackPlayability(track, {}), 'unknown')
   assert.equal(searchPlayabilityLabel('unknown'), null)
 })
 
-test('withSearchPlayabilityTags only applies boolean provider flags', () => {
-  assert.deepEqual(withSearchPlayabilityTags(['a'], undefined), ['a'])
-  assert.deepEqual(withSearchPlayabilityTags(undefined, null), undefined)
-  assert.deepEqual(withSearchPlayabilityTags(['a'], true), [
-    'a',
-    SEARCH_PLAYABILITY_TAG.PLAYABLE,
-  ])
-  assert.deepEqual(
-    withSearchPlayabilityTags([SEARCH_PLAYABILITY_TAG.PLAYABLE], false),
-    [SEARCH_PLAYABILITY_TAG.UNAVAILABLE],
+test('PLAYABLE from PlaybackAvailability shows Доступно', () => {
+  const byCanonicalId = {
+    'canonical-1': availability(PLAYBACK_AVAILABILITY_STATUS.PLAYABLE),
+  }
+  assert.equal(resolveSearchTrackPlayability(track, byCanonicalId), 'playable')
+  assert.equal(searchPlayabilityLabel('playable'), 'Доступно')
+  assert.equal(
+    findPlaybackAvailabilityForSearchTrack(track, byCanonicalId)?.status,
+    PLAYBACK_AVAILABILITY_STATUS.PLAYABLE,
+  )
+})
+
+test('confirmed non-playable PlaybackAvailability statuses show Недоступно', () => {
+  for (const status of [
+    PLAYBACK_AVAILABILITY_STATUS.UNAVAILABLE,
+    PLAYBACK_AVAILABILITY_STATUS.NOT_CONNECTED,
+    PLAYBACK_AVAILABILITY_STATUS.AUTH_REQUIRED,
+    PLAYBACK_AVAILABILITY_STATUS.SUBSCRIPTION_REQUIRED,
+    PLAYBACK_AVAILABILITY_STATUS.UNSUPPORTED,
+  ] as const) {
+    assert.equal(
+      resolveSearchTrackPlayabilityFromAvailability({ status }),
+      'unavailable',
+      status,
+    )
+  }
+  assert.equal(searchPlayabilityLabel('unavailable'), 'Недоступно')
+})
+
+test('UNKNOWN PlaybackAvailability hides indicator', () => {
+  assert.equal(
+    resolveSearchTrackPlayabilityFromAvailability({
+      status: PLAYBACK_AVAILABILITY_STATUS.UNKNOWN,
+    }),
+    'unknown',
+  )
+  assert.equal(
+    resolveSearchTrackPlayability(track, {
+      'canonical-1': availability(PLAYBACK_AVAILABILITY_STATUS.UNKNOWN),
+    }),
+    'unknown',
+  )
+})
+
+test('missing availability stays unknown even if caller invents tags elsewhere', () => {
+  assert.equal(resolveSearchTrackPlayability(track, {}), 'unknown')
+  assert.equal(
+    resolveSearchTrackPlayabilityFromAvailability(null),
+    'unknown',
   )
 })
 

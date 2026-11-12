@@ -1,5 +1,4 @@
 import { createTrack } from '../../normalizeTrack'
-import { withSearchPlayabilityTags } from '../../../services/searchEngine/searchPlayability.ts'
 import type { Track } from '../../../types/track'
 import type { YandexTrack } from './types'
 
@@ -40,7 +39,6 @@ export function mapYandexTrackToTrack(
     coverUrl: buildYandexCoverUrl(track.coverUri ?? album?.coverUri),
     coverColor: COVER_COLOR,
     previewUrl: track.previewUrl ?? null,
-    // available с /search — достоверный флаг API; undefined не угадываем.
-    tags: withSearchPlayabilityTags(tags, track.available),
+    tags,
   })
 }
