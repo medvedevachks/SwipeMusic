@@ -16,6 +16,9 @@ export function mapSpotifyTrackToTrack(
   const year = spotifyTrack.album.release_date
     ? Number.parseInt(spotifyTrack.album.release_date.slice(0, 4), 10)
     : undefined
+  const firstArtist = spotifyTrack.artists.find((item) => item.id)
+  const artistExternalId = firstArtist?.id || undefined
+  const albumExternalId = spotifyTrack.album.id || undefined
 
   return createTrack({
     sourceId: SOURCE_ID,
@@ -23,6 +26,8 @@ export function mapSpotifyTrackToTrack(
     title: spotifyTrack.name,
     artist,
     album: spotifyTrack.album.name,
+    artistExternalId,
+    albumExternalId,
     year: Number.isFinite(year) ? year : undefined,
     durationMs: spotifyTrack.duration_ms,
     coverUrl,

@@ -32,6 +32,8 @@ test('search result row shows cover, title, artist, album, source', () => {
   assert.match(row, /track\.artist/)
   assert.match(row, /track\.album/)
   assert.match(row, /getSourceDisplayName/)
+  assert.match(row, /onOpenArtist/)
+  assert.match(row, /onOpenAlbum/)
 })
 
 test('search result row uses PlaybackAvailability index, not track tags', () => {

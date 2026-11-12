@@ -6,6 +6,10 @@ export type Track = {
   title: string
   artist: string
   album?: string
+  /** Внешний id первого исполнителя (для перехода на ArtistPage). */
+  artistExternalId?: string
+  /** Внешний id альбома (для перехода на AlbumPage). */
+  albumExternalId?: string
   genre?: string
   year?: number
   durationMs?: number
