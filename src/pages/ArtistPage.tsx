@@ -76,17 +76,26 @@ export default function ArtistPage() {
     if (!tracksCursor || loadingTracks) {
       return
     }
+    const generation = loadGen.current
     setLoadingTracks(true)
     try {
       const page = await catalog.getArtistTracks(sourceId, artistId, {
         cursor: tracksCursor,
       })
+      if (generation !== loadGen.current) {
+        return
+      }
       setTracks((prev) => [...prev, ...page.items])
       setTracksCursor(page.nextCursor)
     } catch (err) {
+      if (generation !== loadGen.current) {
+        return
+      }
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setLoadingTracks(false)
+      if (generation === loadGen.current) {
+        setLoadingTracks(false)
+      }
     }
   }
 
@@ -94,17 +103,26 @@ export default function ArtistPage() {
     if (!albumsCursor || loadingAlbums) {
       return
     }
+    const generation = loadGen.current
     setLoadingAlbums(true)
     try {
       const page = await catalog.getArtistAlbums(sourceId, artistId, {
         cursor: albumsCursor,
       })
+      if (generation !== loadGen.current) {
+        return
+      }
       setAlbums((prev) => [...prev, ...page.items])
       setAlbumsCursor(page.nextCursor)
     } catch (err) {
+      if (generation !== loadGen.current) {
+        return
+      }
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setLoadingAlbums(false)
+      if (generation === loadGen.current) {
+        setLoadingAlbums(false)
+      }
     }
   }
 

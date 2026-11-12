@@ -66,15 +66,24 @@ export default function AlbumPage() {
     if (!cursor || loadingMore) {
       return
     }
+    const generation = loadGen.current
     setLoadingMore(true)
     try {
       const page = await catalog.getAlbumTracks(sourceId, albumId, { cursor })
+      if (generation !== loadGen.current) {
+        return
+      }
       setTracks((prev) => [...prev, ...page.items])
       setCursor(page.nextCursor)
     } catch (err) {
+      if (generation !== loadGen.current) {
+        return
+      }
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setLoadingMore(false)
+      if (generation === loadGen.current) {
+        setLoadingMore(false)
+      }
     }
   }
 
