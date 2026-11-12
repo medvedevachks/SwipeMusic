@@ -1,5 +1,7 @@
 import { create } from 'zustand'
+import { getCatalogBrowseService } from '../services/catalogBrowse'
 import { getSearchEngine } from '../services/searchEngine'
+import type { CatalogArtist } from '../types/catalog'
 import type { Track } from '../types/track'
 
 const MAX_RECENT = 20
@@ -10,6 +12,9 @@ type SearchStoreState = {
   loadingMore: boolean
   hasMore: boolean
   results: Track[]
+  artists: CatalogArtist[]
+  artistsLoading: boolean
+  catalogWarnings: string[]
   error: string | null
   providerWarnings: string[]
   activeSources: string[]
@@ -28,6 +33,7 @@ type SearchStoreState = {
 }
 
 const searchEngine = getSearchEngine()
+const catalog = getCatalogBrowseService()
 
 export const useSearchStore = create<SearchStoreState>((set, get) => {
   searchEngine.subscribe((engineState) => {
@@ -50,6 +56,9 @@ export const useSearchStore = create<SearchStoreState>((set, get) => {
     loadingMore: false,
     hasMore: false,
     results: [],
+    artists: [],
+    artistsLoading: false,
+    catalogWarnings: [],
     error: null,
     providerWarnings: [],
     activeSources: [],
@@ -67,12 +76,39 @@ export const useSearchStore = create<SearchStoreState>((set, get) => {
         return []
       }
 
-      set({ query: nextQuery })
+      set({
+        query: nextQuery,
+        artists: [],
+        artistsLoading: true,
+        catalogWarnings: [],
+      })
+
+      const artistsPromise = catalog
+        .searchArtists(nextQuery)
+        .then((result) => {
+          set({
+            artists: result.artists,
+            catalogWarnings: result.warnings,
+            artistsLoading: false,
+          })
+        })
+        .catch((error) => {
+          set({
+            artists: [],
+            artistsLoading: false,
+            catalogWarnings: [
+              error instanceof Error ? error.message : String(error),
+            ],
+          })
+        })
+
       try {
         const results = await searchEngine.search(nextQuery)
         get().addRecentSearch(nextQuery)
+        await artistsPromise
         return results
       } catch {
+        await artistsPromise
         return []
       }
     },
@@ -91,6 +127,9 @@ export const useSearchStore = create<SearchStoreState>((set, get) => {
         loadingMore: false,
         hasMore: false,
         results: [],
+        artists: [],
+        artistsLoading: false,
+        catalogWarnings: [],
         error: null,
         providerWarnings: [],
         activeSources: [],

@@ -2,6 +2,7 @@ import type { FormEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { DevSearchLogPanel } from '../components/DevSearchLogPanel'
+import { SearchArtistRow } from '../components/search/SearchArtistRow'
 import { SearchResultRow } from '../components/search/SearchResultRow'
 import {
   isSearchSeedPlaybackEnabled,
@@ -22,6 +23,9 @@ export default function Search() {
   const loadingMore = useSearchStore((state) => state.loadingMore)
   const hasMore = useSearchStore((state) => state.hasMore)
   const results = useSearchStore((state) => state.results)
+  const artists = useSearchStore((state) => state.artists)
+  const artistsLoading = useSearchStore((state) => state.artistsLoading)
+  const catalogWarnings = useSearchStore((state) => state.catalogWarnings)
   const error = useSearchStore((state) => state.error)
   const providerWarnings = useSearchStore((state) => state.providerWarnings)
   const activeSources = useSearchStore((state) => state.activeSources)
@@ -128,7 +132,7 @@ export default function Search() {
           Поиск
         </h1>
         <p className="text-sm text-[var(--color-muted)]">
-          Список песен по запросу: название, исполнитель или альбом
+          Один запрос — исполнители и песни по активным источникам
         </p>
       </div>
 
@@ -219,7 +223,8 @@ export default function Search() {
         </p>
       )}
 
-      {providerWarnings.length > 0 && results.length > 0 && (
+      {(providerWarnings.length > 0 || catalogWarnings.length > 0) &&
+        (results.length > 0 || artists.length > 0) && (
         <div
           className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-900 dark:text-amber-100"
           role="status"
@@ -227,15 +232,50 @@ export default function Search() {
         >
           <p className="font-medium">Часть источников недоступна</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs opacity-90">
-            {providerWarnings.map((warning) => (
+            {[...providerWarnings, ...catalogWarnings].map((warning) => (
               <li key={warning}>{warning}</li>
             ))}
           </ul>
         </div>
       )}
 
-      {!loading && query && results.length === 0 && !error && (
+      {!loading &&
+        !artistsLoading &&
+        query &&
+        results.length === 0 &&
+        artists.length === 0 &&
+        !error && (
         <p className="text-sm text-[var(--color-muted)]">Ничего не найдено</p>
+      )}
+
+      {(artists.length > 0 || artistsLoading) && (
+        <div className="space-y-3" data-testid="search-artists-section">
+          <h2 className="text-sm font-medium text-[var(--color-fg)]">
+            Исполнители
+            {artists.length > 0 ? `: ${artists.length}` : ''}
+          </h2>
+          {artistsLoading && artists.length === 0 ? (
+            <p className="text-sm text-[var(--color-muted)]" role="status">
+              Ищем исполнителей…
+            </p>
+          ) : null}
+          {artists.length > 0 ? (
+            <ul className="divide-y divide-[var(--color-border)] overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
+              {artists.map((artist) => (
+                <li key={artist.id}>
+                  <SearchArtistRow
+                    artist={artist}
+                    onOpen={() =>
+                      navigate(
+                        `/search/artists/${encodeURIComponent(artist.sourceId)}/${encodeURIComponent(artist.externalId)}`,
+                      )
+                    }
+                  />
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       )}
 
       {results.length > 0 && (

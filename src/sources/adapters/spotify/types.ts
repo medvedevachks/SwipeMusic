@@ -18,6 +18,31 @@ export type SpotifyAlbumRef = {
   release_date?: string
 }
 
+export type SpotifyArtist = {
+  id: string
+  name: string
+  images?: SpotifyImage[]
+}
+
+export type SpotifyAlbum = {
+  id: string
+  name: string
+  images?: SpotifyImage[]
+  release_date?: string
+  total_tracks?: number
+  artists?: SpotifyArtistRef[]
+}
+
+export type SpotifySimplifiedTrack = {
+  id: string
+  name: string
+  duration_ms: number
+  preview_url: string | null
+  artists: SpotifyArtistRef[]
+  explicit?: boolean
+  external_ids?: { isrc?: string }
+}
+
 export type SpotifyTrack = {
   id: string
   name: string
