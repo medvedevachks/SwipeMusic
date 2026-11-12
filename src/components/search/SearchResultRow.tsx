@@ -10,9 +10,16 @@ import type { Track } from '../../types/track'
 type SearchResultRowProps = {
   track: Track
   onPlay: () => void
+  onOpenArtist?: () => void
+  onOpenAlbum?: () => void
 }
 
-export function SearchResultRow({ track, onPlay }: SearchResultRowProps) {
+export function SearchResultRow({
+  track,
+  onPlay,
+  onOpenArtist,
+  onOpenAlbum,
+}: SearchResultRowProps) {
   const playability = usePlaybackAvailabilityStore((state) => {
     const index = getPlaybackAvailabilitySourceIndex(state.byCanonicalId)
     return resolveSearchTrackPlayabilityFromIndex(track, index)
@@ -20,16 +27,17 @@ export function SearchResultRow({ track, onPlay }: SearchResultRowProps) {
   const playabilityLabel = searchPlayabilityLabel(playability)
   const sourceLabel = getSourceDisplayName(track.sourceId)
   const album = track.album?.trim() || null
+  const canOpenArtist = Boolean(onOpenArtist && track.artistExternalId)
+  const canOpenAlbum = Boolean(onOpenAlbum && track.albumExternalId && album)
 
   return (
-    <button
-      type="button"
-      className="flex w-full min-h-14 items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)] sm:items-center sm:gap-4 sm:px-4"
-      onClick={onPlay}
-      aria-label={`Воспроизвести ${track.title} — ${track.artist}`}
+    <div
+      className="flex w-full min-h-14 items-start gap-3 px-3 py-3 sm:items-center sm:gap-4 sm:px-4"
+      data-testid="search-result-row"
     >
-      <span
-        className="mt-0.5 h-12 w-12 shrink-0 rounded-lg bg-cover bg-center sm:mt-0 sm:h-14 sm:w-14"
+      <button
+        type="button"
+        className="mt-0.5 h-12 w-12 shrink-0 rounded-lg bg-cover bg-center transition-opacity hover:opacity-90 sm:mt-0 sm:h-14 sm:w-14"
         style={
           track.coverUrl
             ? { backgroundImage: `url(${track.coverUrl})` }
@@ -37,21 +45,52 @@ export function SearchResultRow({ track, onPlay }: SearchResultRowProps) {
                 backgroundColor: track.coverColor ?? 'var(--color-accent)',
               }
         }
-        aria-hidden
+        onClick={onPlay}
+        aria-label={`Воспроизвести ${track.title} — ${track.artist}`}
+        data-testid="search-result-play"
       />
 
-      <span className="min-w-0 flex-1 space-y-0.5">
-        <span className="block truncate text-sm font-medium text-[var(--color-fg)] sm:text-[15px]">
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <button
+          type="button"
+          className="block w-full truncate text-left text-sm font-medium text-[var(--color-fg)] hover:underline sm:text-[15px]"
+          onClick={onPlay}
+        >
           {track.title}
-        </span>
-        <span className="block truncate text-xs text-[var(--color-muted)] sm:text-sm">
-          {track.artist}
-        </span>
-        {album ? (
-          <span className="block truncate text-xs text-[var(--color-muted)]">
-            {album}
+        </button>
+
+        {canOpenArtist ? (
+          <button
+            type="button"
+            className="block w-full truncate text-left text-xs text-[var(--color-muted)] hover:text-[var(--color-accent)] hover:underline sm:text-sm"
+            onClick={onOpenArtist}
+            data-testid="search-result-artist-link"
+          >
+            {track.artist}
+          </button>
+        ) : (
+          <span className="block truncate text-xs text-[var(--color-muted)] sm:text-sm">
+            {track.artist}
           </span>
+        )}
+
+        {album ? (
+          canOpenAlbum ? (
+            <button
+              type="button"
+              className="block w-full truncate text-left text-xs text-[var(--color-muted)] hover:text-[var(--color-accent)] hover:underline"
+              onClick={onOpenAlbum}
+              data-testid="search-result-album-link"
+            >
+              {album}
+            </button>
+          ) : (
+            <span className="block truncate text-xs text-[var(--color-muted)]">
+              {album}
+            </span>
+          )
         ) : null}
+
         <span className="flex flex-wrap items-center gap-1.5 pt-0.5">
           <span className="rounded-md bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-accent)]">
             {sourceLabel}
@@ -69,7 +108,7 @@ export function SearchResultRow({ track, onPlay }: SearchResultRowProps) {
             </span>
           ) : null}
         </span>
-      </span>
-    </button>
+      </div>
+    </div>
   )
 }

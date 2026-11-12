@@ -10,6 +10,7 @@ import {
   selectSearchPlaybackTracks,
 } from '../services/continuation/index.ts'
 import { isSearchFlowHarnessEnabled } from '../services/continuation/searchFlowHarnessFlag.ts'
+import { albumCatalogPath, artistCatalogPath } from '../navigation/catalogPaths'
 import { getPlaybackIntent } from '../services/playbackIntent'
 import { useSearchStore } from '../store/searchStore'
 import { useSwipeDeckSessionStore } from '../store/swipeDeckSessionStore'
@@ -325,14 +326,37 @@ export default function Search() {
             className="divide-y divide-[var(--color-border)] overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]"
             data-testid="search-track-list"
           >
-            {results.map((track) => (
-              <li key={track.id}>
-                <SearchResultRow
-                  track={track}
-                  onPlay={() => playSearchResult(results, track.id, query)}
-                />
-              </li>
-            ))}
+            {results.map((track) => {
+              const artistExternalId = track.artistExternalId
+              const albumExternalId = track.albumExternalId
+              return (
+                <li key={track.id}>
+                  <SearchResultRow
+                    track={track}
+                    onPlay={() => playSearchResult(results, track.id, query)}
+                    onOpenArtist={
+                      artistExternalId
+                        ? () =>
+                            navigate(
+                              artistCatalogPath(
+                                track.sourceId,
+                                artistExternalId,
+                              ),
+                            )
+                        : undefined
+                    }
+                    onOpenAlbum={
+                      albumExternalId
+                        ? () =>
+                            navigate(
+                              albumCatalogPath(track.sourceId, albumExternalId),
+                            )
+                        : undefined
+                    }
+                  />
+                </li>
+              )
+            })}
           </ul>
 
           <div ref={loadMoreSentinelRef} className="h-1 w-full" aria-hidden />
