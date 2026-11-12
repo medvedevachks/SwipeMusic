@@ -11,6 +11,7 @@ type SearchStoreState = {
   hasMore: boolean
   results: Track[]
   error: string | null
+  providerWarnings: string[]
   activeSources: string[]
   lastSearchTime: number | null
   recentSearches: string[]
@@ -37,6 +38,7 @@ export const useSearchStore = create<SearchStoreState>((set, get) => {
       hasMore: engineState.hasMore,
       results: engineState.results,
       error: engineState.error,
+      providerWarnings: engineState.providerWarnings,
       activeSources: engineState.activeSourceIds,
       lastSearchTime: engineState.lastSearchTime,
     })
@@ -49,6 +51,7 @@ export const useSearchStore = create<SearchStoreState>((set, get) => {
     hasMore: false,
     results: [],
     error: null,
+    providerWarnings: [],
     activeSources: [],
     lastSearchTime: null,
     recentSearches: [],
@@ -89,6 +92,7 @@ export const useSearchStore = create<SearchStoreState>((set, get) => {
         hasMore: false,
         results: [],
         error: null,
+        providerWarnings: [],
         activeSources: [],
         lastSearchTime: null,
       })

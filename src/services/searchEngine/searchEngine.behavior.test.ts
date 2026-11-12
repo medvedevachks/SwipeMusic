@@ -163,6 +163,9 @@ test('isAvailable throw is isolated; other source still returns', async () => {
   const results = await engine.search('q')
   assert.equal(results.length, 20)
   assert.equal(results[0]?.sourceId, 'good')
+  assert.equal(engine.getState().error, null)
+  assert.ok(engine.getState().providerWarnings.length > 0)
+  assert.match(engine.getState().providerWarnings[0] ?? '', /bad/)
 })
 
 test('transient page error keeps cursor then recovers on retry', async () => {

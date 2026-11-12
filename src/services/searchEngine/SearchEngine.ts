@@ -11,6 +11,7 @@ import {
   trackDedupeKey,
   type RankedTrack,
 } from './mergeResults.ts'
+import { mergeProviderWarnings } from './searchPlayability.ts'
 
 type StateListener = (state: SearchEngineState) => void
 
@@ -40,6 +41,7 @@ type SearchCacheEntry = {
   sourceCursors: Record<string, string | null>
   hasMore: boolean
   activeSourceIds: string[]
+  providerWarnings?: string[]
   providerRetries?: Record<string, number>
   duplicateStreaks?: Record<string, number>
 }
@@ -49,6 +51,7 @@ const initialState: SearchEngineState = {
   status: 'idle',
   results: [],
   error: null,
+  providerWarnings: [],
   activeSourceIds: [],
   lastSearchTime: null,
   hasMore: false,
@@ -95,6 +98,7 @@ export class SearchEngine {
       status: 'success',
       results: [...tracks],
       error: null,
+      providerWarnings: [],
       activeSourceIds: ['harness'],
       lastSearchTime: Date.now(),
       hasMore: false,
@@ -136,6 +140,7 @@ export class SearchEngine {
       query: normalized,
       status: 'loading',
       error: null,
+      providerWarnings: [],
       activeSourceIds,
       hasMore: false,
       loadingMore: false,
@@ -158,6 +163,7 @@ export class SearchEngine {
         hasMore: cached.hasMore,
         loadingMore: false,
         error: null,
+        providerWarnings: cached.providerWarnings ?? [],
       })
       return cached.results
     }
@@ -185,11 +191,19 @@ export class SearchEngine {
       }
 
       const hasMore = this.computeHasMore()
+      const surfaceError =
+        page.tracks.length === 0 && page.providerErrors.length > 0
+          ? page.providerErrors[0]!
+          : null
+      const providerWarnings =
+        page.tracks.length > 0 ? page.providerErrors : []
+
       this.writeCache(cacheKey, {
         results: page.tracks,
         sourceCursors: Object.fromEntries(this.sourceCursors),
         hasMore,
         activeSourceIds,
+        providerWarnings,
         providerRetries: Object.fromEntries(this.providerRetries),
         duplicateStreaks: Object.fromEntries(this.duplicateStreaks),
       })
@@ -197,18 +211,14 @@ export class SearchEngine {
       pushDevSearchLog({
         stage: 'merged',
         message: 'Results merged',
-        detail: `tracks=${page.tracks.length};hasMore=${hasMore}`,
+        detail: `tracks=${page.tracks.length};hasMore=${hasMore};warnings=${providerWarnings.length}`,
       })
-
-      const surfaceError =
-        page.tracks.length === 0 && page.providerErrors.length > 0
-          ? page.providerErrors[0]!
-          : null
 
       this.patchState({
         status: surfaceError ? 'error' : 'success',
         results: page.tracks,
         error: surfaceError,
+        providerWarnings,
         lastSearchTime: Date.now(),
         cacheKey,
         hasMore,
@@ -231,6 +241,7 @@ export class SearchEngine {
         status: 'error',
         error: error instanceof Error ? error.message : 'Search failed',
         results: [],
+        providerWarnings: [],
         hasMore: false,
         loadingMore: false,
       })
@@ -318,6 +329,10 @@ export class SearchEngine {
       const merged = [...this.state.results, ...appended]
 
       const hasMore = this.computeHasMore()
+      const providerWarnings = mergeProviderWarnings(
+        this.state.providerWarnings,
+        page.providerErrors,
+      )
       const cacheKey =
         this.state.cacheKey ??
         this.buildCacheKey(this.state.query, this.state.activeSourceIds)
@@ -326,6 +341,7 @@ export class SearchEngine {
         sourceCursors: Object.fromEntries(this.sourceCursors),
         hasMore,
         activeSourceIds: this.state.activeSourceIds,
+        providerWarnings,
         providerRetries: Object.fromEntries(this.providerRetries),
         duplicateStreaks: Object.fromEntries(this.duplicateStreaks),
       })
@@ -333,7 +349,7 @@ export class SearchEngine {
       pushDevSearchLog({
         stage: 'merged',
         message: 'Results merged (next page)',
-        detail: `tracks=${merged.length};added=${appended.length};hasMore=${hasMore}`,
+        detail: `tracks=${merged.length};added=${appended.length};hasMore=${hasMore};warnings=${providerWarnings.length}`,
       })
 
       this.patchState({
@@ -344,6 +360,7 @@ export class SearchEngine {
         lastSearchTime: Date.now(),
         cacheKey,
         error: null,
+        providerWarnings,
       })
 
       return merged
