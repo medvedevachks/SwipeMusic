@@ -17,6 +17,8 @@ import QueuePage from './pages/Queue'
 import Register from './pages/Register'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
+import AlbumPage from './pages/AlbumPage'
+import ArtistPage from './pages/ArtistPage'
 import Search from './pages/Search'
 import Sources from './pages/Sources'
 import Wave from './pages/Wave'
@@ -37,6 +39,14 @@ function App() {
             <Route index element={<Home stage="sorting" />} />
             <Route path="wave" element={<Wave />} />
             <Route path="search" element={<Search />} />
+            <Route
+              path="search/artists/:sourceId/:artistId"
+              element={<ArtistPage />}
+            />
+            <Route
+              path="search/albums/:sourceId/:albumId"
+              element={<AlbumPage />}
+            />
             <Route path="library" element={<Library />} />
             <Route path="library/browse" element={<LibraryBrowse />} />
             <Route path="library/swipes" element={<LibraryFolder folderId="swipes" />} />

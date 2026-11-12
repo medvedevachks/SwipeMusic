@@ -1,7 +1,10 @@
 import type {
+  SpotifyAlbum,
+  SpotifyArtist,
   SpotifyPaging,
   SpotifyPlaylist,
   SpotifySavedTrackItem,
+  SpotifySimplifiedTrack,
   SpotifyTrack,
   SpotifyUserProfile,
 } from './types'
@@ -92,6 +95,66 @@ export class SpotifyApiClient {
       { logHttpAsSearch: true },
     )
     return data.tracks
+  }
+
+  async searchArtists(
+    query: string,
+    options?: { limit?: number; offset?: number; signal?: AbortSignal },
+  ): Promise<SpotifyPaging<SpotifyArtist>> {
+    const params = new URLSearchParams({
+      q: query,
+      type: 'artist',
+      limit: String(options?.limit ?? 20),
+      offset: String(options?.offset ?? 0),
+    })
+    const data = await this.getJson<{ artists: SpotifyPaging<SpotifyArtist> }>(
+      `/search?${params.toString()}`,
+      options?.signal,
+    )
+    return data.artists
+  }
+
+  async getArtist(
+    artistId: string,
+    signal?: AbortSignal,
+  ): Promise<SpotifyArtist> {
+    return this.getJson(`/artists/${encodeURIComponent(artistId)}`, signal)
+  }
+
+  async getArtistAlbums(
+    artistId: string,
+    options?: { limit?: number; offset?: number; signal?: AbortSignal },
+  ): Promise<SpotifyPaging<SpotifyAlbum>> {
+    const params = new URLSearchParams({
+      include_groups: 'album,single',
+      limit: String(options?.limit ?? 20),
+      offset: String(options?.offset ?? 0),
+    })
+    return this.getJson(
+      `/artists/${encodeURIComponent(artistId)}/albums?${params.toString()}`,
+      options?.signal,
+    )
+  }
+
+  async getAlbum(
+    albumId: string,
+    signal?: AbortSignal,
+  ): Promise<SpotifyAlbum> {
+    return this.getJson(`/albums/${encodeURIComponent(albumId)}`, signal)
+  }
+
+  async getAlbumTracks(
+    albumId: string,
+    options?: { limit?: number; offset?: number; signal?: AbortSignal },
+  ): Promise<SpotifyPaging<SpotifySimplifiedTrack>> {
+    const params = new URLSearchParams({
+      limit: String(options?.limit ?? 50),
+      offset: String(options?.offset ?? 0),
+    })
+    return this.getJson(
+      `/albums/${encodeURIComponent(albumId)}/tracks?${params.toString()}`,
+      options?.signal,
+    )
   }
 
   async getSavedTracks(options?: {

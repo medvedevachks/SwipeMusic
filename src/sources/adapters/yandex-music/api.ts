@@ -3,6 +3,11 @@ import { pushYandexDevLog } from './devLog.ts'
 import { yandexMusicRequestHeaders } from './requestHeaders.ts'
 import type {
   YandexAccountStatus,
+  YandexAlbumWithTracks,
+  YandexArtistAlbumsPage,
+  YandexArtistBrief,
+  YandexArtistHit,
+  YandexArtistTracksPage,
   YandexDownloadInfo,
   YandexPlaylistShort,
   YandexSearchResponse,
@@ -78,6 +83,79 @@ export class YandexMusicApiClient {
       tracks,
       total: result.tracks?.total ?? tracks.length,
     }
+  }
+
+  async searchArtists(
+    query: string,
+    options?: { page?: number; signal?: AbortSignal },
+  ): Promise<{ artists: YandexArtistHit[]; total: number }> {
+    const params = new URLSearchParams({
+      text: query,
+      type: 'artist',
+      page: String(options?.page ?? 0),
+      nocorrect: 'false',
+    })
+    pushYandexDevLog({
+      stage: 'request',
+      message: 'GET /search?type=artist',
+      detail: `q=${query};page=${options?.page ?? 0}`,
+    })
+    const result = await this.getJson<YandexSearchResponse>(
+      `/search?${params.toString()}`,
+      options?.signal,
+      { logHttp: true },
+    )
+    const artists = result.artists?.results ?? []
+    return {
+      artists,
+      total: result.artists?.total ?? artists.length,
+    }
+  }
+
+  async getArtistBrief(
+    artistId: string,
+    signal?: AbortSignal,
+  ): Promise<YandexArtistBrief> {
+    return this.getJson<YandexArtistBrief>(
+      `/artists/${encodeURIComponent(artistId)}/brief-info`,
+      signal,
+    )
+  }
+
+  async getArtistTracksPage(
+    artistId: string,
+    options?: { page?: number; signal?: AbortSignal },
+  ): Promise<YandexArtistTracksPage> {
+    const params = new URLSearchParams({
+      page: String(options?.page ?? 0),
+    })
+    return this.getJson<YandexArtistTracksPage>(
+      `/artists/${encodeURIComponent(artistId)}/tracks?${params.toString()}`,
+      options?.signal,
+    )
+  }
+
+  async getArtistDirectAlbumsPage(
+    artistId: string,
+    options?: { page?: number; signal?: AbortSignal },
+  ): Promise<YandexArtistAlbumsPage> {
+    const params = new URLSearchParams({
+      page: String(options?.page ?? 0),
+    })
+    return this.getJson<YandexArtistAlbumsPage>(
+      `/artists/${encodeURIComponent(artistId)}/direct-albums?${params.toString()}`,
+      options?.signal,
+    )
+  }
+
+  async getAlbumWithTracks(
+    albumId: string,
+    signal?: AbortSignal,
+  ): Promise<YandexAlbumWithTracks> {
+    return this.getJson<YandexAlbumWithTracks>(
+      `/albums/${encodeURIComponent(albumId)}/with-tracks`,
+      signal,
+    )
   }
 
   async getLikedTracks(

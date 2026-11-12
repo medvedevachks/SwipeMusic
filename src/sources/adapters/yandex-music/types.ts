@@ -54,6 +54,51 @@ export type YandexSearchResponse = {
     results?: YandexTrack[]
     total?: number
   }
+  artists?: {
+    results?: YandexArtistHit[]
+    total?: number
+  }
+}
+
+export type YandexArtistHit = {
+  id: number | string
+  name?: string
+  cover?: { uri?: string }
+  ogImage?: string
+}
+
+export type YandexArtistBrief = {
+  artist?: YandexArtistHit
+  counts?: { tracks?: number; directAlbums?: number }
+}
+
+export type YandexPager = {
+  page?: number
+  perPage?: number
+  total?: number
+}
+
+export type YandexArtistTracksPage = {
+  tracks?: YandexTrack[]
+  pager?: YandexPager
+}
+
+export type YandexArtistAlbumsPage = {
+  albums?: YandexAlbumHit[]
+  pager?: YandexPager
+}
+
+export type YandexAlbumHit = {
+  id: number | string
+  title?: string
+  year?: number
+  trackCount?: number
+  coverUri?: string
+  artists?: YandexArtist[]
+}
+
+export type YandexAlbumWithTracks = YandexAlbumHit & {
+  volumes?: Array<Array<YandexTrack | null> | null>
 }
 
 export type YandexDownloadInfo = {

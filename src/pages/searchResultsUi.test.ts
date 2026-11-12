@@ -16,12 +16,12 @@ const playability = readFileSync(
   'utf8',
 )
 
-test('search UI is a single track list without artist/album pages', () => {
+test('search UI keeps unified list without tabs', () => {
   assert.match(searchPage, /SearchResultRow/)
   assert.match(searchPage, /data-testid="search-track-list"/)
   assert.match(searchPage, /Песни:/)
-  assert.equal(searchPage.includes('/artist'), false)
-  assert.equal(searchPage.includes('/album'), false)
+  assert.match(searchPage, /search-artists-section/)
+  assert.equal(searchPage.includes('role="tablist"'), false)
   assert.equal(searchPage.includes('ArtistsPage'), false)
   assert.equal(searchPage.includes('AlbumsPage'), false)
 })
@@ -65,7 +65,7 @@ test('partial provider failures surface as warning with results kept', () => {
   assert.match(searchPage, /providerWarnings/)
   assert.match(searchPage, /Часть источников недоступна/)
   assert.match(searchPage, /data-testid="search-provider-warnings"/)
-  assert.match(searchPage, /providerWarnings\.length > 0 && results\.length > 0/)
+  assert.match(searchPage, /providerWarnings\.length > 0 \|\| catalogWarnings\.length > 0/)
 })
 
 test('Play and swipe entry points remain on Search page', () => {
