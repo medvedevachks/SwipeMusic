@@ -163,6 +163,9 @@ test('isAvailable throw is isolated; other source still returns', async () => {
   const results = await engine.search('q')
   assert.equal(results.length, 20)
   assert.equal(results[0]?.sourceId, 'good')
+  assert.equal(engine.getState().error, null)
+  assert.ok(engine.getState().providerWarnings.length > 0)
+  assert.match(engine.getState().providerWarnings[0] ?? '', /bad/)
 })
 
 test('transient page error keeps cursor then recovers on retry', async () => {
@@ -182,9 +185,57 @@ test('transient page error keeps cursor then recovers on retry', async () => {
   const afterFail = await engine.searchNext()
   assert.equal(afterFail.length, 20)
   assert.equal(engine.getState().hasMore, true)
+  assert.ok(
+    engine.getState().providerWarnings.some((item) => item.includes('a:')),
+  )
   const afterRetry = await engine.searchNext()
   assert.equal(afterRetry.length, 40)
   assert.equal(engine.getState().hasMore, false)
+  assert.equal(engine.getState().providerWarnings.length, 0)
+})
+
+test('recovered source drops its warning while other source warning remains', async () => {
+  const engine = createSearchEngineForTests(
+    portsFor({
+      flaky: pagingAdapter(
+        'flaky',
+        [
+          Array.from({ length: 20 }, (_, i) => track('flaky', i)),
+          Array.from({ length: 20 }, (_, i) => track('flaky', i + 20)),
+        ],
+        { failOnPage: 1, failTimes: 1 },
+      ),
+      broken: pagingAdapter(
+        'broken',
+        [
+          Array.from({ length: 20 }, (_, i) => track('broken', i)),
+          Array.from({ length: 20 }, (_, i) => track('broken', i + 20)),
+        ],
+        { failOnPage: 1, failTimes: 99 },
+      ),
+    }),
+  )
+
+  await engine.search('q')
+  assert.equal(engine.getState().results.length, 40)
+  assert.equal(engine.getState().providerWarnings.length, 0)
+
+  await engine.searchNext()
+  const afterFail = engine.getState().providerWarnings
+  assert.ok(afterFail.some((item) => item.includes('flaky:')))
+  assert.ok(afterFail.some((item) => item.includes('broken:')))
+
+  await engine.searchNext()
+  const afterPartialRecovery = engine.getState().providerWarnings
+  assert.equal(
+    afterPartialRecovery.some((item) => item.includes('flaky:')),
+    false,
+    'flaky recovered — warning cleared',
+  )
+  assert.ok(
+    afterPartialRecovery.some((item) => item.includes('broken:')),
+    'broken still failing — warning kept',
+  )
 })
 
 test('duplicate page with advancing cursor does not stop on first hit', async () => {

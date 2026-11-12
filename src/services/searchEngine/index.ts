@@ -29,3 +29,20 @@ export {
   trackDedupeKey,
   type RankedTrack,
 } from './mergeResults.ts'
+export {
+  findPlaybackAvailabilityForSearchTrack,
+  getPlaybackAvailabilitySourceIndex,
+  lookupSearchTrackAvailability,
+  providerWarningsList,
+  reconcileProviderWarningsBySource,
+  resetPlaybackAvailabilitySourceIndexForTests,
+  resolveSearchTrackPlayability,
+  resolveSearchTrackPlayabilityFromAvailability,
+  resolveSearchTrackPlayabilityFromIndex,
+  searchPlayabilityLabel,
+  searchTrackSourceKeys,
+} from './searchPlayability.ts'
+export type {
+  ProviderWarningEntry,
+  SearchTrackPlayability,
+} from './searchPlayability.ts'

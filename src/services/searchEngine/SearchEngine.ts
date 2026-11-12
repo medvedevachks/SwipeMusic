@@ -11,6 +11,11 @@ import {
   trackDedupeKey,
   type RankedTrack,
 } from './mergeResults.ts'
+import {
+  providerWarningsList,
+  reconcileProviderWarningsBySource,
+  type ProviderWarningEntry,
+} from './searchPlayability.ts'
 
 type StateListener = (state: SearchEngineState) => void
 
@@ -40,6 +45,9 @@ type SearchCacheEntry = {
   sourceCursors: Record<string, string | null>
   hasMore: boolean
   activeSourceIds: string[]
+  providerWarningsBySource?: Record<string, string>
+  /** @deprecated legacy cache shape */
+  providerWarnings?: string[]
   providerRetries?: Record<string, number>
   duplicateStreaks?: Record<string, number>
 }
@@ -49,6 +57,7 @@ const initialState: SearchEngineState = {
   status: 'idle',
   results: [],
   error: null,
+  providerWarnings: [],
   activeSourceIds: [],
   lastSearchTime: null,
   hasMore: false,
@@ -69,6 +78,8 @@ export class SearchEngine {
   private readonly sourceCursors = new Map<string, string | null>()
   private readonly providerRetries = new Map<string, number>()
   private readonly duplicateStreaks = new Map<string, number>()
+  /** Warnings keyed by sourceId — снимаются при успешном ответе источника. */
+  private providerWarningBySource: Record<string, string> = {}
   private nextInFlight = false
   /** Инвалидирует in-flight searchNext при cancel/новом search. */
   private nextFlightGeneration = 0
@@ -90,11 +101,13 @@ export class SearchEngine {
     this.sourceCursors.clear()
     this.providerRetries.clear()
     this.duplicateStreaks.clear()
+    this.providerWarningBySource = {}
     this.patchState({
       query,
       status: 'success',
       results: [...tracks],
       error: null,
+      providerWarnings: [],
       activeSourceIds: ['harness'],
       lastSearchTime: Date.now(),
       hasMore: false,
@@ -136,6 +149,7 @@ export class SearchEngine {
       query: normalized,
       status: 'loading',
       error: null,
+      providerWarnings: [],
       activeSourceIds,
       hasMore: false,
       loadingMore: false,
@@ -150,6 +164,9 @@ export class SearchEngine {
         message: `Results merged (cache)`,
         detail: `tracks=${cached.results.length};hasMore=${cached.hasMore}`,
       })
+      this.providerWarningBySource = {
+        ...(cached.providerWarningsBySource ?? {}),
+      }
       this.patchState({
         status: 'success',
         results: cached.results,
@@ -158,6 +175,7 @@ export class SearchEngine {
         hasMore: cached.hasMore,
         loadingMore: false,
         error: null,
+        providerWarnings: providerWarningsList(this.providerWarningBySource),
       })
       return cached.results
     }
@@ -165,6 +183,7 @@ export class SearchEngine {
     this.sourceCursors.clear()
     this.providerRetries.clear()
     this.duplicateStreaks.clear()
+    this.providerWarningBySource = {}
 
     try {
       const page = await this.fetchPageFromSources({
@@ -185,11 +204,28 @@ export class SearchEngine {
       }
 
       const hasMore = this.computeHasMore()
+      const surfaceError =
+        page.tracks.length === 0 && page.providerErrors.length > 0
+          ? page.providerErrors[0]!.message
+          : null
+      this.providerWarningBySource =
+        page.tracks.length > 0
+          ? reconcileProviderWarningsBySource(
+              {},
+              {
+                recoveredSourceIds: page.recoveredSourceIds,
+                errors: page.providerErrors,
+              },
+            )
+          : {}
+      const providerWarnings = providerWarningsList(this.providerWarningBySource)
+
       this.writeCache(cacheKey, {
         results: page.tracks,
         sourceCursors: Object.fromEntries(this.sourceCursors),
         hasMore,
         activeSourceIds,
+        providerWarningsBySource: { ...this.providerWarningBySource },
         providerRetries: Object.fromEntries(this.providerRetries),
         duplicateStreaks: Object.fromEntries(this.duplicateStreaks),
       })
@@ -197,18 +233,14 @@ export class SearchEngine {
       pushDevSearchLog({
         stage: 'merged',
         message: 'Results merged',
-        detail: `tracks=${page.tracks.length};hasMore=${hasMore}`,
+        detail: `tracks=${page.tracks.length};hasMore=${hasMore};warnings=${providerWarnings.length}`,
       })
-
-      const surfaceError =
-        page.tracks.length === 0 && page.providerErrors.length > 0
-          ? page.providerErrors[0]!
-          : null
 
       this.patchState({
         status: surfaceError ? 'error' : 'success',
         results: page.tracks,
         error: surfaceError,
+        providerWarnings,
         lastSearchTime: Date.now(),
         cacheKey,
         hasMore,
@@ -231,6 +263,7 @@ export class SearchEngine {
         status: 'error',
         error: error instanceof Error ? error.message : 'Search failed',
         results: [],
+        providerWarnings: [],
         hasMore: false,
         loadingMore: false,
       })
@@ -318,6 +351,14 @@ export class SearchEngine {
       const merged = [...this.state.results, ...appended]
 
       const hasMore = this.computeHasMore()
+      this.providerWarningBySource = reconcileProviderWarningsBySource(
+        this.providerWarningBySource,
+        {
+          recoveredSourceIds: page.recoveredSourceIds,
+          errors: page.providerErrors,
+        },
+      )
+      const providerWarnings = providerWarningsList(this.providerWarningBySource)
       const cacheKey =
         this.state.cacheKey ??
         this.buildCacheKey(this.state.query, this.state.activeSourceIds)
@@ -326,6 +367,7 @@ export class SearchEngine {
         sourceCursors: Object.fromEntries(this.sourceCursors),
         hasMore,
         activeSourceIds: this.state.activeSourceIds,
+        providerWarningsBySource: { ...this.providerWarningBySource },
         providerRetries: Object.fromEntries(this.providerRetries),
         duplicateStreaks: Object.fromEntries(this.duplicateStreaks),
       })
@@ -333,7 +375,7 @@ export class SearchEngine {
       pushDevSearchLog({
         stage: 'merged',
         message: 'Results merged (next page)',
-        detail: `tracks=${merged.length};added=${appended.length};hasMore=${hasMore}`,
+        detail: `tracks=${merged.length};added=${appended.length};hasMore=${hasMore};warnings=${providerWarnings.length}`,
       })
 
       this.patchState({
@@ -344,6 +386,7 @@ export class SearchEngine {
         lastSearchTime: Date.now(),
         cacheKey,
         error: null,
+        providerWarnings,
       })
 
       return merged
@@ -392,6 +435,7 @@ export class SearchEngine {
     this.sourceCursors.clear()
     this.providerRetries.clear()
     this.duplicateStreaks.clear()
+    this.providerWarningBySource = {}
     this.patchState({ ...initialState })
   }
 
@@ -443,10 +487,12 @@ export class SearchEngine {
     tracks: Track[]
     ranked: RankedTrack[]
     cursors: Map<string, string | null>
-    providerErrors: string[]
+    providerErrors: ProviderWarningEntry[]
+    recoveredSourceIds: string[]
   }> {
     const ranked: RankedTrack[] = []
-    const providerErrors: string[] = []
+    const providerErrors: ProviderWarningEntry[] = []
+    const recoveredSourceIds: string[] = []
     const nextCursors = new Map(input.cursors)
 
     await Promise.all(
@@ -514,8 +560,9 @@ export class SearchEngine {
             return
           }
 
-          // Успех — сбрасываем retry-счётчик.
+          // Успех — сбрасываем retry-счётчик и warning источника.
           this.providerRetries.delete(config.id)
+          recoveredSourceIds.push(config.id)
 
           let nextCursor = page.nextCursor ?? null
           if (page.tracks.length === 0) {
@@ -571,7 +618,13 @@ export class SearchEngine {
     )
 
     const tracks = mergeAndDedupeSearchResults(ranked)
-    return { tracks, ranked, cursors: nextCursors, providerErrors }
+    return {
+      tracks,
+      ranked,
+      cursors: nextCursors,
+      providerErrors,
+      recoveredSourceIds,
+    }
   }
 
   /**
@@ -625,11 +678,14 @@ export class SearchEngine {
     sourceId: string,
     cursor: string | null,
     nextCursors: Map<string, string | null>,
-    providerErrors: string[],
+    providerErrors: ProviderWarningEntry[],
     providerLabel: string,
     detail: string,
   ): void {
-    providerErrors.push(`${providerLabel}: ${detail}`)
+    providerErrors.push({
+      sourceId,
+      message: `${providerLabel}: ${detail}`,
+    })
     const retries = (this.providerRetries.get(sourceId) ?? 0) + 1
     this.providerRetries.set(sourceId, retries)
     if (retries > MAX_PROVIDER_RETRIES || cursor == null) {

@@ -2,6 +2,7 @@ import type { FormEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { DevSearchLogPanel } from '../components/DevSearchLogPanel'
+import { SearchResultRow } from '../components/search/SearchResultRow'
 import {
   isSearchSeedPlaybackEnabled,
   planSearchPlayback,
@@ -12,6 +13,7 @@ import { getPlaybackIntent } from '../services/playbackIntent'
 import { useSearchStore } from '../store/searchStore'
 import { useSwipeDeckSessionStore } from '../store/swipeDeckSessionStore'
 import type { Track } from '../types/track'
+import { getSourceDisplayName } from '../utils/sourceDisplay'
 
 export default function Search() {
   const navigate = useNavigate()
@@ -21,6 +23,7 @@ export default function Search() {
   const hasMore = useSearchStore((state) => state.hasMore)
   const results = useSearchStore((state) => state.results)
   const error = useSearchStore((state) => state.error)
+  const providerWarnings = useSearchStore((state) => state.providerWarnings)
   const activeSources = useSearchStore((state) => state.activeSources)
   const recentSearches = useSearchStore((state) => state.recentSearches)
   const setQuery = useSearchStore((state) => state.setQuery)
@@ -116,6 +119,8 @@ export default function Search() {
     return () => observer.disconnect()
   }, [hasMore, loading, loadingMore, results.length, searchNext])
 
+  const activeSourceLabels = activeSources.map((id) => getSourceDisplayName(id))
+
   return (
     <section className="space-y-5 pb-4">
       <div className="space-y-1">
@@ -123,11 +128,11 @@ export default function Search() {
           Поиск
         </h1>
         <p className="text-sm text-[var(--color-muted)]">
-          Поиск композиций сразу по всем активным источникам
+          Список песен по запросу: название, исполнитель или альбом
         </p>
       </div>
 
-      <form className="flex gap-2" onSubmit={onSubmit}>
+      <form className="flex flex-col gap-2 sm:flex-row" onSubmit={onSubmit}>
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
@@ -135,25 +140,27 @@ export default function Search() {
           className="min-w-0 flex-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5 text-sm text-[var(--color-fg)] outline-none ring-[var(--color-accent)] focus:ring-2"
           aria-label="Поисковый запрос"
         />
-        <button
-          type="submit"
-          disabled={loading || !draft.trim()}
-          className="rounded-xl bg-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-white disabled:opacity-40"
-        >
-          Найти
-        </button>
-        {(query || results.length > 0) && (
+        <div className="flex gap-2">
           <button
-            type="button"
-            className="rounded-xl border border-[var(--color-border)] px-3 py-2.5 text-sm text-[var(--color-fg)]"
-            onClick={() => {
-              setDraft('')
-              clear()
-            }}
+            type="submit"
+            disabled={loading || !draft.trim()}
+            className="min-h-11 flex-1 rounded-xl bg-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-white disabled:opacity-40 sm:flex-none"
           >
-            Сброс
+            Найти
           </button>
-        )}
+          {(query || results.length > 0) && (
+            <button
+              type="button"
+              className="min-h-11 rounded-xl border border-[var(--color-border)] px-3 py-2.5 text-sm text-[var(--color-fg)]"
+              onClick={() => {
+                setDraft('')
+                clear()
+              }}
+            >
+              Сброс
+            </button>
+          )}
+        </div>
       </form>
 
       {import.meta.env.DEV ? <DevSearchLogPanel /> : null}
@@ -206,10 +213,25 @@ export default function Search() {
         </p>
       )}
 
-      {error && (
-        <p className="text-sm text-rose-600" role="alert">
+      {error && results.length === 0 && (
+        <p className="text-sm text-rose-600 dark:text-rose-400" role="alert">
           {error}
         </p>
+      )}
+
+      {providerWarnings.length > 0 && results.length > 0 && (
+        <div
+          className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-900 dark:text-amber-100"
+          role="status"
+          data-testid="search-provider-warnings"
+        >
+          <p className="font-medium">Часть источников недоступна</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs opacity-90">
+            {providerWarnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {!loading && query && results.length === 0 && !error && (
@@ -218,57 +240,37 @@ export default function Search() {
 
       {results.length > 0 && (
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div className="min-w-0 space-y-0.5">
               <h2 className="text-sm font-medium text-[var(--color-fg)]">
-                Найдено: {results.length}
+                Песни: {results.length}
                 {hasMore ? '+' : ''}
               </h2>
-              {activeSources.length > 0 ? (
+              {activeSourceLabels.length > 0 ? (
                 <p className="truncate text-xs text-[var(--color-muted)]">
-                  Источники: {activeSources.join(', ')}
+                  Источники: {activeSourceLabels.join(', ')}
                 </p>
               ) : null}
             </div>
             <button
               type="button"
-              className="rounded-xl border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-fg)]"
+              className="min-h-11 rounded-xl border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-fg)] sm:min-h-0"
               onClick={() => openAllInSwipes(results, results[0]?.id, query)}
             >
               Открыть все в свайпах
             </button>
           </div>
 
-          <ul className="divide-y divide-[var(--color-border)] overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <ul
+            className="divide-y divide-[var(--color-border)] overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]"
+            data-testid="search-track-list"
+          >
             {results.map((track) => (
               <li key={track.id}>
-                <button
-                  type="button"
-                  className="flex w-full min-h-11 items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)]"
-                  onClick={() => playSearchResult(results, track.id, query)}
-                >
-                  <span
-                    className="h-12 w-12 shrink-0 rounded-lg bg-cover bg-center"
-                    style={
-                      track.coverUrl
-                        ? { backgroundImage: `url(${track.coverUrl})` }
-                        : {
-                            backgroundColor:
-                              track.coverColor ?? 'var(--color-accent)',
-                          }
-                    }
-                    aria-hidden
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-[var(--color-fg)]">
-                      {track.title}
-                    </span>
-                    <span className="block truncate text-xs text-[var(--color-muted)]">
-                      {track.artist}
-                      {track.album ? ` · ${track.album}` : ''}
-                    </span>
-                  </span>
-                </button>
+                <SearchResultRow
+                  track={track}
+                  onPlay={() => playSearchResult(results, track.id, query)}
+                />
               </li>
             ))}
           </ul>
