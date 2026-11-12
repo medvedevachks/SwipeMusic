@@ -34,18 +34,21 @@ test('search result row shows cover, title, artist, album, source', () => {
   assert.match(row, /getSourceDisplayName/)
 })
 
-test('search result row uses PlaybackAvailability store, not track tags', () => {
+test('search result row uses PlaybackAvailability index, not track tags', () => {
   assert.match(row, /usePlaybackAvailabilityStore/)
-  assert.match(row, /resolveSearchTrackPlayability/)
+  assert.match(row, /getPlaybackAvailabilitySourceIndex/)
+  assert.match(row, /resolveSearchTrackPlayabilityFromIndex/)
   assert.match(row, /searchPlayabilityLabel/)
   assert.match(row, /playabilityLabel \?/)
   assert.equal(row.includes('track.tags'), false)
   assert.equal(row.includes('withSearchPlayabilityTags'), false)
+  assert.equal(row.includes('Object.values(byCanonicalId)'), false)
 })
 
-test('search playability ignores provider available and search tags', () => {
+test('search playability uses sourceTrackKey index without provider available tags', () => {
   assert.match(playability, /PLAYBACK_AVAILABILITY_STATUS/)
-  assert.match(playability, /findPlaybackAvailabilityForSearchTrack/)
+  assert.match(playability, /getPlaybackAvailabilitySourceIndex/)
+  assert.match(playability, /reconcileProviderWarningsBySource/)
   assert.equal(playability.includes('SEARCH_PLAYABILITY_TAG'), false)
   assert.equal(playability.includes('withSearchPlayabilityTags'), false)
   assert.equal(playability.includes('track.available'), false)

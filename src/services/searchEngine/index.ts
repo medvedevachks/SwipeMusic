@@ -31,10 +31,18 @@ export {
 } from './mergeResults.ts'
 export {
   findPlaybackAvailabilityForSearchTrack,
-  mergeProviderWarnings,
+  getPlaybackAvailabilitySourceIndex,
+  lookupSearchTrackAvailability,
+  providerWarningsList,
+  reconcileProviderWarningsBySource,
+  resetPlaybackAvailabilitySourceIndexForTests,
   resolveSearchTrackPlayability,
   resolveSearchTrackPlayabilityFromAvailability,
+  resolveSearchTrackPlayabilityFromIndex,
   searchPlayabilityLabel,
   searchTrackSourceKeys,
 } from './searchPlayability.ts'
-export type { SearchTrackPlayability } from './searchPlayability.ts'
+export type {
+  ProviderWarningEntry,
+  SearchTrackPlayability,
+} from './searchPlayability.ts'

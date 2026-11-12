@@ -8,6 +8,11 @@ import type { Track } from '../../types/track.ts'
 
 export type SearchTrackPlayability = 'playable' | 'unavailable' | 'unknown'
 
+export type ProviderWarningEntry = {
+  sourceId: string
+  message: string
+}
+
 const CONFIRMED_UNAVAILABLE: ReadonlySet<PlaybackAvailabilityStatus> = new Set([
   PLAYBACK_AVAILABILITY_STATUS.NOT_CONNECTED,
   PLAYBACK_AVAILABILITY_STATUS.AUTH_REQUIRED,
@@ -28,6 +33,53 @@ export function searchTrackSourceKeys(
   return keys
 }
 
+let indexedByCanonicalId: Record<string, CanonicalPlaybackAvailability> | null =
+  null
+let sourceTrackKeyIndex: ReadonlyMap<string, SourceCopyAvailability> = new Map()
+
+/**
+ * Индекс копий по sourceTrackKey.
+ * Пересчитывается только когда меняется ссылка byCanonicalId (replace/clear store).
+ */
+export function getPlaybackAvailabilitySourceIndex(
+  byCanonicalId: Record<string, CanonicalPlaybackAvailability>,
+): ReadonlyMap<string, SourceCopyAvailability> {
+  if (byCanonicalId === indexedByCanonicalId) {
+    return sourceTrackKeyIndex
+  }
+  const next = new Map<string, SourceCopyAvailability>()
+  for (const entry of Object.values(byCanonicalId)) {
+    for (const copy of entry.copies) {
+      if (!copy.sourceTrackKey) {
+        continue
+      }
+      next.set(copy.sourceTrackKey, copy)
+    }
+  }
+  indexedByCanonicalId = byCanonicalId
+  sourceTrackKeyIndex = next
+  return sourceTrackKeyIndex
+}
+
+/** Только для unit-тестов индекса. */
+export function resetPlaybackAvailabilitySourceIndexForTests(): void {
+  indexedByCanonicalId = null
+  sourceTrackKeyIndex = new Map()
+}
+
+export function lookupSearchTrackAvailability(
+  track: Pick<Track, 'id' | 'sourceId' | 'externalId'>,
+  index: ReadonlyMap<string, SourceCopyAvailability>,
+): SourceCopyAvailability | null {
+  for (const key of searchTrackSourceKeys(track)) {
+    const hit = index.get(key)
+    if (hit) {
+      return hit
+    }
+  }
+  return null
+}
+
 /**
  * Ищет уже известный результат PlaybackAvailability для трека поиска.
  * Не запускает probe и не читает provider `available`.
@@ -36,15 +88,10 @@ export function findPlaybackAvailabilityForSearchTrack(
   track: Pick<Track, 'id' | 'sourceId' | 'externalId'>,
   byCanonicalId: Record<string, CanonicalPlaybackAvailability>,
 ): SourceCopyAvailability | null {
-  const keys = new Set(searchTrackSourceKeys(track))
-  for (const entry of Object.values(byCanonicalId)) {
-    for (const copy of entry.copies) {
-      if (keys.has(copy.sourceTrackKey)) {
-        return copy
-      }
-    }
-  }
-  return null
+  return lookupSearchTrackAvailability(
+    track,
+    getPlaybackAvailabilitySourceIndex(byCanonicalId),
+  )
 }
 
 /**
@@ -75,6 +122,15 @@ export function resolveSearchTrackPlayability(
   )
 }
 
+export function resolveSearchTrackPlayabilityFromIndex(
+  track: Pick<Track, 'id' | 'sourceId' | 'externalId'>,
+  index: ReadonlyMap<string, SourceCopyAvailability>,
+): SearchTrackPlayability {
+  return resolveSearchTrackPlayabilityFromAvailability(
+    lookupSearchTrackAvailability(track, index),
+  )
+}
+
 export function searchPlayabilityLabel(
   status: SearchTrackPlayability,
 ): string | null {
@@ -87,19 +143,35 @@ export function searchPlayabilityLabel(
   return null
 }
 
-export function mergeProviderWarnings(
-  existing: readonly string[],
-  incoming: readonly string[],
-): string[] {
-  const out: string[] = []
-  const seen = new Set<string>()
-  for (const item of [...existing, ...incoming]) {
-    const trimmed = item.trim()
-    if (!trimmed || seen.has(trimmed)) {
+/**
+ * После успешного ответа источника его warning снимается;
+ * ошибки других источников сохраняются; новые ошибки перезаписывают запись источника.
+ */
+export function reconcileProviderWarningsBySource(
+  existing: Record<string, string>,
+  update: {
+    recoveredSourceIds: readonly string[]
+    errors: readonly ProviderWarningEntry[]
+  },
+): Record<string, string> {
+  const next = { ...existing }
+  for (const sourceId of update.recoveredSourceIds) {
+    delete next[sourceId]
+  }
+  for (const error of update.errors) {
+    const message = error.message.trim()
+    if (!error.sourceId || !message) {
       continue
     }
-    seen.add(trimmed)
-    out.push(trimmed)
+    next[error.sourceId] = message
   }
-  return out
+  return next
+}
+
+export function providerWarningsList(
+  bySource: Record<string, string>,
+): string[] {
+  return Object.keys(bySource)
+    .sort()
+    .map((sourceId) => bySource[sourceId]!)
 }

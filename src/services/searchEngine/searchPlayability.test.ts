@@ -4,9 +4,13 @@ import { PLAYBACK_AVAILABILITY_STATUS } from '../../types/playbackAvailability.t
 import type { CanonicalPlaybackAvailability } from '../../types/playbackAvailability.ts'
 import {
   findPlaybackAvailabilityForSearchTrack,
-  mergeProviderWarnings,
+  getPlaybackAvailabilitySourceIndex,
+  providerWarningsList,
+  reconcileProviderWarningsBySource,
+  resetPlaybackAvailabilitySourceIndexForTests,
   resolveSearchTrackPlayability,
   resolveSearchTrackPlayabilityFromAvailability,
+  resolveSearchTrackPlayabilityFromIndex,
   searchPlayabilityLabel,
 } from './searchPlayability.ts'
 
@@ -35,11 +39,13 @@ function availability(
 }
 
 test('without PlaybackAvailability entry indicator stays unknown', () => {
+  resetPlaybackAvailabilitySourceIndexForTests()
   assert.equal(resolveSearchTrackPlayability(track, {}), 'unknown')
   assert.equal(searchPlayabilityLabel('unknown'), null)
 })
 
 test('PLAYABLE from PlaybackAvailability shows Доступно', () => {
+  resetPlaybackAvailabilitySourceIndexForTests()
   const byCanonicalId = {
     'canonical-1': availability(PLAYBACK_AVAILABILITY_STATUS.PLAYABLE),
   }
@@ -48,6 +54,27 @@ test('PLAYABLE from PlaybackAvailability shows Доступно', () => {
   assert.equal(
     findPlaybackAvailabilityForSearchTrack(track, byCanonicalId)?.status,
     PLAYBACK_AVAILABILITY_STATUS.PLAYABLE,
+  )
+})
+
+test('sourceTrackKey index is reused until byCanonicalId reference changes', () => {
+  resetPlaybackAvailabilitySourceIndexForTests()
+  const byCanonicalId = {
+    'canonical-1': availability(PLAYBACK_AVAILABILITY_STATUS.PLAYABLE),
+  }
+  const first = getPlaybackAvailabilitySourceIndex(byCanonicalId)
+  const second = getPlaybackAvailabilitySourceIndex(byCanonicalId)
+  assert.equal(first, second)
+  assert.equal(first.get('yandex-music:42')?.status, 'PLAYABLE')
+
+  const rebuilt = {
+    'canonical-1': availability(PLAYBACK_AVAILABILITY_STATUS.UNAVAILABLE),
+  }
+  const third = getPlaybackAvailabilitySourceIndex(rebuilt)
+  assert.notEqual(third, first)
+  assert.equal(
+    resolveSearchTrackPlayabilityFromIndex(track, third),
+    'unavailable',
   )
 })
 
@@ -69,6 +96,7 @@ test('confirmed non-playable PlaybackAvailability statuses show Недоступ
 })
 
 test('UNKNOWN PlaybackAvailability hides indicator', () => {
+  resetPlaybackAvailabilitySourceIndexForTests()
   assert.equal(
     resolveSearchTrackPlayabilityFromAvailability({
       status: PLAYBACK_AVAILABILITY_STATUS.UNKNOWN,
@@ -83,17 +111,33 @@ test('UNKNOWN PlaybackAvailability hides indicator', () => {
   )
 })
 
-test('missing availability stays unknown even if caller invents tags elsewhere', () => {
-  assert.equal(resolveSearchTrackPlayability(track, {}), 'unknown')
-  assert.equal(
-    resolveSearchTrackPlayabilityFromAvailability(null),
-    'unknown',
+test('reconcileProviderWarningsBySource clears recovered source only', () => {
+  const next = reconcileProviderWarningsBySource(
+    {
+      flaky: 'flaky: timeout',
+      broken: 'broken: 500',
+    },
+    {
+      recoveredSourceIds: ['flaky'],
+      errors: [{ sourceId: 'broken', message: 'broken: still down' }],
+    },
   )
+  assert.deepEqual(next, {
+    broken: 'broken: still down',
+  })
+  assert.deepEqual(providerWarningsList(next), ['broken: still down'])
 })
 
-test('mergeProviderWarnings dedupes and keeps order', () => {
-  assert.deepEqual(
-    mergeProviderWarnings(['A: fail', 'B: fail'], ['A: fail', 'C: fail']),
-    ['A: fail', 'B: fail', 'C: fail'],
+test('reconcile keeps other warnings when one source recovers without new errors', () => {
+  const next = reconcileProviderWarningsBySource(
+    {
+      a: 'a: fail',
+      b: 'b: fail',
+    },
+    {
+      recoveredSourceIds: ['a'],
+      errors: [],
+    },
   )
+  assert.deepEqual(next, { b: 'b: fail' })
 })
