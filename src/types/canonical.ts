@@ -48,6 +48,11 @@ export type CanonicalLibraryItem = {
   copies: SourceCopy[]
   state: CanonicalUserState
   catalogIds: string[]
+  /**
+   * Источники внешнего избранного (Яндекс / Spotify / …).
+   * Отдельно от state.liked.
+   */
+  sourceFavoriteSourceIds: string[]
 }
 
 export type CanonicalMembership = {

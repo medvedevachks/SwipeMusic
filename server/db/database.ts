@@ -192,6 +192,25 @@ CREATE TABLE IF NOT EXISTS user_catalog_canonical_tracks (
 CREATE INDEX IF NOT EXISTS idx_user_catalog_canonical_track
   ON user_catalog_canonical_tracks (user_id, canonical_track_id);
 
+-- FAV-01: зеркало внешнего избранного источника (не state.liked Swipe Music).
+CREATE TABLE IF NOT EXISTS user_source_favorites (
+  user_id TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  source_track_key TEXT NOT NULL,
+  canonical_track_id TEXT NOT NULL,
+  imported_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  PRIMARY KEY (user_id, source_id, external_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id, source_track_key) REFERENCES user_track_source_copies (user_id, source_track_key),
+  FOREIGN KEY (user_id, canonical_track_id) REFERENCES user_canonical_tracks (user_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_source_favorites_canonical
+  ON user_source_favorites (user_id, canonical_track_id);
+CREATE INDEX IF NOT EXISTS idx_user_source_favorites_seen
+  ON user_source_favorites (user_id, source_id, last_seen_at);
+
 CREATE TABLE IF NOT EXISTS user_data_migrations (
   user_id TEXT NOT NULL,
   migration_key TEXT NOT NULL,

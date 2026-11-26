@@ -140,6 +140,20 @@ export const libraryClient = {
     return request('/api/me/canonical-library') as Promise<{ items: CanonicalLibraryItem[] }>
   },
 
+  syncSourceFavorites(
+    sourceId: string,
+    body: {
+      snapshots: SourceCopySnapshot[]
+      seenAt: string
+      finalize: boolean
+    },
+  ): Promise<{ sourceId: string; upserted: number; pruned: number }> {
+    return request(`/api/me/sources/${encodeURIComponent(sourceId)}/favorites/sync`, {
+      method: 'POST',
+      body,
+    }) as Promise<{ sourceId: string; upserted: number; pruned: number }>
+  },
+
   ensureIdentity(snapshot: SourceCopySnapshot): Promise<TrackIdentity> {
     return request('/api/me/tracks/identity', {
       method: 'POST',

@@ -1,7 +1,7 @@
 import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore'
 import {
+  externalFavoriteCanonicalItems,
   formatSourceCopyCount,
-  likedCanonicalItems,
   listCanonicalItems,
   myMusicCanonicalItems,
 } from '../../services/canonical/selectors'
@@ -11,7 +11,7 @@ import { getSourceDisplayName } from '../../utils/sourceDisplay'
 export function CanonicalOrganizedList() {
   const itemsById = useCanonicalLibraryStore((state) => state.itemsById)
   const items = listCanonicalItems(Object.values(itemsById))
-  const favorites = likedCanonicalItems(items)
+  const favorites = externalFavoriteCanonicalItems(items)
   const myMusic = myMusicCanonicalItems(items)
 
   return (
@@ -21,7 +21,7 @@ export function CanonicalOrganizedList() {
           Избранное
         </h2>
         <p className="text-sm text-[var(--color-muted)]">
-          Лайки Swipe Music. Это не папка «Мне нравится» Яндекс Музыки.
+          Зеркало избранного подключённых источников. Лайки Swipe Music — в «Моя музыка».
         </p>
       </div>
       {favorites.length === 0 ? (
@@ -42,6 +42,16 @@ export function CanonicalOrganizedList() {
                 <span className="block truncate text-xs text-[var(--color-muted)]">
                   {item.canonicalTrack.artist}
                 </span>
+                <span className="mt-1 flex flex-wrap gap-1">
+                  {item.sourceFavoriteSourceIds.map((sourceId) => (
+                    <span
+                      key={`${item.canonicalTrack.id}:${sourceId}`}
+                      className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-muted)]"
+                    >
+                      {getSourceDisplayName(sourceId)}
+                    </span>
+                  ))}
+                </span>
               </span>
             </li>
           ))}
@@ -52,7 +62,7 @@ export function CanonicalOrganizedList() {
           Моя музыка
         </h2>
         <p className="text-sm text-[var(--color-muted)]">
-          Сохранённые композиции. Несколько источников одной песни показаны одной строкой.
+          Лайки и каталоги Swipe Music. Несколько источников одной песни — одной строкой.
         </p>
       </div>
       {myMusic.length === 0 ? (

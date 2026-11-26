@@ -54,6 +54,7 @@ export function mapCanonicalItem(item: CanonicalLibraryItem): CanonicalLibraryIt
     copies: item.copies.map(mapSourceCopy),
     state: mapUserState(item.state),
     catalogIds: [...item.catalogIds],
+    sourceFavoriteSourceIds: [...(item.sourceFavoriteSourceIds ?? [])],
   }
 }
 
@@ -64,6 +65,7 @@ export function itemFromIdentity(identity: TrackIdentity): CanonicalLibraryItem 
     copies: identity.copies.map(mapSourceCopy),
     state: neutralCanonicalState(canonicalTrack.createdAt),
     catalogIds: [],
+    sourceFavoriteSourceIds: [],
   }
 }
 
@@ -87,6 +89,7 @@ export function mergeIdentityIntoItem(
     copies: [...byKey.values()],
     state: existing.state,
     catalogIds: [...existing.catalogIds],
+    sourceFavoriteSourceIds: [...(existing.sourceFavoriteSourceIds ?? [])],
   }
 }
 

@@ -34,6 +34,7 @@ import {
   resolveYandexSearchExhausted,
 } from './yandexSearchPaging.ts'
 import { pushYandexDevLog } from './devLog'
+import { syncSourceFavorites } from '../../../services/sourceFavorites'
 import { mapYandexTrackToTrack } from './mapTrack'
 import { buildYandexPlaybackCandidates } from './playbackCandidates'
 import { probeYandexTrackAvailability } from './trackAvailability'
@@ -478,6 +479,32 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
     const likedTracks = liked.map((item) =>
       mapYandexTrackToTrack(item, ['favorite']),
     )
+
+    // FAV-01: зеркало внешнего избранного в SQLite (без state.liked / sys_swipes).
+    // Ошибка импорта не откатывает ранее сохранённые source favorites и не рвёт MediaIndex sync.
+    try {
+      const favoritesSync = await syncSourceFavorites({
+        sourceId: SOURCE_ID,
+        tracks: likedTracks,
+        signal,
+      })
+      pushYandexDevLog({
+        stage: 'library',
+        message: 'source favorites sync',
+        detail:
+          favoritesSync.status === 'synced'
+            ? `upserted=${favoritesSync.upserted};pruned=${favoritesSync.pruned}`
+            : favoritesSync.status === 'error'
+              ? `error=${favoritesSync.message}`
+              : favoritesSync.reason,
+      })
+    } catch (error) {
+      pushYandexDevLog({
+        stage: 'error',
+        message: 'source favorites sync failed',
+        detail: error instanceof Error ? error.message : String(error),
+      })
+    }
 
     const playlistsRaw = await this.api.getPlaylists(this.syncMeta.uid, signal)
     const playlistCache: PlaylistCache = []
