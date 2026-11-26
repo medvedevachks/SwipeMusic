@@ -1,5 +1,5 @@
 /**
- * FAV-01 — зеркало внешнего избранного без state.liked / sys_swipes.
+ * FAV-01 / FAV-01F — зеркало внешнего избранного: syncId, prune, изоляция.
  */
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -83,6 +83,17 @@ function snapshot(externalId: string, title = externalId) {
   }
 }
 
+async function startSync(cookie: string) {
+  const started = await api('/api/me/sources/yandex-music/favorites/sync/start', {
+    method: 'POST',
+    cookie,
+    body: {},
+  })
+  assert.equal(started.status, 200)
+  assert.equal(typeof started.body.syncId, 'string')
+  return String(started.body.syncId)
+}
+
 before(async () => {
   server = await listenAuthServer({
     db,
@@ -108,24 +119,27 @@ after(async () => {
 
 test('sync imports all likes without setting state.liked or sys_swipes', async () => {
   const user = await register('fav-import@example.com')
-  const seenAt = '2026-11-26T10:00:00.000Z'
-  const sync = await api('/api/me/sources/yandex-music/favorites/sync', {
+  const syncId = await startSync(user.cookie)
+  const chunk = await api('/api/me/sources/yandex-music/favorites/sync', {
     method: 'POST',
     cookie: user.cookie,
     body: {
+      syncId,
       snapshots: [snapshot('1', 'One'), snapshot('2', 'Two'), snapshot('3', 'Three')],
-      seenAt,
-      finalize: true,
     },
   })
-  assert.equal(sync.status, 200)
-  assert.equal(sync.body.upserted, 3)
-  assert.equal(sync.body.pruned, 0)
+  assert.equal(chunk.status, 200)
+  assert.equal(chunk.body.upserted, 3)
+
+  const done = await api('/api/me/sources/yandex-music/favorites/sync/complete', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: { syncId },
+  })
+  assert.equal(done.status, 200)
 
   const library = await api('/api/me/canonical-library', { cookie: user.cookie })
-  assert.equal(library.status, 200)
   const items = library.body.items as Array<{
-    canonicalTrack: { title: string }
     state: { liked: boolean }
     catalogIds: string[]
     sourceFavoriteSourceIds: string[]
@@ -138,31 +152,33 @@ test('sync imports all likes without setting state.liked or sys_swipes', async (
   }
 })
 
-test('resync without duplicates preserves local liked and catalogs', async () => {
+test('resync preserves local liked and catalogs; no duplicates', async () => {
   const user = await register('fav-preserve@example.com')
-  const first = await api('/api/me/sources/yandex-music/favorites/sync', {
+  const firstId = await startSync(user.cookie)
+  await api('/api/me/sources/yandex-music/favorites/sync', {
     method: 'POST',
     cookie: user.cookie,
-    body: {
-      snapshots: [snapshot('10', 'Keep')],
-      seenAt: '2026-11-26T11:00:00.000Z',
-      finalize: true,
-    },
+    body: { syncId: firstId, snapshots: [snapshot('10', 'Keep')] },
   })
-  assert.equal(first.status, 200)
+  await api('/api/me/sources/yandex-music/favorites/sync/complete', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: { syncId: firstId },
+  })
 
   const libraryBefore = await api('/api/me/canonical-library', { cookie: user.cookie })
-  const item = (libraryBefore.body.items as Array<{
-    canonicalTrack: { id: string }
-  }>)[0]!
-  const liked = await api(`/api/me/canonical-library/${item.canonicalTrack.id}`, {
-    method: 'PATCH',
-    cookie: user.cookie,
-    body: { liked: true },
-  })
-  assert.equal(liked.status, 200)
-
-  const categories = await api('/api/me/categories', {
+  const item = (libraryBefore.body.items as Array<{ canonicalTrack: { id: string } }>)[0]!
+  assert.equal(
+    (
+      await api(`/api/me/canonical-library/${item.canonicalTrack.id}`, {
+        method: 'PATCH',
+        cookie: user.cookie,
+        body: { liked: true },
+      })
+    ).status,
+    200,
+  )
+  const created = await api('/api/me/categories', {
     method: 'POST',
     cookie: user.cookie,
     body: {
@@ -175,28 +191,31 @@ test('resync without duplicates preserves local liked and catalogs', async () =>
       system: false,
     },
   })
-  assert.ok(categories.status === 200 || categories.status === 201)
-  const assigned = await api(
-    `/api/me/catalogs/cat_fav_test/tracks/${item.canonicalTrack.id}`,
-    { method: 'PUT', cookie: user.cookie },
+  assert.ok(created.status === 200 || created.status === 201)
+  assert.equal(
+    (
+      await api(`/api/me/catalogs/cat_fav_test/tracks/${item.canonicalTrack.id}`, {
+        method: 'PUT',
+        cookie: user.cookie,
+      })
+    ).status,
+    200,
   )
-  assert.equal(assigned.status, 200)
 
-  const second = await api('/api/me/sources/yandex-music/favorites/sync', {
+  const secondId = await startSync(user.cookie)
+  await api('/api/me/sources/yandex-music/favorites/sync', {
     method: 'POST',
     cookie: user.cookie,
-    body: {
-      snapshots: [snapshot('10', 'Keep')],
-      seenAt: '2026-11-26T12:00:00.000Z',
-      finalize: true,
-    },
+    body: { syncId: secondId, snapshots: [snapshot('10', 'Keep')] },
   })
-  assert.equal(second.status, 200)
-  assert.equal(second.body.upserted, 1)
+  await api('/api/me/sources/yandex-music/favorites/sync/complete', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: { syncId: secondId },
+  })
 
   const libraryAfter = await api('/api/me/canonical-library', { cookie: user.cookie })
   const rows = libraryAfter.body.items as Array<{
-    canonicalTrack: { id: string; title: string }
     state: { liked: boolean }
     catalogIds: string[]
     sourceFavoriteSourceIds: string[]
@@ -207,75 +226,143 @@ test('resync without duplicates preserves local liked and catalogs', async () =>
   assert.deepEqual(rows[0]?.sourceFavoriteSourceIds, ['yandex-music'])
 })
 
-test('failed finalize leaves previous imports; successful prune removes missing', async () => {
-  const user = await register('fav-prune@example.com')
+test('stale sync cannot upsert or prune after a newer start', async () => {
+  const user = await register('fav-stale@example.com')
+  const oldId = await startSync(user.cookie)
   await api('/api/me/sources/yandex-music/favorites/sync', {
     method: 'POST',
     cookie: user.cookie,
-    body: {
-      snapshots: [snapshot('a'), snapshot('b')],
-      seenAt: '2026-11-26T13:00:00.000Z',
-      finalize: true,
-    },
+    body: { syncId: oldId, snapshots: [snapshot('a'), snapshot('b')] },
+  })
+  await api('/api/me/sources/yandex-music/favorites/sync/complete', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: { syncId: oldId },
   })
 
-  // Чанк без finalize — prune не выполняется.
+  const staleId = await startSync(user.cookie)
+  const freshId = await startSync(user.cookie)
+  assert.notEqual(staleId, freshId)
+
+  const staleUpsert = await api('/api/me/sources/yandex-music/favorites/sync', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: { syncId: staleId, snapshots: [snapshot('a')] },
+  })
+  assert.equal(staleUpsert.status, 409)
+  assert.equal(staleUpsert.body.error, 'STALE_SYNC')
+
   await api('/api/me/sources/yandex-music/favorites/sync', {
     method: 'POST',
     cookie: user.cookie,
-    body: {
-      snapshots: [snapshot('a')],
-      seenAt: '2026-11-26T14:00:00.000Z',
-      finalize: false,
-    },
+    body: { syncId: freshId, snapshots: [snapshot('a')] },
   })
-  let library = await api('/api/me/canonical-library', { cookie: user.cookie })
-  let items = library.body.items as Array<{
-    sourceFavoriteSourceIds: string[]
-    copies: Array<{ externalId: string }>
-  }>
-  assert.equal(
-    items.filter((row) => row.sourceFavoriteSourceIds.includes('yandex-music')).length,
-    2,
-  )
-
-  const finalized = await api('/api/me/sources/yandex-music/favorites/sync', {
+  const staleComplete = await api('/api/me/sources/yandex-music/favorites/sync/complete', {
     method: 'POST',
     cookie: user.cookie,
-    body: {
-      snapshots: [snapshot('a')],
-      seenAt: '2026-11-26T14:00:00.000Z',
-      finalize: true,
-    },
+    body: { syncId: staleId },
   })
-  assert.equal(finalized.status, 200)
-  assert.equal(finalized.body.pruned, 1)
+  assert.equal(staleComplete.status, 409)
 
-  library = await api('/api/me/canonical-library', { cookie: user.cookie })
-  items = library.body.items as typeof items
-  const mirrored = items.filter((row) =>
-    row.sourceFavoriteSourceIds.includes('yandex-music'),
-  )
+  const freshComplete = await api('/api/me/sources/yandex-music/favorites/sync/complete', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: { syncId: freshId },
+  })
+  assert.equal(freshComplete.status, 200)
+  assert.equal(freshComplete.body.pruned, 1)
+
+  const library = await api('/api/me/canonical-library', { cookie: user.cookie })
+  const mirrored = (
+    library.body.items as Array<{
+      sourceFavoriteSourceIds: string[]
+      copies: Array<{ externalId: string }>
+    }>
+  ).filter((row) => row.sourceFavoriteSourceIds.includes('yandex-music'))
   assert.equal(mirrored.length, 1)
   assert.equal(mirrored[0]?.copies[0]?.externalId, 'a')
 })
 
-test('sync rejects mixed sourceId in batch', async () => {
-  const user = await register('fav-mixed@example.com')
-  const result = await api('/api/me/sources/yandex-music/favorites/sync', {
+test('confirmed empty list prunes mirror; incomplete list never starts prune', async () => {
+  const user = await register('fav-empty@example.com')
+  const fillId = await startSync(user.cookie)
+  await api('/api/me/sources/yandex-music/favorites/sync', {
     method: 'POST',
     cookie: user.cookie,
-    body: {
-      snapshots: [
-        snapshot('1'),
-        {
-          ...snapshot('2'),
-          sourceId: 'spotify',
-        },
-      ],
-      seenAt: '2026-11-26T15:00:00.000Z',
-      finalize: true,
-    },
+    body: { syncId: fillId, snapshots: [snapshot('x'), snapshot('y')] },
   })
-  assert.equal(result.status, 400)
+  await api('/api/me/sources/yandex-music/favorites/sync/complete', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: { syncId: fillId },
+  })
+
+  const emptyId = await startSync(user.cookie)
+  const emptyDone = await api('/api/me/sources/yandex-music/favorites/sync/complete', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: { syncId: emptyId },
+  })
+  assert.equal(emptyDone.status, 200)
+  assert.equal(emptyDone.body.pruned, 2)
+
+  const library = await api('/api/me/canonical-library', { cookie: user.cookie })
+  const mirrored = (
+    library.body.items as Array<{ sourceFavoriteSourceIds: string[] }>
+  ).filter((row) => row.sourceFavoriteSourceIds.includes('yandex-music'))
+  assert.equal(mirrored.length, 0)
+})
+
+test('users cannot write into another account cookie scope', async () => {
+  const a = await register('fav-user-a@example.com')
+  const b = await register('fav-user-b@example.com')
+  const syncA = await startSync(a.cookie)
+  await api('/api/me/sources/yandex-music/favorites/sync', {
+    method: 'POST',
+    cookie: a.cookie,
+    body: { syncId: syncA, snapshots: [snapshot('only-a')] },
+  })
+  await api('/api/me/sources/yandex-music/favorites/sync/complete', {
+    method: 'POST',
+    cookie: a.cookie,
+    body: { syncId: syncA },
+  })
+
+  const hijack = await api('/api/me/sources/yandex-music/favorites/sync', {
+    method: 'POST',
+    cookie: b.cookie,
+    body: { syncId: syncA, snapshots: [snapshot('only-a'), snapshot('injected')] },
+  })
+  assert.equal(hijack.status, 404)
+
+  const libraryB = await api('/api/me/canonical-library', { cookie: b.cookie })
+  assert.equal((libraryB.body.items as unknown[]).length, 0)
+})
+
+test('large batch import accepts 200 snapshots across chunks without cap', async () => {
+  const user = await register('fav-large@example.com')
+  const syncId = await startSync(user.cookie)
+  const total = 250
+  let upserted = 0
+  for (let offset = 0; offset < total; offset += 50) {
+    const snapshots = Array.from({ length: 50 }, (_, index) =>
+      snapshot(String(offset + index + 1), `T${offset + index + 1}`),
+    )
+    const chunk = await api('/api/me/sources/yandex-music/favorites/sync', {
+      method: 'POST',
+      cookie: user.cookie,
+      body: { syncId, snapshots },
+    })
+    assert.equal(chunk.status, 200)
+    upserted += Number(chunk.body.upserted)
+  }
+  assert.equal(upserted, total)
+  const done = await api('/api/me/sources/yandex-music/favorites/sync/complete', {
+    method: 'POST',
+    cookie: user.cookie,
+    body: { syncId },
+  })
+  assert.equal(done.status, 200)
+  const library = await api('/api/me/canonical-library', { cookie: user.cookie })
+  assert.equal((library.body.items as unknown[]).length, total)
 })

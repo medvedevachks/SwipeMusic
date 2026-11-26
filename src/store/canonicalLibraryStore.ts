@@ -48,12 +48,15 @@ export const useCanonicalLibraryStore = create<CanonicalLibraryStore>((set, get)
   ...empty,
 
   replaceForUser: (userId, items) => {
+    // Полная пересборка индекса — O(копии), без копирования map на каждый item.
     const itemsById: Record<string, CanonicalLibraryItem> = {}
-    let sourceKeyToCanonicalId: Record<string, string> = {}
+    const sourceKeyToCanonicalId: Record<string, string> = {}
     for (const raw of items) {
       const item = mapCanonicalItem(raw)
       itemsById[item.canonicalTrack.id] = item
-      sourceKeyToCanonicalId = indexItem(sourceKeyToCanonicalId, item)
+      for (const copy of item.copies) {
+        sourceKeyToCanonicalId[copy.sourceTrackKey] = item.canonicalTrack.id
+      }
     }
     set({
       userId,

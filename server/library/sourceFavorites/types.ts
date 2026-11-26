@@ -1,17 +1,32 @@
 import type { IsoTimestamp } from '../types.ts'
 import type { SourceCopySnapshot } from '../identity/types.ts'
 
-/** Пакет синхронизации внешнего избранного одного sourceId. */
-export type SourceFavoritesSyncBody = {
-  snapshots: SourceCopySnapshot[]
-  /** Момент старта клиентской синхронизации; на finalize удаляются более старые. */
-  seenAt: IsoTimestamp
-  /** true только после успешной загрузки полного набора чанков. */
-  finalize: boolean
+/** Старт серверного прогона синхронизации. */
+export type SourceFavoritesSyncStartResult = {
+  sourceId: string
+  syncId: string
+  startedAt: IsoTimestamp
 }
 
-export type SourceFavoritesSyncResult = {
+/** Пакет upsert внутри активного syncId. */
+export type SourceFavoritesSyncChunkBody = {
+  syncId: string
+  snapshots: SourceCopySnapshot[]
+}
+
+export type SourceFavoritesSyncChunkResult = {
   sourceId: string
+  syncId: string
   upserted: number
+}
+
+/** Завершение прогона: prune только если syncId ещё open. */
+export type SourceFavoritesSyncCompleteBody = {
+  syncId: string
+}
+
+export type SourceFavoritesSyncCompleteResult = {
+  sourceId: string
+  syncId: string
   pruned: number
 }

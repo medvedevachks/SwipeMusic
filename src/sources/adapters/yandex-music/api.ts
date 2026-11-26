@@ -158,13 +158,14 @@ export class YandexMusicApiClient {
     )
   }
 
-  async getLikedTracks(
+  /** Только refs избранного — без гидратации полных треков. */
+  async getLikedTrackRefs(
     userId: number | string,
     signal?: AbortSignal,
-  ): Promise<YandexTrack[]> {
+  ): Promise<string[]> {
     pushYandexDevLog({
       stage: 'library',
-      message: 'GET likes/tracks',
+      message: 'GET likes/tracks refs',
       detail: `uid=${userId}`,
     })
     const result = await this.getJson<{
@@ -172,15 +173,51 @@ export class YandexMusicApiClient {
     }>(`/users/${userId}/likes/tracks`, signal)
 
     const refs = result.library?.tracks ?? []
-    if (refs.length === 0) {
-      return []
-    }
-    const ids = refs.map((item) =>
+    return refs.map((item) =>
       item.albumId != null && String(item.albumId).length > 0
         ? `${item.id}:${item.albumId}`
         : String(item.id),
     )
+  }
+
+  async getLikedTracks(
+    userId: number | string,
+    signal?: AbortSignal,
+  ): Promise<YandexTrack[]> {
+    const ids = await this.getLikedTrackRefs(userId, signal)
+    if (ids.length === 0) {
+      return []
+    }
     return this.getTracksByIds(ids, signal)
+  }
+
+  /**
+   * Пакетная гидратация треков без накопления всего массива у вызывающего.
+   * Вызывающий может писать каждый chunk и отпускать ссылку.
+   */
+  async *iterateTracksByIds(
+    ids: readonly string[],
+    signal?: AbortSignal,
+    chunkSize = 50,
+  ): AsyncGenerator<YandexTrack[], void, void> {
+    const list = ids.map((item) => item.trim()).filter(Boolean)
+    for (let offset = 0; offset < list.length; offset += chunkSize) {
+      if (signal?.aborted) {
+        const error = new Error('Aborted')
+        error.name = 'AbortError'
+        throw error
+      }
+      const chunk = list.slice(offset, offset + chunkSize)
+      const params = new URLSearchParams({
+        'track-ids': chunk.join(','),
+        'with-positions': 'true',
+      })
+      const result = await this.getJson<YandexTrack[]>(
+        `/tracks?${params.toString()}`,
+        signal,
+      )
+      yield Array.isArray(result) ? result : []
+    }
   }
 
   async getTracksByIds(
@@ -194,21 +231,9 @@ export class YandexMusicApiClient {
       return []
     }
 
-    const chunkSize = 50
     const tracks: YandexTrack[] = []
-    for (let offset = 0; offset < list.length; offset += chunkSize) {
-      const chunk = list.slice(offset, offset + chunkSize)
-      const params = new URLSearchParams({
-        'track-ids': chunk.join(','),
-        'with-positions': 'true',
-      })
-      const result = await this.getJson<YandexTrack[]>(
-        `/tracks?${params.toString()}`,
-        signal,
-      )
-      if (Array.isArray(result)) {
-        tracks.push(...result)
-      }
+    for await (const chunk of this.iterateTracksByIds(list, signal)) {
+      tracks.push(...chunk)
     }
     return tracks
   }

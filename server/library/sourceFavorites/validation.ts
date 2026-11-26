@@ -1,7 +1,10 @@
 import type { FieldErrors, Parsed } from '../validation.ts'
 import { validateSourceSnapshot } from '../identity/validation.ts'
 import type { SourceCopySnapshot } from '../identity/types.ts'
-import type { SourceFavoritesSyncBody } from './types.ts'
+import type {
+  SourceFavoritesSyncChunkBody,
+  SourceFavoritesSyncCompleteBody,
+} from './types.ts'
 
 const MAX_BATCH = 100
 
@@ -9,25 +12,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-export function validateSourceFavoritesSyncBody(
+function asSyncId(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const trimmed = value.trim()
+  if (!trimmed || trimmed.length > 80) {
+    return null
+  }
+  return trimmed
+}
+
+export function validateSourceFavoritesSyncChunkBody(
   body: unknown,
-): Parsed<SourceFavoritesSyncBody> {
+): Parsed<SourceFavoritesSyncChunkBody> {
   if (!isRecord(body)) {
     return { ok: false, fields: { body: 'Ожидается объект' } }
   }
   const fields: FieldErrors = {}
+  const syncId = asSyncId(body.syncId)
+  if (!syncId) {
+    fields.syncId = 'Нужен syncId'
+  }
   if (!Array.isArray(body.snapshots)) {
     fields.snapshots = 'Ожидается массив'
-  }
-  const seenAt =
-    typeof body.seenAt === 'string' && body.seenAt.trim() && !Number.isNaN(Date.parse(body.seenAt))
-      ? body.seenAt.trim()
-      : null
-  if (!seenAt) {
-    fields.seenAt = 'Нужен ISO timestamp'
-  }
-  if (typeof body.finalize !== 'boolean') {
-    fields.finalize = 'Ожидается boolean'
   }
   if (Object.keys(fields).length > 0) {
     return { ok: false, fields }
@@ -48,11 +56,23 @@ export function validateSourceFavoritesSyncBody(
   return {
     ok: true,
     value: {
+      syncId: syncId!,
       snapshots,
-      seenAt: seenAt!,
-      finalize: body.finalize as boolean,
     },
   }
+}
+
+export function validateSourceFavoritesSyncCompleteBody(
+  body: unknown,
+): Parsed<SourceFavoritesSyncCompleteBody> {
+  if (!isRecord(body)) {
+    return { ok: false, fields: { body: 'Ожидается объект' } }
+  }
+  const syncId = asSyncId(body.syncId)
+  if (!syncId) {
+    return { ok: false, fields: { syncId: 'Нужен syncId' } }
+  }
+  return { ok: true, value: { syncId } }
 }
 
 export const SOURCE_FAVORITES_MAX_BATCH = MAX_BATCH
