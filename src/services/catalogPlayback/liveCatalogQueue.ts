@@ -1,6 +1,6 @@
 import type { CanonicalLibraryItem } from '../../types/canonical.ts'
 import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
-import { isInMyMusic } from '../canonical/selectors.ts'
+import { hasSourceFavorite, isInMyMusic } from '../canonical/selectors.ts'
 import type { CatalogQueueEntry } from './buildCatalogPlaybackQueue.ts'
 
 const VIRTUAL_FAVORITES_ID = 'sys_favorites'
@@ -44,7 +44,7 @@ function itemStillInFolder(
   item: CanonicalLibraryItem,
 ): boolean {
   if (catalogId === VIRTUAL_FAVORITES_ID) {
-    return item.state.liked
+    return hasSourceFavorite(item)
   }
   if (catalogId === VIRTUAL_MY_MUSIC_ID) {
     return isInMyMusic(item)

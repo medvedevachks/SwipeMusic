@@ -34,6 +34,7 @@ import {
   resolveYandexSearchExhausted,
 } from './yandexSearchPaging.ts'
 import { pushYandexDevLog } from './devLog'
+import { syncSourceFavorites } from '../../../services/sourceFavorites'
 import { mapYandexTrackToTrack } from './mapTrack'
 import { buildYandexPlaybackCandidates } from './playbackCandidates'
 import { probeYandexTrackAvailability } from './trackAvailability'
@@ -474,17 +475,78 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
       message: 'syncLibrary started',
     })
 
-    const liked = await this.api.getLikedTracks(this.syncMeta.uid, signal)
-    const likedTracks = liked.map((item) =>
-      mapYandexTrackToTrack(item, ['favorite']),
-    )
+    // Refs сначала: подтверждённый полный список (в т.ч. пустой) без гидратации всех треков.
+    let likedRefs: string[] = []
+    let likedRefsComplete = false
+    try {
+      likedRefs = await this.api.getLikedTrackRefs(this.syncMeta.uid, signal)
+      likedRefsComplete = true
+    } catch (error) {
+      pushYandexDevLog({
+        stage: 'error',
+        message: 'liked refs failed',
+        detail: error instanceof Error ? error.message : String(error),
+      })
+    }
+
+    const byId = new Map<string, Track>()
+
+    // FAV-01F/G: потоковая запись зеркала; prune только после listComplete + полной гидратации.
+    try {
+      const favoritesSync = await syncSourceFavorites({
+        sourceId: SOURCE_ID,
+        signal,
+        source: {
+          listComplete: likedRefsComplete,
+          batches: (async function* (adapter: YandexMusicAdapter) {
+            if (!likedRefsComplete) {
+              return
+            }
+            for await (const chunk of adapter.api.iterateLikedTracksByRefs(
+              likedRefs,
+              signal,
+            )) {
+              const mapped = chunk.map((item) =>
+                mapYandexTrackToTrack(item, ['favorite']),
+              )
+              for (const track of mapped) {
+                byId.set(track.id, track)
+              }
+              yield mapped
+            }
+          })(this),
+        },
+      })
+      pushYandexDevLog({
+        stage: 'library',
+        message: 'source favorites sync',
+        detail:
+          favoritesSync.status === 'synced'
+            ? `upserted=${favoritesSync.upserted};pruned=${favoritesSync.pruned};sync=${favoritesSync.syncId}`
+            : favoritesSync.status === 'error'
+              ? `error=${favoritesSync.message}`
+              : favoritesSync.reason,
+      })
+    } catch (error) {
+      pushYandexDevLog({
+        stage: 'error',
+        message: 'source favorites sync failed',
+        detail: error instanceof Error ? error.message : String(error),
+      })
+    }
+
+    // Если favorites sync не прошёл, всё равно наполняем MediaIndex потоково.
+    if (likedRefsComplete && byId.size === 0 && likedRefs.length > 0) {
+      for await (const chunk of this.api.iterateTracksByIds(likedRefs, signal)) {
+        for (const item of chunk) {
+          const mapped = mapYandexTrackToTrack(item, ['favorite'])
+          byId.set(mapped.id, mapped)
+        }
+      }
+    }
 
     const playlistsRaw = await this.api.getPlaylists(this.syncMeta.uid, signal)
     const playlistCache: PlaylistCache = []
-    const byId = new Map<string, Track>()
-    for (const track of likedTracks) {
-      byId.set(track.id, track)
-    }
 
     for (const playlist of playlistsRaw.slice(0, 30)) {
       try {

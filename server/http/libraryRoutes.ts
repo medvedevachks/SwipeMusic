@@ -5,6 +5,11 @@ import { createLibraryRepository, type LibraryResult } from '../library/reposito
 import { createCanonicalLibraryRepository } from '../library/canonical/repository.ts'
 import { validateLikedPatch } from '../library/canonical/validation.ts'
 import { createIdentityRepository } from '../library/identity/repository.ts'
+import { createSourceFavoritesRepository } from '../library/sourceFavorites/repository.ts'
+import {
+  validateSourceFavoritesSyncChunkBody,
+  validateSourceFavoritesSyncCompleteBody,
+} from '../library/sourceFavorites/validation.ts'
 import {
   validateLinkBody,
   validateSourceSnapshot,
@@ -62,6 +67,7 @@ export async function handleLibraryRequest(
   const library = createLibraryRepository(context.db)
   const identity = createIdentityRepository(context.db)
   const canonicalLibrary = createCanonicalLibraryRepository(context.db)
+  const sourceFavorites = createSourceFavoritesRepository(context.db)
   const limit = parseHistoryLimit(url.searchParams.get('limit'))
 
   if (method === 'GET' && path === '/api/me/library-state') {
@@ -319,6 +325,74 @@ export async function handleLibraryRequest(
 
   if (method === 'GET' && path === '/api/me/canonical-library') {
     sendJson(res, 200, { items: canonicalLibrary.list(userId) })
+    return
+  }
+
+  const sourceFavoritesStartMatch = path.match(
+    /^\/api\/me\/sources\/([^/]+)\/favorites\/sync\/start$/,
+  )
+  if (sourceFavoritesStartMatch && method === 'POST') {
+    const sourceId = safeDecode(sourceFavoritesStartMatch[1])
+    if (!sourceId || sourceId.length > 64) {
+      sendJson(res, 404, { error: 'NOT_FOUND' })
+      return
+    }
+    const started = sourceFavorites.start(userId, sourceId)
+    if (!started.ok) {
+      sendFailure(res, started)
+      return
+    }
+    sendJson(res, 200, started.value)
+    return
+  }
+
+  const sourceFavoritesCompleteMatch = path.match(
+    /^\/api\/me\/sources\/([^/]+)\/favorites\/sync\/complete$/,
+  )
+  if (sourceFavoritesCompleteMatch && method === 'POST') {
+    const sourceId = safeDecode(sourceFavoritesCompleteMatch[1])
+    if (!sourceId || sourceId.length > 64) {
+      sendJson(res, 404, { error: 'NOT_FOUND' })
+      return
+    }
+    const body = await readBody(req, res)
+    if (body === undefined) return
+    const parsed = validateSourceFavoritesSyncCompleteBody(body)
+    if (!parsed.ok) {
+      sendJson(res, 400, { error: 'VALIDATION', fields: parsed.fields })
+      return
+    }
+    const completed = sourceFavorites.complete(userId, sourceId, parsed.value.syncId)
+    if (!completed.ok) {
+      sendFailure(res, completed)
+      return
+    }
+    sendJson(res, 200, completed.value)
+    return
+  }
+
+  const sourceFavoritesSyncMatch = path.match(
+    /^\/api\/me\/sources\/([^/]+)\/favorites\/sync$/,
+  )
+  if (sourceFavoritesSyncMatch && method === 'POST') {
+    const sourceId = safeDecode(sourceFavoritesSyncMatch[1])
+    if (!sourceId || sourceId.length > 64) {
+      sendJson(res, 404, { error: 'NOT_FOUND' })
+      return
+    }
+    const body = await readBody(req, res)
+    if (body === undefined) return
+    const parsed = validateSourceFavoritesSyncChunkBody(body)
+    if (!parsed.ok) {
+      sendJson(res, 400, { error: 'VALIDATION', fields: parsed.fields })
+      return
+    }
+    const synced = sourceFavorites.upsertChunk(userId, sourceId, parsed.value)
+    if (!synced.ok) {
+      sendFailure(res, synced)
+      return
+    }
+    sendJson(res, 200, synced.value)
     return
   }
 

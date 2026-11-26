@@ -306,6 +306,17 @@ export function createCanonicalLibraryRepository(db: DatabaseSync) {
   const categoryById = db.prepare(`
     SELECT id FROM user_categories WHERE user_id = ? AND id = ?
   `)
+  const sourceFavoritesOf = db.prepare(`
+    SELECT DISTINCT source_id
+    FROM user_source_favorites
+    WHERE user_id = ? AND canonical_track_id = ?
+    ORDER BY source_id ASC
+  `)
+  const retargetSourceFavorites = db.prepare(`
+    UPDATE user_source_favorites
+    SET canonical_track_id = ?
+    WHERE user_id = ? AND canonical_track_id = ?
+  `)
 
   function writeState(userId: string, canonicalId: string, state: CanonicalUserState, now: string): void {
     const existing = stateByCanonical.get(userId, canonicalId) as StateRow | undefined
@@ -341,11 +352,15 @@ export function createCanonicalLibraryRepository(db: DatabaseSync) {
     const catalogIds = (membershipsOf.all(userId, canonicalId) as MembershipRow[]).map(
       (row) => row.catalog_id,
     )
+    const sourceFavoriteSourceIds = (
+      sourceFavoritesOf.all(userId, canonicalId) as Array<{ source_id: string }>
+    ).map((row) => row.source_id)
     return {
       canonicalTrack: toCanonical(canonical),
       copies,
       state: { ...state, customMetadata: stripCanonicalMetadata(state.customMetadata) },
       catalogIds,
+      sourceFavoriteSourceIds,
     }
   }
 
@@ -547,6 +562,7 @@ export function createCanonicalLibraryRepository(db: DatabaseSync) {
         insertMembership.run(userId, row.catalog_id, targetId, row.created_at)
       }
       deleteMemberships.run(userId, sourceId)
+      retargetSourceFavorites.run(targetId, userId, sourceId)
     },
 
     /**

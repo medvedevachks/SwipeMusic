@@ -5,8 +5,8 @@ import { PlayIcon } from '../components/icons'
 import { getCategoryGlyph } from '../config/categoryPresets'
 import {
   canonicalTracksInCatalog,
+  externalFavoriteCanonicalItems,
   formatSourceCopyCount,
-  likedCanonicalItems,
   listCanonicalItems,
   myMusicCanonicalItems,
   preferredTrackFromCanonical,
@@ -57,7 +57,7 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
       case 'swipes':
         return canonicalTracksInCatalog(items, SYS_SWIPES_ID)
       case 'favorites':
-        return likedCanonicalItems(items)
+        return externalFavoriteCanonicalItems(items)
       case 'my-music':
         return myMusicCanonicalItems(items)
       default: {
@@ -362,7 +362,7 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
                 <span className="min-w-0 flex-1 overflow-hidden">
                   <span className="block truncate text-sm font-medium text-[var(--color-fg)]">
                     {item.canonicalTrack.title}
-                    {item.state.liked ? ' · лайк' : ''}
+                    {folderId !== 'favorites' && item.state.liked ? ' · лайк' : ''}
                   </span>
                   <span className="block truncate text-xs text-[var(--color-muted)]">
                     {item.canonicalTrack.artist}
@@ -371,12 +371,15 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
                     <span className="rounded-full bg-[var(--color-accent)]/10 px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--color-accent)]">
                       {formatSourceCopyCount(item.copies.length)}
                     </span>
-                    {item.copies.map((copy) => (
+                    {(folderId === 'favorites'
+                      ? item.sourceFavoriteSourceIds
+                      : item.copies.map((copy) => copy.sourceId)
+                    ).map((sourceId) => (
                       <span
-                        key={copy.sourceTrackKey}
+                        key={`${item.canonicalTrack.id}:${sourceId}`}
                         className="rounded-full border border-[var(--color-border)] px-2 py-0.5 text-[10px] text-[var(--color-muted)]"
                       >
-                        {getSourceDisplayName(copy.sourceId)}
+                        {getSourceDisplayName(sourceId)}
                       </span>
                     ))}
                   </span>

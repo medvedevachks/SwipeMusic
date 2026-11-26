@@ -24,6 +24,11 @@ export type CanonicalLibraryItem = {
   copies: SourceCopyDto[]
   state: CanonicalUserState
   catalogIds: string[]
+  /**
+   * Источники, в чьём внешнем избранном есть эта композиция.
+   * Не связано с state.liked Swipe Music.
+   */
+  sourceFavoriteSourceIds: string[]
 }
 
 export type CanonicalMembership = {

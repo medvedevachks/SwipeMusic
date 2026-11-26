@@ -12,6 +12,7 @@ import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore.ts'
 import { filterQueueToLiveCatalogMembership } from '../catalogPlayback/liveCatalogQueue.ts'
 import type { CatalogQueueEntry } from '../catalogPlayback/buildCatalogPlaybackQueue.ts'
 import {
+  externalFavoriteCanonicalItems,
   isInMyMusic,
   likedCanonicalItems,
   myMusicCanonicalItems,
@@ -26,6 +27,7 @@ function item(input: {
   catalogIds?: string[]
   copies?: number
   title?: string
+  sourceFavoriteSourceIds?: string[]
 }): CanonicalLibraryItem {
   const copies = Array.from({ length: input.copies ?? 1 }, (_, index) => {
     const externalId = `${input.id}-${index}`
@@ -69,6 +71,7 @@ function item(input: {
       customMetadata: {},
     },
     catalogIds: input.catalogIds ?? [],
+    sourceFavoriteSourceIds: input.sourceFavoriteSourceIds ?? [],
   }
 }
 
@@ -196,19 +199,44 @@ test('multiple SourceCopies stay one composition in my-music', () => {
   assert.equal(myMusicCanonicalItems([row])[0]?.copies.length, 3)
 })
 
-test('favorites and swipes selectors are unchanged', () => {
+test('local likes stay in my-music; favorites folder uses external mirror', () => {
   const orphan = item({ id: 'o' })
   const liked = item({ id: 'l', liked: true, catalogIds: [SYS_SWIPES_ID] })
   const catalogOnly = item({ id: 'c', catalogIds: ['cat_car'] })
-  const all = [orphan, liked, catalogOnly]
+  const externalOnly = item({
+    id: 'e',
+    sourceFavoriteSourceIds: ['yandex-music'],
+  })
+  const all = [orphan, liked, catalogOnly, externalOnly]
   assert.deepEqual(
     likedCanonicalItems(all).map((row) => row.canonicalTrack.id),
     ['l'],
   )
   assert.deepEqual(
+    externalFavoriteCanonicalItems(all).map((row) => row.canonicalTrack.id),
+    ['e'],
+  )
+  assert.deepEqual(
     myMusicCanonicalItems(all).map((row) => row.canonicalTrack.id).sort(),
     ['c', 'l'],
   )
+  assert.equal(isInMyMusic(externalOnly), false)
+})
+
+test('LibraryFolder favorites uses externalFavoriteCanonicalItems', () => {
+  const folder = readFileSync(join(here, '../../pages/LibraryFolder.tsx'), 'utf8')
+  const list = readFileSync(
+    join(here, '../../components/catalog/CanonicalOrganizedList.tsx'),
+    'utf8',
+  )
+  const folders = readFileSync(
+    join(here, '../../components/catalog/LibrarySystemFolders.tsx'),
+    'utf8',
+  )
+  assert.match(folder, /externalFavoriteCanonicalItems/)
+  assert.match(list, /externalFavoriteCanonicalItems/)
+  assert.match(folders, /externalFavoriteCanonicalItems/)
+  assert.equal(folder.includes('likedCanonicalItems'), false)
 })
 
 test('reload/hydrate: my-music uses same predicate on replaced store items', () => {

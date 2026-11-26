@@ -22,9 +22,25 @@ export function likedCanonicalItems(
   return items.filter((item) => item.state.liked).sort(byTitle)
 }
 
+/** Есть ли зеркало внешнего избранного хотя бы у одного источника. */
+export function hasSourceFavorite(item: CanonicalLibraryItem): boolean {
+  return (item.sourceFavoriteSourceIds?.length ?? 0) > 0
+}
+
+/**
+ * «Избранное» = зеркало внешнего избранного подключённых источников.
+ * Не использует state.liked Swipe Music.
+ */
+export function externalFavoriteCanonicalItems(
+  items: readonly CanonicalLibraryItem[],
+): CanonicalLibraryItem[] {
+  return items.filter(hasSourceFavorite).sort(byTitle)
+}
+
 /**
  * «Моя музыка» (вариант A): осознанное сохранение =
  * liked или membership в пользовательском каталоге (не sys_swipes).
+ * Внешнее избранное само по себе сюда не попадает.
  * Техническая canonical identity без этих признаков не входит.
  */
 export function isInMyMusic(item: CanonicalLibraryItem): boolean {

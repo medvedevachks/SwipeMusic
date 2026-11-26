@@ -192,6 +192,41 @@ CREATE TABLE IF NOT EXISTS user_catalog_canonical_tracks (
 CREATE INDEX IF NOT EXISTS idx_user_catalog_canonical_track
   ON user_catalog_canonical_tracks (user_id, canonical_track_id);
 
+-- FAV-01: зеркало внешнего избранного источника (не state.liked Swipe Music).
+CREATE TABLE IF NOT EXISTS user_source_favorites (
+  user_id TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  source_track_key TEXT NOT NULL,
+  canonical_track_id TEXT NOT NULL,
+  imported_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  sync_id TEXT,
+  PRIMARY KEY (user_id, source_id, external_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id, source_track_key) REFERENCES user_track_source_copies (user_id, source_track_key),
+  FOREIGN KEY (user_id, canonical_track_id) REFERENCES user_canonical_tracks (user_id, id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_source_favorites_canonical
+  ON user_source_favorites (user_id, canonical_track_id);
+CREATE INDEX IF NOT EXISTS idx_user_source_favorites_seen
+  ON user_source_favorites (user_id, source_id, last_seen_at);
+CREATE INDEX IF NOT EXISTS idx_user_source_favorites_sync
+  ON user_source_favorites (user_id, source_id, sync_id);
+
+-- FAV-01F: серверно контролируемый прогон синхронизации (prune только для активного syncId).
+CREATE TABLE IF NOT EXISTS user_source_favorite_syncs (
+  user_id TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  sync_id TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  status TEXT NOT NULL,
+  PRIMARY KEY (user_id, source_id, sync_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_user_source_favorite_syncs_open
+  ON user_source_favorite_syncs (user_id, source_id, status);
+
 CREATE TABLE IF NOT EXISTS user_data_migrations (
   user_id TEXT NOT NULL,
   migration_key TEXT NOT NULL,
@@ -254,6 +289,14 @@ CREATE TABLE IF NOT EXISTS user_playback_stats (
 );
 `
 
+function ensureColumn(db: DatabaseSync, table: string, column: string, ddl: string): void {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+  if (rows.some((row) => row.name === column)) {
+    return
+  }
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`)
+}
+
 export function openDatabase(databasePath: string): DatabaseSync {
   if (databasePath !== ':memory:') {
     mkdirSync(dirname(databasePath), { recursive: true })
@@ -262,5 +305,7 @@ export function openDatabase(databasePath: string): DatabaseSync {
   const db = new DatabaseSync(databasePath)
   db.exec('PRAGMA foreign_keys = ON')
   db.exec(SCHEMA)
+  // FAV-01 → FAV-01F: sync_id на уже созданной таблице favorites.
+  ensureColumn(db, 'user_source_favorites', 'sync_id', 'sync_id TEXT')
   return db
 }
