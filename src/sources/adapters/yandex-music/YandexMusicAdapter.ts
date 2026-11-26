@@ -491,7 +491,7 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
 
     const byId = new Map<string, Track>()
 
-    // FAV-01F: потоковая запись зеркала; prune только после listComplete + серверного syncId.
+    // FAV-01F/G: потоковая запись зеркала; prune только после listComplete + полной гидратации.
     try {
       const favoritesSync = await syncSourceFavorites({
         sourceId: SOURCE_ID,
@@ -502,7 +502,7 @@ export class YandexMusicAdapter implements MusicSourceAdapter {
             if (!likedRefsComplete) {
               return
             }
-            for await (const chunk of adapter.api.iterateTracksByIds(
+            for await (const chunk of adapter.api.iterateLikedTracksByRefs(
               likedRefs,
               signal,
             )) {

@@ -40,9 +40,13 @@ test('Yandex syncLibrary streams liked refs without full pre-buffer', () => {
   )
   assert.match(adapter, /getLikedTrackRefs/)
   assert.match(adapter, /listComplete: likedRefsComplete/)
-  assert.match(adapter, /iterateTracksByIds/)
-  assert.match(api, /async \*iterateTracksByIds/)
-  assert.match(api, /getLikedTrackRefs/)
+  assert.match(adapter, /iterateLikedTracksByRefs/)
+  assert.match(api, /async \*iterateLikedTracksByRefs/)
+  assert.match(api, /parseLikedTrackRefsPayload/)
+  assert.match(api, /resolveHydratedTracksForBatch/)
+  assert.match(api, /INVALID_LIKES_PAYLOAD/)
+  assert.match(api, /INCOMPLETE_HYDRATION/)
+  assert.equal(api.includes('result.library?.tracks ??'), false)
 })
 
 test('API routes encode start/chunk/complete syncId flow', () => {
@@ -164,6 +168,73 @@ test('incomplete list does not start sync or prune', async () => {
     assert.deepEqual(calls, [])
   } finally {
     libraryClient.startSourceFavoritesSync = prevStart
+    resetAuthSessionEpochForTests()
+  }
+})
+
+test('hydration failure mid-stream aborts before complete/prune', async () => {
+  resetAuthSessionEpochForTests()
+  bindAuthSessionEpoch('user-a')
+  const calls: string[] = []
+  const { libraryClient } = await import('../libraryPersistence/client.ts')
+  const prevStart = libraryClient.startSourceFavoritesSync
+  const prevUpsert = libraryClient.upsertSourceFavoritesChunk
+  const prevComplete = libraryClient.completeSourceFavoritesSync
+  const prevLoad = libraryClient.loadCanonicalLibrary
+
+  libraryClient.startSourceFavoritesSync = async () => {
+    calls.push('start')
+    return {
+      sourceId: 'yandex-music',
+      syncId: 'sync_hyd',
+      startedAt: '2026-11-26T00:00:00.000Z',
+    }
+  }
+  libraryClient.upsertSourceFavoritesChunk = async () => {
+    calls.push('upsert')
+    return { sourceId: 'yandex-music', syncId: 'sync_hyd', upserted: 1 }
+  }
+  libraryClient.completeSourceFavoritesSync = async () => {
+    calls.push('complete')
+    return { sourceId: 'yandex-music', syncId: 'sync_hyd', pruned: 9 }
+  }
+  libraryClient.loadCanonicalLibrary = async () => {
+    calls.push('load')
+    return { items: [] }
+  }
+
+  try {
+    const result = await syncSourceFavorites({
+      sourceId: 'yandex-music',
+      source: {
+        listComplete: true,
+        batches: (async function* () {
+          yield [
+            {
+              id: 'yandex-music:1',
+              sourceId: 'yandex-music',
+              externalId: '1',
+              title: 'Ok',
+              artist: 'A',
+            },
+          ]
+          throw new Error('Liked tracks hydration incomplete: empty-response')
+        })(),
+      },
+    })
+    assert.equal(result.status, 'error')
+    if (result.status === 'error') {
+      assert.match(result.message, /hydration incomplete/)
+    }
+    assert.ok(calls.includes('start'))
+    assert.ok(calls.includes('upsert'))
+    assert.equal(calls.includes('complete'), false)
+    assert.equal(calls.includes('load'), false)
+  } finally {
+    libraryClient.startSourceFavoritesSync = prevStart
+    libraryClient.upsertSourceFavoritesChunk = prevUpsert
+    libraryClient.completeSourceFavoritesSync = prevComplete
+    libraryClient.loadCanonicalLibrary = prevLoad
     resetAuthSessionEpochForTests()
   }
 })

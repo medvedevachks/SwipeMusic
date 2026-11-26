@@ -1,5 +1,9 @@
 import { md5Hex } from './md5.ts'
 import { pushYandexDevLog } from './devLog.ts'
+import {
+  parseLikedTrackRefsPayload,
+  resolveHydratedTracksForBatch,
+} from './likedTracksParse.ts'
 import { yandexMusicRequestHeaders } from './requestHeaders.ts'
 import type {
   YandexAccountStatus,
@@ -158,7 +162,10 @@ export class YandexMusicApiClient {
     )
   }
 
-  /** Только refs избранного — без гидратации полных треков. */
+  /**
+   * Только refs избранного — без гидратации полных треков.
+   * Битая схема ответа (нет library/tracks) → ошибка, не пустой список.
+   */
   async getLikedTrackRefs(
     userId: number | string,
     signal?: AbortSignal,
@@ -168,16 +175,19 @@ export class YandexMusicApiClient {
       message: 'GET likes/tracks refs',
       detail: `uid=${userId}`,
     })
-    const result = await this.getJson<{
-      library?: { tracks?: Array<{ id: string | number; albumId?: string }> }
-    }>(`/users/${userId}/likes/tracks`, signal)
-
-    const refs = result.library?.tracks ?? []
-    return refs.map((item) =>
-      item.albumId != null && String(item.albumId).length > 0
-        ? `${item.id}:${item.albumId}`
-        : String(item.id),
+    const result = await this.getJson<unknown>(
+      `/users/${userId}/likes/tracks`,
+      signal,
     )
+    const parsed = parseLikedTrackRefsPayload(result)
+    if (!parsed.ok) {
+      throw new YandexApiError(
+        `Liked track refs invalid: ${parsed.reason}`,
+        502,
+        'INVALID_LIKES_PAYLOAD',
+      )
+    }
+    return parsed.refs
   }
 
   async getLikedTracks(
@@ -193,7 +203,7 @@ export class YandexMusicApiClient {
 
   /**
    * Пакетная гидратация треков без накопления всего массива у вызывающего.
-   * Вызывающий может писать каждый chunk и отпускать ссылку.
+   * Невалидный/пустой ответ батча → [] (для MediaIndex и прочих best-effort путей).
    */
   async *iterateTracksByIds(
     ids: readonly string[],
@@ -217,6 +227,43 @@ export class YandexMusicApiClient {
         signal,
       )
       yield Array.isArray(result) ? result : []
+    }
+  }
+
+  /**
+   * Строгая гидратация для зеркала избранного: incomplete batch прерывает sync
+   * (без complete/prune). Unavailable id закрываются stub-треком.
+   */
+  async *iterateLikedTracksByRefs(
+    ids: readonly string[],
+    signal?: AbortSignal,
+    chunkSize = 50,
+  ): AsyncGenerator<YandexTrack[], void, void> {
+    const list = ids.map((item) => item.trim()).filter(Boolean)
+    for (let offset = 0; offset < list.length; offset += chunkSize) {
+      if (signal?.aborted) {
+        const error = new Error('Aborted')
+        error.name = 'AbortError'
+        throw error
+      }
+      const chunk = list.slice(offset, offset + chunkSize)
+      const params = new URLSearchParams({
+        'track-ids': chunk.join(','),
+        'with-positions': 'true',
+      })
+      const result = await this.getJson<unknown>(
+        `/tracks?${params.toString()}`,
+        signal,
+      )
+      const resolved = resolveHydratedTracksForBatch(chunk, result)
+      if (!resolved.ok) {
+        throw new YandexApiError(
+          `Liked tracks hydration incomplete: ${resolved.reason}`,
+          502,
+          'INCOMPLETE_HYDRATION',
+        )
+      }
+      yield resolved.tracks
     }
   }
 
