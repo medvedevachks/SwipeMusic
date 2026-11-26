@@ -119,14 +119,21 @@ export class SpotifyAdapter implements MusicSourceAdapter {
     }
 
     try {
+      const limit = params?.limit ?? 20
+      const offset = params?.cursor
+        ? Number.parseInt(params.cursor, 10) || 0
+        : 0
       const page = await this.api.searchTracks(normalized, {
-        limit: params?.limit ?? 20,
+        limit,
+        offset: Number.isFinite(offset) && offset > 0 ? offset : 0,
         signal: params?.signal,
       })
       this.appOwnerPremiumBlocked = false
+      const nextOffset = page.offset + page.limit
       return {
         tracks: page.items.map((item) => mapSpotifyTrackToTrack(item)),
-        nextCursor: page.next ? String(page.offset + page.limit) : null,
+        // Spotify paging.next === null на последней странице.
+        nextCursor: page.next ? String(nextOffset) : null,
       }
     } catch (error) {
       if (isAppOwnerPremiumRequiredError(error)) {

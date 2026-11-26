@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { getCategoryGlyph } from '../../config/categoryPresets'
 import {
   canonicalCatalogCount,
-  likedCanonicalItems,
+  externalFavoriteCanonicalItems,
   listCanonicalItems,
   myMusicCanonicalItems,
 } from '../../services/canonical/selectors'
@@ -22,7 +22,7 @@ function countForFolder(
     case 'swipes':
       return canonicalCatalogCount(items, SYS_SWIPES_ID)
     case 'favorites':
-      return likedCanonicalItems(items).length
+      return externalFavoriteCanonicalItems(items).length
     case 'my-music':
       return myMusicCanonicalItems(items).length
     default: {

@@ -11,6 +11,8 @@ export function createTrack(input: {
   title: string
   artist: string
   album?: string
+  artistExternalId?: string
+  albumExternalId?: string
   genre?: string
   year?: number
   durationMs?: number
@@ -26,6 +28,8 @@ export function createTrack(input: {
     title: input.title,
     artist: input.artist,
     album: input.album,
+    artistExternalId: input.artistExternalId,
+    albumExternalId: input.albumExternalId,
     genre: input.genre,
     year: input.year,
     durationMs: input.durationMs,

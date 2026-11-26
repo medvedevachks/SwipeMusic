@@ -1,8 +1,17 @@
 import { md5Hex } from './md5.ts'
 import { pushYandexDevLog } from './devLog.ts'
+import {
+  parseLikedTrackRefsPayload,
+  resolveHydratedTracksForBatch,
+} from './likedTracksParse.ts'
 import { yandexMusicRequestHeaders } from './requestHeaders.ts'
 import type {
   YandexAccountStatus,
+  YandexAlbumWithTracks,
+  YandexArtistAlbumsPage,
+  YandexArtistBrief,
+  YandexArtistHit,
+  YandexArtistTracksPage,
   YandexDownloadInfo,
   YandexPlaylistShort,
   YandexSearchResponse,
@@ -80,29 +89,182 @@ export class YandexMusicApiClient {
     }
   }
 
+  async searchArtists(
+    query: string,
+    options?: { page?: number; signal?: AbortSignal },
+  ): Promise<{ artists: YandexArtistHit[]; total: number }> {
+    const params = new URLSearchParams({
+      text: query,
+      type: 'artist',
+      page: String(options?.page ?? 0),
+      nocorrect: 'false',
+    })
+    pushYandexDevLog({
+      stage: 'request',
+      message: 'GET /search?type=artist',
+      detail: `q=${query};page=${options?.page ?? 0}`,
+    })
+    const result = await this.getJson<YandexSearchResponse>(
+      `/search?${params.toString()}`,
+      options?.signal,
+      { logHttp: true },
+    )
+    const artists = result.artists?.results ?? []
+    return {
+      artists,
+      total: result.artists?.total ?? artists.length,
+    }
+  }
+
+  async getArtistBrief(
+    artistId: string,
+    signal?: AbortSignal,
+  ): Promise<YandexArtistBrief> {
+    return this.getJson<YandexArtistBrief>(
+      `/artists/${encodeURIComponent(artistId)}/brief-info`,
+      signal,
+    )
+  }
+
+  async getArtistTracksPage(
+    artistId: string,
+    options?: { page?: number; signal?: AbortSignal },
+  ): Promise<YandexArtistTracksPage> {
+    const params = new URLSearchParams({
+      page: String(options?.page ?? 0),
+    })
+    return this.getJson<YandexArtistTracksPage>(
+      `/artists/${encodeURIComponent(artistId)}/tracks?${params.toString()}`,
+      options?.signal,
+    )
+  }
+
+  async getArtistDirectAlbumsPage(
+    artistId: string,
+    options?: { page?: number; signal?: AbortSignal },
+  ): Promise<YandexArtistAlbumsPage> {
+    const params = new URLSearchParams({
+      page: String(options?.page ?? 0),
+    })
+    return this.getJson<YandexArtistAlbumsPage>(
+      `/artists/${encodeURIComponent(artistId)}/direct-albums?${params.toString()}`,
+      options?.signal,
+    )
+  }
+
+  async getAlbumWithTracks(
+    albumId: string,
+    signal?: AbortSignal,
+  ): Promise<YandexAlbumWithTracks> {
+    return this.getJson<YandexAlbumWithTracks>(
+      `/albums/${encodeURIComponent(albumId)}/with-tracks`,
+      signal,
+    )
+  }
+
+  /**
+   * Только refs избранного — без гидратации полных треков.
+   * Битая схема ответа (нет library/tracks) → ошибка, не пустой список.
+   */
+  async getLikedTrackRefs(
+    userId: number | string,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    pushYandexDevLog({
+      stage: 'library',
+      message: 'GET likes/tracks refs',
+      detail: `uid=${userId}`,
+    })
+    const result = await this.getJson<unknown>(
+      `/users/${userId}/likes/tracks`,
+      signal,
+    )
+    const parsed = parseLikedTrackRefsPayload(result)
+    if (!parsed.ok) {
+      throw new YandexApiError(
+        `Liked track refs invalid: ${parsed.reason}`,
+        502,
+        'INVALID_LIKES_PAYLOAD',
+      )
+    }
+    return parsed.refs
+  }
+
   async getLikedTracks(
     userId: number | string,
     signal?: AbortSignal,
   ): Promise<YandexTrack[]> {
-    pushYandexDevLog({
-      stage: 'library',
-      message: 'GET likes/tracks',
-      detail: `uid=${userId}`,
-    })
-    const result = await this.getJson<{
-      library?: { tracks?: Array<{ id: string | number; albumId?: string }> }
-    }>(`/users/${userId}/likes/tracks`, signal)
-
-    const refs = result.library?.tracks ?? []
-    if (refs.length === 0) {
+    const ids = await this.getLikedTrackRefs(userId, signal)
+    if (ids.length === 0) {
       return []
     }
-    const ids = refs.map((item) =>
-      item.albumId != null && String(item.albumId).length > 0
-        ? `${item.id}:${item.albumId}`
-        : String(item.id),
-    )
     return this.getTracksByIds(ids, signal)
+  }
+
+  /**
+   * Пакетная гидратация треков без накопления всего массива у вызывающего.
+   * Невалидный/пустой ответ батча → [] (для MediaIndex и прочих best-effort путей).
+   */
+  async *iterateTracksByIds(
+    ids: readonly string[],
+    signal?: AbortSignal,
+    chunkSize = 50,
+  ): AsyncGenerator<YandexTrack[], void, void> {
+    const list = ids.map((item) => item.trim()).filter(Boolean)
+    for (let offset = 0; offset < list.length; offset += chunkSize) {
+      if (signal?.aborted) {
+        const error = new Error('Aborted')
+        error.name = 'AbortError'
+        throw error
+      }
+      const chunk = list.slice(offset, offset + chunkSize)
+      const params = new URLSearchParams({
+        'track-ids': chunk.join(','),
+        'with-positions': 'true',
+      })
+      const result = await this.getJson<YandexTrack[]>(
+        `/tracks?${params.toString()}`,
+        signal,
+      )
+      yield Array.isArray(result) ? result : []
+    }
+  }
+
+  /**
+   * Строгая гидратация для зеркала избранного: incomplete batch прерывает sync
+   * (без complete/prune). Unavailable id закрываются stub-треком.
+   */
+  async *iterateLikedTracksByRefs(
+    ids: readonly string[],
+    signal?: AbortSignal,
+    chunkSize = 50,
+  ): AsyncGenerator<YandexTrack[], void, void> {
+    const list = ids.map((item) => item.trim()).filter(Boolean)
+    for (let offset = 0; offset < list.length; offset += chunkSize) {
+      if (signal?.aborted) {
+        const error = new Error('Aborted')
+        error.name = 'AbortError'
+        throw error
+      }
+      const chunk = list.slice(offset, offset + chunkSize)
+      const params = new URLSearchParams({
+        'track-ids': chunk.join(','),
+        'with-positions': 'true',
+      })
+      const result = await this.getJson<unknown>(
+        `/tracks?${params.toString()}`,
+        signal,
+      )
+      const resolved = resolveHydratedTracksForBatch(chunk, result)
+      if (!resolved.ok) {
+        throw new YandexApiError(
+          `Liked tracks hydration incomplete: ${resolved.reason}`,
+          502,
+          'INCOMPLETE_HYDRATION',
+        )
+      }
+      yield resolved.tracks
+    }
   }
 
   async getTracksByIds(
@@ -116,21 +278,9 @@ export class YandexMusicApiClient {
       return []
     }
 
-    const chunkSize = 50
     const tracks: YandexTrack[] = []
-    for (let offset = 0; offset < list.length; offset += chunkSize) {
-      const chunk = list.slice(offset, offset + chunkSize)
-      const params = new URLSearchParams({
-        'track-ids': chunk.join(','),
-        'with-positions': 'true',
-      })
-      const result = await this.getJson<YandexTrack[]>(
-        `/tracks?${params.toString()}`,
-        signal,
-      )
-      if (Array.isArray(result)) {
-        tracks.push(...result)
-      }
+    for await (const chunk of this.iterateTracksByIds(list, signal)) {
+      tracks.push(...chunk)
     }
     return tracks
   }

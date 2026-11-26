@@ -616,8 +616,9 @@ test('LIKE сохраняет трек, возвращает карточку и
   const library = (await server.ssrLoadModule(
     '/src/library/providers/SmartLibraryProvider.ts',
   )) as { SmartLibraryProvider: new () => { getTracks: (id: string) => Promise<Array<{ id: string }>> } }
+  // FAV-01: локальный like остаётся в liked/my-music, не в зеркале внешнего избранного.
   const favorites = await new library.SmartLibraryProvider().getTracks('favorites')
-  assert.equal(favorites.some((item) => item.id === 'yandex-music:101'), true)
+  assert.equal(favorites.some((item) => item.id === 'yandex-music:101'), false)
 })
 
 test('сердце улетает только после успешного ответа', { timeout: 20_000 }, async () => {

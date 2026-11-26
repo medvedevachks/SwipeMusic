@@ -27,6 +27,10 @@ export function mapYandexTrackToTrack(
     track.artists?.map((item) => item.name).filter(Boolean).join(', ') ||
     'Unknown Artist'
   const album = track.albums?.[0]
+  const firstArtist = track.artists?.find((item) => item.id != null)
+  const artistExternalId =
+    firstArtist?.id != null ? String(firstArtist.id) : undefined
+  const albumExternalId = album?.id != null ? String(album.id) : undefined
 
   return createTrack({
     sourceId: SOURCE_ID,
@@ -34,6 +38,8 @@ export function mapYandexTrackToTrack(
     title: track.title?.trim() || 'Unknown Title',
     artist,
     album: album?.title,
+    artistExternalId,
+    albumExternalId,
     year: album?.year,
     durationMs: track.durationMs,
     coverUrl: buildYandexCoverUrl(track.coverUri ?? album?.coverUri),

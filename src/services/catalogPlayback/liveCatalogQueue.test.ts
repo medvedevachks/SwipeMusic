@@ -51,6 +51,7 @@ function item(
       customMetadata: {},
     },
     catalogIds,
+    sourceFavoriteSourceIds: [],
   }
 }
 
@@ -116,6 +117,23 @@ test('sys_my_music live queue keeps liked/user-catalog and drops orphan identity
   assert.deepEqual(
     live.map((row) => row.canonicalTrackId),
     ['can_liked', 'can_catalog'],
+  )
+  useCanonicalLibraryStore.getState().clear()
+})
+
+test('sys_favorites live queue keeps external mirror only', () => {
+  const localLike = item('can_liked', [])
+  const external = item('can_ext', [])
+  external.state = { ...external.state, liked: false }
+  external.sourceFavoriteSourceIds = ['yandex-music']
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [localLike, external])
+  const live = filterQueueToLiveCatalogMembership('sys_favorites', [
+    entry('can_liked'),
+    entry('can_ext'),
+  ])
+  assert.deepEqual(
+    live.map((row) => row.canonicalTrackId),
+    ['can_ext'],
   )
   useCanonicalLibraryStore.getState().clear()
 })

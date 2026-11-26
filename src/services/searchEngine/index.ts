@@ -1,14 +1,48 @@
-export { SearchEngine, getSearchEngine } from './SearchEngine'
+import {
+  SearchEngine,
+  createSearchEngineForTests,
+  getSearchEngine,
+  registerSearchEnginePortsFactory,
+  resetSearchEngineForTests,
+} from './SearchEngine.ts'
+import { createDefaultSearchEnginePorts } from './searchEnginePorts.ts'
+
+registerSearchEnginePortsFactory(createDefaultSearchEnginePorts)
+
+export {
+  SearchEngine,
+  createSearchEngineForTests,
+  getSearchEngine,
+  resetSearchEngineForTests,
+}
+export type { SearchEnginePorts, SearchSourceConfig } from './SearchEngine.ts'
 export {
   beginDevSearchSession,
   clearDevSearchLog,
   getDevSearchLog,
   pushDevSearchLog,
   subscribeDevSearchLog,
-} from './devSearchLog'
-export type { DevSearchLogEntry, DevSearchLogStage } from './devSearchLog'
+} from './devSearchLog.ts'
+export type { DevSearchLogEntry, DevSearchLogStage } from './devSearchLog.ts'
 export {
   mergeAndDedupeSearchResults,
   trackDedupeKey,
   type RankedTrack,
-} from './mergeResults'
+} from './mergeResults.ts'
+export {
+  findPlaybackAvailabilityForSearchTrack,
+  getPlaybackAvailabilitySourceIndex,
+  lookupSearchTrackAvailability,
+  providerWarningsList,
+  reconcileProviderWarningsBySource,
+  resetPlaybackAvailabilitySourceIndexForTests,
+  resolveSearchTrackPlayability,
+  resolveSearchTrackPlayabilityFromAvailability,
+  resolveSearchTrackPlayabilityFromIndex,
+  searchPlayabilityLabel,
+  searchTrackSourceKeys,
+} from './searchPlayability.ts'
+export type {
+  ProviderWarningEntry,
+  SearchTrackPlayability,
+} from './searchPlayability.ts'

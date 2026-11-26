@@ -11,10 +11,17 @@ export type SearchEngineState = {
   status: SearchEngineStatus
   results: Track[]
   error: string | null
+  /**
+   * Частичные сбои источников при ненулевой выдаче.
+   * Не блокирует UI — показываются как предупреждение.
+   */
+  providerWarnings: string[]
   activeSourceIds: string[]
   lastSearchTime: number | null
-  /** Заготовка под постраничную загрузку. */
+  /** Есть ли ещё страницы хотя бы у одного провайдера. */
   hasMore: boolean
-  /** Заготовка под кэш: ключ последнего успешного запроса. */
+  /** Идёт подгрузка следующей страницы (результаты уже на экране). */
+  loadingMore: boolean
+  /** Ключ кэша последнего успешного запроса (включая частичную выдачу). */
   cacheKey: string | null
 }

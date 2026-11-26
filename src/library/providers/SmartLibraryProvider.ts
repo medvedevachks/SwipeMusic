@@ -1,4 +1,5 @@
 import { getCollectionEngine } from '../../services/collectionEngine'
+import { externalFavoriteCanonicalItems } from '../../services/canonical/selectors'
 import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore'
 import { useCollectionStore } from '../../store/collectionStore'
 import type { Track } from '../../types/track'
@@ -6,14 +7,17 @@ import type { LibraryNode, LibraryProvider } from '../../types/libraryProvider'
 
 const ROOT_FAVORITES = 'favorites'
 
-function canonicalLikedTracks(): Track[] {
+/** FAV-01: умная коллекция «Избранное» = зеркало внешних source favorites. */
+function favoriteTracks(): Track[] {
   const items = Object.values(useCanonicalLibraryStore.getState().itemsById)
   const tracks: Track[] = []
-  for (const item of items) {
-    if (!item.state.liked) {
-      continue
-    }
+  const seen = new Set<string>()
+  for (const item of externalFavoriteCanonicalItems(items)) {
     for (const copy of item.copies) {
+      if (seen.has(copy.sourceTrackKey)) {
+        continue
+      }
+      seen.add(copy.sourceTrackKey)
       tracks.push({
         id: copy.sourceTrackKey,
         sourceId: copy.sourceId,
@@ -22,23 +26,21 @@ function canonicalLikedTracks(): Track[] {
         artist: copy.artist,
         album: copy.album ?? undefined,
         durationMs: copy.durationMs ?? undefined,
-        coverUrl: copy.artworkUrl,
+        coverUrl: copy.artworkUrl ?? undefined,
       })
     }
   }
-  return tracks
-}
-
-function favoriteTracks(): Track[] {
-  const fromEngine = getCollectionEngine()
+  // Legacy CollectionEngine favorite flag — только если нет canonical зеркала.
+  for (const row of getCollectionEngine()
     .listTracks({ includeHidden: false })
-    .filter((item) => item.favorite || item.liked)
-    .map((item) => item.track)
-  const seen = new Set(fromEngine.map((track) => track.id))
-  return [
-    ...fromEngine,
-    ...canonicalLikedTracks().filter((track) => !seen.has(track.id)),
-  ]
+    .filter((item) => item.favorite)) {
+    if (seen.has(row.track.id)) {
+      continue
+    }
+    seen.add(row.track.id)
+    tracks.push(row.track)
+  }
+  return tracks
 }
 
 const ROOT_RECENT_PLAYED = 'recently-played'

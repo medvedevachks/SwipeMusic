@@ -19,6 +19,7 @@ import { clearContinuousDiscoveryRuntime } from '../recommendation/continuousSes
 import { invalidateContinuousBuffer } from '../recommendation/continuousBuffer.ts'
 import { bindSessionTasteUser } from '../taste/loadSessionTasteProfile.ts'
 import { tasteProfileCache } from '../taste/profileCache.ts'
+import { bindSearchHistoryUser } from '../../store/searchHistoryBind.ts'
 
 const CHANNEL_NAME = 'sm-auth-epoch'
 const AUTH_SYNC_MESSAGE = 'auth-changed'
@@ -58,6 +59,7 @@ function bindPlaybackSessionsSafe(userId: string | null): void {
 export function applyExternalAuthUser(user: AuthUser | null): void {
   tasteProfileCache.invalidate()
   bindSessionTasteUser(user?.id ?? null)
+  bindSearchHistoryUser(user?.id ?? null)
   bindAuthSessionEpoch(user?.id ?? null)
   clearContinuousRuntimeOnAuthChange()
   bindPlaybackSessionsSafe(user?.id ?? null)
