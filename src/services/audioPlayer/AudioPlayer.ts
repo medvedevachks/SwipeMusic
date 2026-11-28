@@ -989,7 +989,11 @@ export class AudioPlayer {
         const { tryDeferCatalogNav } = await import(
           '../catalogPlayback/catalogExpandNavigation.ts'
         )
-        if (tryDeferCatalogNav('next')) {
+        if (
+          tryDeferCatalogNav('next', {
+            getContext: () => getPlaybackQueue().getPlaybackContext(),
+          })
+        ) {
           return
         }
       } catch {
@@ -1044,7 +1048,11 @@ export class AudioPlayer {
         const { tryDeferCatalogNav } = await import(
           '../catalogPlayback/catalogExpandNavigation.ts'
         )
-        if (tryDeferCatalogNav('previous')) {
+        if (
+          tryDeferCatalogNav('previous', {
+            getContext: () => getPlaybackQueue().getPlaybackContext(),
+          })
+        ) {
           return
         }
       } catch {
@@ -1061,7 +1069,9 @@ export class AudioPlayer {
         if (
           isCatalogExpandGateActive() &&
           getPlaybackQueue().getItems().length <= 1 &&
-          tryDeferCatalogNav('previous')
+          tryDeferCatalogNav('previous', {
+            getContext: () => getPlaybackQueue().getPlaybackContext(),
+          })
         ) {
           return
         }
@@ -1136,6 +1146,21 @@ export class AudioPlayer {
     }
     const track = getPlaybackQueue().next({ fromEnded: true })
     if (!track) {
+      // FAV-02: конец частичного соседнего окна — отложить advance, не stop/цикл.
+      try {
+        const { tryDeferCatalogNav } = await import(
+          '../catalogPlayback/catalogExpandNavigation.ts'
+        )
+        if (
+          tryDeferCatalogNav('next', {
+            getContext: () => getPlaybackQueue().getPlaybackContext(),
+          })
+        ) {
+          return
+        }
+      } catch {
+        // optional
+      }
       // PLAYBACK-CME-01: album end → related (same-artist library) или stop.
       const endedContext = before.context
       if (

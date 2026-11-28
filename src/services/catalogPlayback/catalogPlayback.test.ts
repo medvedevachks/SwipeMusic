@@ -1985,6 +1985,10 @@ test('FAV-02: rapid Next during early stub does not loop before expand completes
   queue.clear()
   queue.setRepeatMode('ALL')
   const expands: number[] = []
+  // Early start + соседнее окно readyPerSide=4 вокруг index 3 → n0..n7.
+  const neighborReady = new Set(
+    Array.from({ length: 8 }, (_, index) => `n${index}.mp3`),
+  )
 
   const pending = playUserCatalog(
     {
@@ -2002,8 +2006,7 @@ test('FAV-02: rapid Next during early stub does not loop before expand completes
           supportsStreaming: true,
           isAvailable: () => true,
           async checkTrackAvailability(track) {
-            // Early + immediate neighbors (n2/n3/n4) без hold; хвост ждёт.
-            if (!['n2.mp3', 'n3.mp3', 'n4.mp3'].includes(track.externalId)) {
+            if (!neighborReady.has(track.externalId)) {
               await holdRest
             }
             return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
@@ -2041,19 +2044,43 @@ test('FAV-02: rapid Next during early stub does not loop before expand completes
 
   // Соседнее окно расширяет stub до ≥3 до полного prepare.
   await neighborPartialGate
-  assert.ok(queue.getItems().length >= 3)
-  const midId = queue.current()?.id
-  const stepped = queue.next()
-  assert.ok(stepped)
-  assert.notEqual(stepped.id, midId)
+  assert.ok(queue.getItems().length >= 5)
+  // Частичная очередь: Repeat ALL ещё не включён.
+  assert.notEqual(queue.getRepeatMode(), 'ALL')
+
+  const visited: string[] = []
+  const startId = queue.current()?.id
+  assert.ok(startId)
+  visited.push(startId)
+  for (let step = 0; step < 5; step += 1) {
+    const stepped = queue.next()
+    if (!stepped) {
+      break
+    }
+    // Без ALL Next не должен возвращаться к уже пройденным соседям.
+    assert.equal(visited.includes(stepped.id), false)
+    visited.push(stepped.id)
+  }
+  assert.ok(visited.length >= 4)
+  assert.equal(queue.next(), null)
+  assert.equal(queue.next({ fromEnded: true }), null)
+  assert.notEqual(queue.getRepeatMode(), 'ALL')
+
+  const afterPrev = queue.previous()
+  assert.ok(afterPrev)
+  assert.equal(afterPrev.id, visited[visited.length - 2])
+  const afterPrev2 = queue.previous()
+  assert.ok(afterPrev2)
+  assert.equal(afterPrev2.id, visited[visited.length - 3])
 
   releaseRest()
   const result = await pending
   assert.equal(result.status, 'played')
   if (result.status !== 'played') return
   assert.equal(queue.getItems().length, 12)
-  assert.ok(expands.some((length) => length >= 3 && length < 12))
+  assert.ok(expands.some((length) => length >= 5 && length < 12))
   assert.ok(expands.includes(12))
+  assert.equal(queue.getRepeatMode(), 'ALL')
 })
 
 test('FAV-02: deferred Next during 345-prep flushes after neighbors without second intent', async () => {
@@ -2083,6 +2110,10 @@ test('FAV-02: deferred Next during 345-prep flushes after neighbors without seco
   const queue = getPlaybackQueue()
   queue.clear()
   let playSelectionCount = 0
+  // readyPerSide=4 вокруг index 100 → b96..b104 после releaseNeighbors.
+  const neighborBand = new Set(
+    Array.from({ length: 9 }, (_, index) => `b${96 + index}.mp3`),
+  )
   const {
     tryDeferCatalogNav,
     getDeferredCatalogNav,
@@ -2108,7 +2139,7 @@ test('FAV-02: deferred Next during 345-prep flushes after neighbors without seco
             if (track.externalId === 'b100.mp3') {
               return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
             }
-            if (['b99.mp3', 'b101.mp3'].includes(track.externalId)) {
+            if (neighborBand.has(track.externalId)) {
               await holdNeighbors
               return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
             }
@@ -2145,8 +2176,21 @@ test('FAV-02: deferred Next during 345-prep flushes after neighbors without seco
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
   assert.equal(isCatalogExpandGateActive(), true)
-  assert.equal(tryDeferCatalogNav('next'), true)
+  assert.equal(
+    tryDeferCatalogNav('next', {
+      getContext: () => queue.getPlaybackContext(),
+    }),
+    true,
+  )
   assert.equal(getDeferredCatalogNav(), 'next')
+  const {
+    getDeferredCatalogNavBinding,
+  } = await import('./catalogExpandNavigation.ts')
+  const binding = getDeferredCatalogNavBinding()
+  assert.ok(binding)
+  assert.equal(binding.command, 'next')
+  assert.equal(binding.catalogId, 'sys_favorites')
+  assert.ok(binding.generation > 0)
   assert.equal(playSelectionCount, 1)
 
   // Соседи появляются → flush отложенного Next без второго catalog intent.
@@ -2161,8 +2205,9 @@ test('FAV-02: deferred Next during 345-prep flushes after neighbors without seco
   assert.equal(getDeferredCatalogNav(), null)
   assert.ok(queue.getItems().length >= 3)
   assert.equal(playSelectionCount, 1)
-  // После flush очередь сдвинута на соседа.
+  // После flush очередь сдвинута на соседа; ALL ещё не на частичном окне.
   assert.notEqual(queue.current()?.id, 'local-folder:b100.mp3')
+  assert.notEqual(queue.getRepeatMode(), 'ALL')
 
   releaseRest()
   const result = await pending
@@ -2171,6 +2216,102 @@ test('FAV-02: deferred Next during 345-prep flushes after neighbors without seco
   assert.equal(playSelectionCount, 1)
   assert.equal(queue.getItems().length, 345)
   assert.equal(isCatalogExpandGateActive(), false)
+})
+
+test('FAV-02: deferred Next cancelled on session switch; foreign flush ignored', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  installMemoryLocalStorage()
+  resetCatalogRepeatPolicyForTests()
+  const {
+    beginCatalogExpandGate,
+    tryDeferCatalogNav,
+    getDeferredCatalogNav,
+    flushDeferredCatalogNav,
+    completeCatalogExpandGate,
+    cancelCatalogExpandGate,
+    isCatalogExpandGateActive,
+  } = await import('./catalogExpandNavigation.ts')
+
+  beginCatalogExpandGate({ generation: 42, catalogId: 'sys_favorites' })
+  assert.equal(
+    tryDeferCatalogNav('next', {
+      getContext: () => ({
+        type: 'playlist',
+        id: 'sys_favorites',
+        title: 'Избранное',
+      }),
+    }),
+    true,
+  )
+
+  // Переключение сессии (search) отменяет pending и gate.
+  assert.equal(
+    tryDeferCatalogNav('previous', {
+      getContext: () => ({
+        type: 'search-seed',
+        query: 'other',
+        seedTrackId: 't1',
+      }),
+    }),
+    false,
+  )
+  assert.equal(getDeferredCatalogNav(), null)
+  assert.equal(isCatalogExpandGateActive(), false)
+
+  beginCatalogExpandGate({ generation: 43, catalogId: 'sys_favorites' })
+  assert.equal(tryDeferCatalogNav('next'), true)
+  cancelCatalogExpandGate()
+  const afterCancel = await flushDeferredCatalogNav({
+    getContext: () => ({
+      type: 'playlist',
+      id: 'sys_favorites',
+      title: 'Избранное',
+    }),
+    expectedGeneration: 43,
+    expectedCatalogId: 'sys_favorites',
+    runNext: async () => {
+      throw new Error('cancelled session must not flush')
+    },
+    runPrevious: async () => {
+      throw new Error('cancelled session must not flush')
+    },
+  })
+  assert.equal(afterCancel, null)
+
+  beginCatalogExpandGate({ generation: 44, catalogId: 'sys_favorites' })
+  assert.equal(tryDeferCatalogNav('next'), true)
+  // Новая catalog generation — complete старой не перехватывает.
+  beginCatalogExpandGate({ generation: 45, catalogId: 'sys_favorites' })
+  assert.equal(tryDeferCatalogNav('previous'), true)
+  const staleComplete = await completeCatalogExpandGate(44, {
+    getContext: () => ({
+      type: 'playlist',
+      id: 'sys_favorites',
+      title: 'Избранное',
+    }),
+    runNext: async () => {
+      throw new Error('stale generation must not run')
+    },
+    runPrevious: async () => {
+      throw new Error('stale generation must not run')
+    },
+  })
+  assert.equal(staleComplete, null)
+  assert.equal(getDeferredCatalogNav(), 'previous')
+  const fresh = await completeCatalogExpandGate(45, {
+    getContext: () => ({
+      type: 'playlist',
+      id: 'sys_favorites',
+      title: 'Избранное',
+    }),
+    expectedCatalogId: 'sys_favorites',
+    runNext: async () => {
+      throw new Error('expected previous')
+    },
+    runPrevious: async () => undefined,
+  })
+  assert.equal(fresh, 'previous')
 })
 
 test('FAV-02: mid-start favorites accepts early then expands full 345 without second play', async () => {

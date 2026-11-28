@@ -7,8 +7,14 @@ type CatalogExpandGate = {
   catalogId: string
 }
 
+type PendingCatalogExpandNav = {
+  command: CatalogExpandNavCommand
+  generation: number
+  catalogId: string
+}
+
 let gate: CatalogExpandGate | null = null
-let pending: CatalogExpandNavCommand | null = null
+let pending: PendingCatalogExpandNav | null = null
 
 /** Старт early-play stub: Next/Previous без соседа можно отложить. */
 export function beginCatalogExpandGate(input: {
@@ -41,23 +47,45 @@ export function isCatalogExpandGateActive(input?: {
   return true
 }
 
+export type TryDeferCatalogNavDeps = {
+  /** Актуальный playback context — чужая сессия не откладывает команду. */
+  getContext?: () => PlaybackContext
+}
+
 /**
  * Отложить Next/Previous, пока stub не расширен.
+ * Привязка к generation + catalogId gate; при смене сессии/контекста — cancel.
  * Не останавливает текущий звук и не стартует новый catalog intent.
  */
 export function tryDeferCatalogNav(
   command: CatalogExpandNavCommand,
+  deps?: TryDeferCatalogNavDeps,
 ): boolean {
   if (!gate) {
     return false
   }
-  // Последняя команда побеждает (быстрые Next/Previous).
-  pending = command
+  if (deps?.getContext) {
+    const context = deps.getContext()
+    if (!contextMatchesGate(context, gate.catalogId)) {
+      cancelCatalogExpandGate()
+      return false
+    }
+  }
+  // Последняя команда побеждает (быстрые Next/Previous), с тем же owner.
+  pending = {
+    command,
+    generation: gate.generation,
+    catalogId: gate.catalogId,
+  }
   return true
 }
 
 export function getDeferredCatalogNav(): CatalogExpandNavCommand | null {
-  return pending
+  return pending?.command ?? null
+}
+
+export function getDeferredCatalogNavBinding(): PendingCatalogExpandNav | null {
+  return pending ? { ...pending } : null
 }
 
 /** Смена сессии / отмена prepare — забыть отложенную навигацию. */
@@ -70,10 +98,69 @@ function contextMatchesGate(context: PlaybackContext, catalogId: string): boolea
   return context.type === 'playlist' && context.id === catalogId
 }
 
+function pendingMatchesGate(row: PendingCatalogExpandNav): boolean {
+  return (
+    gate !== null &&
+    row.generation === gate.generation &&
+    row.catalogId === gate.catalogId
+  )
+}
+
 export type CatalogExpandNavFlushDeps = {
   getContext: () => PlaybackContext
   runNext: () => Promise<void>
   runPrevious: () => Promise<void>
+  /**
+   * Ожидаемая generation playUserCatalog — чужой/устаревший flush не играет.
+   * Без поля используется generation из pending/gate.
+   */
+  expectedGeneration?: number
+  /** Ожидаемый catalogId (playlist session owner). */
+  expectedCatalogId?: string
+}
+
+function takePendingForFlush(
+  deps: CatalogExpandNavFlushDeps,
+): PendingCatalogExpandNav | null {
+  if (!gate || !pending) {
+    return null
+  }
+  if (!pendingMatchesGate(pending)) {
+    pending = null
+    return null
+  }
+  if (
+    deps.expectedGeneration !== undefined &&
+    deps.expectedGeneration !== pending.generation
+  ) {
+    return null
+  }
+  if (
+    deps.expectedCatalogId !== undefined &&
+    deps.expectedCatalogId !== pending.catalogId
+  ) {
+    return null
+  }
+  const context = deps.getContext()
+  if (!contextMatchesGate(context, pending.catalogId)) {
+    cancelCatalogExpandGate()
+    return null
+  }
+  const row = pending
+  pending = null
+  return row
+}
+
+async function runPendingCommand(
+  row: PendingCatalogExpandNav,
+  deps: CatalogExpandNavFlushDeps,
+): Promise<CatalogExpandNavCommand> {
+  if (row.command === 'next') {
+    await deps.runNext()
+  } else {
+    await deps.runPrevious()
+  }
+  return row.command
 }
 
 /**
@@ -83,26 +170,16 @@ export type CatalogExpandNavFlushDeps = {
 export async function flushDeferredCatalogNav(
   deps: CatalogExpandNavFlushDeps,
 ): Promise<CatalogExpandNavCommand | null> {
-  if (!gate || !pending) {
+  const row = takePendingForFlush(deps)
+  if (!row) {
     return null
   }
-  const catalogId = gate.catalogId
-  const command = pending
-  pending = null
-  if (!contextMatchesGate(deps.getContext(), catalogId)) {
-    return null
-  }
-  if (command === 'next') {
-    await deps.runNext()
-  } else {
-    await deps.runPrevious()
-  }
-  return command
+  return runPendingCommand(row, deps)
 }
 
 /**
  * Expand завершён для этой generation: снять gate и выполнить отложенную
- * команду только если всё ещё тот же playlist-каталог.
+ * команду только если всё ещё тот же playlist-каталог и та же generation.
  */
 export async function completeCatalogExpandGate(
   generation: number,
@@ -112,21 +189,25 @@ export async function completeCatalogExpandGate(
     return null
   }
   const catalogId = gate.catalogId
-  const command = pending
+  const row = pending
   gate = null
   pending = null
-  if (!command) {
+  if (!row) {
     return null
   }
-  if (!contextMatchesGate(deps.getContext(), catalogId)) {
+  if (row.generation !== generation || row.catalogId !== catalogId) {
     return null
   }
-  if (command === 'next') {
-    await deps.runNext()
-  } else {
-    await deps.runPrevious()
+  if (
+    deps.expectedCatalogId !== undefined &&
+    deps.expectedCatalogId !== row.catalogId
+  ) {
+    return null
   }
-  return command
+  if (!contextMatchesGate(deps.getContext(), row.catalogId)) {
+    return null
+  }
+  return runPendingCommand(row, deps)
 }
 
 /** Сброс для unit-тестов. */

@@ -6,6 +6,7 @@ import {
   completeCatalogExpandGate,
   flushDeferredCatalogNav,
   getDeferredCatalogNav,
+  getDeferredCatalogNavBinding,
   isCatalogExpandGateActive,
   resetCatalogExpandNavigationForTests,
   tryDeferCatalogNav,
@@ -137,6 +138,12 @@ test('flushDeferredCatalogNav runs pending and keeps gate for late expand', asyn
   resetCatalogExpandNavigationForTests()
   beginCatalogExpandGate({ generation: 9, catalogId: 'sys_favorites' })
   assert.equal(tryDeferCatalogNav('next'), true)
+  const binding = getDeferredCatalogNavBinding()
+  assert.deepEqual(binding, {
+    command: 'next',
+    generation: 9,
+    catalogId: 'sys_favorites',
+  })
   const calls: string[] = []
   const flushed = await flushDeferredCatalogNav({
     getContext: () => ({
@@ -144,6 +151,8 @@ test('flushDeferredCatalogNav runs pending and keeps gate for late expand', asyn
       id: 'sys_favorites',
       title: 'Избранное',
     }),
+    expectedGeneration: 9,
+    expectedCatalogId: 'sys_favorites',
     runNext: async () => {
       calls.push('next')
     },
@@ -155,6 +164,70 @@ test('flushDeferredCatalogNav runs pending and keeps gate for late expand', asyn
   assert.deepEqual(calls, ['next'])
   assert.equal(isCatalogExpandGateActive(), true)
   assert.equal(getDeferredCatalogNav(), null)
+})
+
+test('deferred nav binds to generation/catalogId and drops on foreign session', async () => {
+  resetCatalogExpandNavigationForTests()
+  beginCatalogExpandGate({ generation: 4, catalogId: 'sys_favorites' })
+  assert.equal(
+    tryDeferCatalogNav('next', {
+      getContext: () => ({
+        type: 'playlist',
+        id: 'sys_favorites',
+        title: 'Избранное',
+      }),
+    }),
+    true,
+  )
+
+  // Чужой context при defer → cancel gate, команда не копится.
+  beginCatalogExpandGate({ generation: 4, catalogId: 'sys_favorites' })
+  assert.equal(
+    tryDeferCatalogNav('previous', {
+      getContext: () => ({ type: 'search-seed', query: 'q', seedTrackId: 'x' }),
+    }),
+    false,
+  )
+  assert.equal(isCatalogExpandGateActive(), false)
+  assert.equal(getDeferredCatalogNav(), null)
+
+  // Устаревшая generation не flush'ится в чужую сессию.
+  beginCatalogExpandGate({ generation: 5, catalogId: 'sys_favorites' })
+  assert.equal(tryDeferCatalogNav('next'), true)
+  const stale = await flushDeferredCatalogNav({
+    getContext: () => ({
+      type: 'playlist',
+      id: 'sys_favorites',
+      title: 'Избранное',
+    }),
+    expectedGeneration: 4,
+    expectedCatalogId: 'sys_favorites',
+    runNext: async () => {
+      throw new Error('stale generation must not run')
+    },
+    runPrevious: async () => {
+      throw new Error('stale generation must not run')
+    },
+  })
+  assert.equal(stale, null)
+  assert.equal(getDeferredCatalogNav(), 'next')
+
+  beginCatalogExpandGate({ generation: 6, catalogId: 'cat_a' })
+  assert.equal(tryDeferCatalogNav('next'), true)
+  const wrongCatalog = await completeCatalogExpandGate(6, {
+    getContext: () => ({
+      type: 'playlist',
+      id: 'cat_b',
+      title: 'Other',
+    }),
+    runNext: async () => {
+      throw new Error('foreign catalog must not run')
+    },
+    runPrevious: async () => {
+      throw new Error('foreign catalog must not run')
+    },
+  })
+  assert.equal(wrongCatalog, null)
 })
 
 test('neighbor window prepares adjacent ready tracks before full catalog', async () => {

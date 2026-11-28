@@ -39,11 +39,13 @@ export {
   completeCatalogExpandGate,
   flushDeferredCatalogNav,
   getDeferredCatalogNav,
+  getDeferredCatalogNavBinding,
   isCatalogExpandGateActive,
   resetCatalogExpandNavigationForTests,
   tryDeferCatalogNav,
   type CatalogExpandNavCommand,
   type CatalogExpandNavFlushDeps,
+  type TryDeferCatalogNavDeps,
 } from './catalogExpandNavigation.ts'
 export {
   prepareCatalogNeighborWindow,

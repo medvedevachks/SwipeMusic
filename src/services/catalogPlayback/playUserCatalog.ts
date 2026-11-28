@@ -460,6 +460,8 @@ export async function playUserCatalog(
         if (deps.getPlayerState) {
           return {
             getContext: () => getPlaybackQueue().getPlaybackContext(),
+            expectedGeneration: generation,
+            expectedCatalogId: input.catalog.id,
             runNext: async () => {
               getPlaybackQueue().next()
             },
@@ -470,6 +472,8 @@ export async function playUserCatalog(
         }
         return {
           getContext: () => getPlaybackQueue().getPlaybackContext(),
+          expectedGeneration: generation,
+          expectedCatalogId: input.catalog.id,
           runNext: async () => {
             const { getAudioPlayer } = await import('../audioPlayer/index.ts')
             await getAudioPlayer().next()
@@ -494,8 +498,9 @@ export async function playUserCatalog(
           ...resolveOpts,
           isCancelled: () => !isCurrent(generation),
           preResolved,
-          readyPerSide: 1,
-          maxScanPerSide: 8,
+          // Достаточно соседей для нескольких Next/Previous до full expand.
+          readyPerSide: 4,
+          maxScanPerSide: 12,
         })
         for (const [id, resolution] of neighbors.preResolved) {
           preResolved.set(id, resolution)
@@ -522,7 +527,8 @@ export async function playUserCatalog(
               startIndex: liveStart,
               context,
             })
-            applyCatalogLoopRepeatIfOwned(input.catalog.id)
+            // Не включать Repeat ALL на частичном соседнем окне —
+            // иначе Next зацикливает уже проигранных соседей до full expand.
             // Соседи уже в очереди — выполнить отложенный Next/Previous,
             // не дожидаясь полного prepare и не снимая gate.
             await flushDeferredCatalogNav(await resolveExpandNavFlushDeps())
