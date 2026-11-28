@@ -113,3 +113,20 @@ test('FullscreenPlayer favorites like waits for save confirmation', () => {
   assert.match(source, /eventOptions:\s*\{\s*passive:\s*false\s*\}/)
   assert.equal(source.includes('new AudioPlayer'), false)
 })
+
+test('FAV-02 FullscreenPlayer favorites gestures cover touch and mouse paths', () => {
+  const source = readFileSync(
+    new URL('../components/player/FullscreenPlayer.tsx', import.meta.url),
+    'utf8',
+  )
+  assert.match(source, /bindFavoritesGesture\s*=\s*useDrag/)
+  assert.match(source, /pointer:\s*\{\s*touch:\s*true\s*\}/)
+  assert.match(source, /pointer\/touch \+ mouse/)
+  assert.match(source, /applyFavoritesGesture/)
+  assert.match(source, /void next\(\)/)
+  assert.match(source, /void previous\(\)/)
+  assert.match(source, /data-testid="fullscreen-player-favorites-gesture"/)
+  // Кнопки Next/Previous остаются доступны мышью рядом с жестами на обложке.
+  assert.match(source, /aria-label="Предыдущий"/)
+  assert.match(source, /aria-label="Следующий"/)
+})

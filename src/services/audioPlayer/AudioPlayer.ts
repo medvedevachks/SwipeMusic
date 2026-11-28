@@ -984,6 +984,17 @@ export class AudioPlayer {
       holder.track = getPlaybackQueue().next()
     })
     if (!holder.track) {
+      // FAV-02 / catalog early expand: не stop() на stub — отложить Next.
+      try {
+        const { tryDeferCatalogNav } = await import(
+          '../catalogPlayback/catalogExpandNavigation.ts'
+        )
+        if (tryDeferCatalogNav('next')) {
+          return
+        }
+      } catch {
+        // optional in partial graphs
+      }
       this.stop()
       this.patchState({
         currentTrack: null,
@@ -1026,9 +1037,37 @@ export class AudioPlayer {
     getContinuationSession().cancel()
     clearRecommendationExhausted()
 
+    const beforeId = this.state.currentTrack?.id ?? null
     const track = getPlaybackQueue().previous()
     if (!track) {
+      try {
+        const { tryDeferCatalogNav } = await import(
+          '../catalogPlayback/catalogExpandNavigation.ts'
+        )
+        if (tryDeferCatalogNav('previous')) {
+          return
+        }
+      } catch {
+        // optional
+      }
       return
+    }
+    // Stub early expand: previous() может вернуть тот же трек — не переигрывать.
+    if (track.id === beforeId) {
+      try {
+        const { tryDeferCatalogNav, isCatalogExpandGateActive } = await import(
+          '../catalogPlayback/catalogExpandNavigation.ts'
+        )
+        if (
+          isCatalogExpandGateActive() &&
+          getPlaybackQueue().getItems().length <= 1 &&
+          tryDeferCatalogNav('previous')
+        ) {
+          return
+        }
+      } catch {
+        // optional
+      }
     }
     if (track.id !== this.state.currentTrack?.id) {
       reportPlayback({

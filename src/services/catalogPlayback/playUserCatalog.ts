@@ -12,6 +12,14 @@ import {
 } from './buildCatalogPlaybackQueue.ts'
 import { isAutoplayBlockedError } from './autoplayBlocked.ts'
 import {
+  beginCatalogExpandGate,
+  cancelCatalogExpandGate,
+  completeCatalogExpandGate,
+  flushDeferredCatalogNav,
+  resetCatalogExpandNavigationForTests,
+  type CatalogExpandNavFlushDeps,
+} from './catalogExpandNavigation.ts'
+import {
   applyCatalogLoopRepeatIfOwned,
   beginCatalogLoopSession,
   resetCatalogRepeatPolicyForTests,
@@ -19,6 +27,7 @@ import {
 import { filterQueueToLiveCatalogMembership } from './liveCatalogQueue.ts'
 import { CATALOG_PREPARE_CONCURRENCY } from './mapPool.ts'
 import { CATALOG_PLAYBACK_MESSAGE } from './messages.ts'
+import { prepareCatalogNeighborWindow } from './prepareCatalogNeighborWindow.ts'
 
 export type PlayUserCatalogInput = {
   catalog: Pick<Catalog, 'id' | 'name'>
@@ -107,6 +116,7 @@ export function resetCatalogPlaybackGate(): void {
   activeGeneration = 0
   inFlight = false
   resetCatalogRepeatPolicyForTests()
+  resetCatalogExpandNavigationForTests()
 }
 
 /**
@@ -116,6 +126,7 @@ export function resetCatalogPlaybackGate(): void {
 export function cancelCatalogPlaybackGate(): void {
   activeGeneration += 1
   inFlight = false
+  cancelCatalogExpandGate()
 }
 
 function isCurrent(generation: number): boolean {
@@ -401,6 +412,127 @@ export async function playUserCatalog(
       }
     }
 
+    const resolveReplaceQueue = async () => {
+      if (deps.replaceQueue) {
+        return deps.replaceQueue
+      }
+      const { isSessionSwitchIntegrationEnabled } = await import(
+        '../sessionSwitch/featureFlag.ts'
+      )
+      if (isSessionSwitchIntegrationEnabled()) {
+        const { expandCatalogSessionQueue } = await import(
+          '../sessionSwitch/integration/playCatalogSession.ts'
+        )
+        return async (options: {
+          tracks: Track[]
+          startIndex: number
+          context: PlaylistPlayContext
+        }) => {
+          return expandCatalogSessionQueue({
+            tracks: options.tracks,
+            startIndex: options.startIndex,
+            catalogId: options.context.id,
+            catalogTitle: options.context.title,
+          })
+        }
+      }
+      const { getPlaybackQueue } = await import('../playbackQueue/PlaybackQueue.ts')
+      return async (options: {
+        tracks: Track[]
+        startIndex: number
+        context: PlaylistPlayContext
+      }) => {
+        return getPlaybackQueue().replacePlaylistItemsPreservingPlayback(
+          options.tracks,
+          { type: 'playlist', id: options.context.id },
+        )
+      }
+    }
+
+    const replaceQueue = startedEarly ? await resolveReplaceQueue() : null
+
+    const resolveExpandNavFlushDeps =
+      async (): Promise<CatalogExpandNavFlushDeps> => {
+        const { getPlaybackQueue } = await import(
+          '../playbackQueue/PlaybackQueue.ts'
+        )
+        // В unit-тестах с getPlayerState — только сдвиг очереди, без AudioPlayer.
+        if (deps.getPlayerState) {
+          return {
+            getContext: () => getPlaybackQueue().getPlaybackContext(),
+            runNext: async () => {
+              getPlaybackQueue().next()
+            },
+            runPrevious: async () => {
+              getPlaybackQueue().previous()
+            },
+          }
+        }
+        return {
+          getContext: () => getPlaybackQueue().getPlaybackContext(),
+          runNext: async () => {
+            const { getAudioPlayer } = await import('../audioPlayer/index.ts')
+            await getAudioPlayer().next()
+          },
+          runPrevious: async () => {
+            const { getAudioPlayer } = await import('../audioPlayer/index.ts')
+            await getAudioPlayer().previous()
+          },
+        }
+      }
+
+    // FAV-02: gate + соседнее окно до полного prepare 345 треков.
+    if (startedEarly && earlyStartCanonicalId && isCurrent(generation)) {
+      beginCatalogExpandGate({
+        generation,
+        catalogId: input.catalog.id,
+      })
+      try {
+        const neighbors = await prepareCatalogNeighborWindow({
+          items: input.items,
+          startCanonicalTrackId: earlyStartCanonicalId,
+          ...resolveOpts,
+          isCancelled: () => !isCurrent(generation),
+          preResolved,
+          readyPerSide: 1,
+          maxScanPerSide: 8,
+        })
+        for (const [id, resolution] of neighbors.preResolved) {
+          preResolved.set(id, resolution)
+        }
+        if (
+          replaceQueue &&
+          isCurrent(generation) &&
+          neighbors.partialQueue.length > 1
+        ) {
+          const livePartial = filterQueueToLiveCatalogMembership(
+            input.catalog.id,
+            neighbors.partialQueue,
+          )
+          if (livePartial.length > 1) {
+            let liveStart = 0
+            if (earlyStartCanonicalId) {
+              const index = livePartial.findIndex(
+                (entry) => entry.canonicalTrackId === earlyStartCanonicalId,
+              )
+              liveStart = index >= 0 ? index : 0
+            }
+            await replaceQueue({
+              tracks: livePartial.map((entry) => entry.track),
+              startIndex: liveStart,
+              context,
+            })
+            applyCatalogLoopRepeatIfOwned(input.catalog.id)
+            // Соседи уже в очереди — выполнить отложенный Next/Previous,
+            // не дожидаясь полного prepare и не снимая gate.
+            await flushDeferredCatalogNav(await resolveExpandNavFlushDeps())
+          }
+        }
+      } catch {
+        // Соседи best-effort: полный build ниже всё равно попытается.
+      }
+    }
+
     let queue: CatalogQueueEntry[]
     let resolutions: CatalogItemResolution[]
     try {
@@ -416,6 +548,7 @@ export async function playUserCatalog(
       queue = built.queue
       resolutions = built.resolutions
     } catch {
+      cancelCatalogExpandGate()
       if (startedEarly) {
         return {
           status: 'played',
@@ -434,6 +567,7 @@ export async function playUserCatalog(
     }
 
     if (!isCurrent(generation)) {
+      cancelCatalogExpandGate()
       if (startedEarly && earlyStartCanonicalId) {
         const early = preResolved.get(earlyStartCanonicalId)
         if (early?.status === 'ready') {
@@ -452,6 +586,7 @@ export async function playUserCatalog(
     if (preferredId) {
       const startEntry = queue.find((entry) => entry.canonicalTrackId === preferredId)
       if (!startEntry) {
+        cancelCatalogExpandGate()
         const itemResolution = resolutions.find(
           (row) =>
             row.status === 'unavailable' && row.canonicalTrackId === preferredId,
@@ -467,6 +602,7 @@ export async function playUserCatalog(
     }
 
     if (queue.length === 0) {
+      cancelCatalogExpandGate()
       return {
         status: 'empty',
         message: CATALOG_PLAYBACK_MESSAGE.NO_PLAYABLE,
@@ -484,29 +620,9 @@ export async function playUserCatalog(
 
     // Ранний старт всегда (preferred или первая доступная) — только expand, без повторного play.
     if (startedEarly) {
-      const replaceQueue =
-        deps.replaceQueue ??
-        (async (options) => {
-          const { isSessionSwitchIntegrationEnabled } = await import(
-            '../sessionSwitch/featureFlag.ts'
-          )
-          if (isSessionSwitchIntegrationEnabled()) {
-            const { expandCatalogSessionQueue } = await import(
-              '../sessionSwitch/integration/playCatalogSession.ts'
-            )
-            return expandCatalogSessionQueue({
-              tracks: options.tracks,
-              startIndex: options.startIndex,
-              catalogId: options.context.id,
-              catalogTitle: options.context.title,
-            })
-          }
-          const { getPlaybackQueue } = await import('../playbackQueue/PlaybackQueue.ts')
-          return getPlaybackQueue().replacePlaylistItemsPreservingPlayback(
-            options.tracks,
-            { type: 'playlist', id: options.context.id },
-          )
-        })
+      const expand =
+        replaceQueue ??
+        (await resolveReplaceQueue())
       // generation + ownership: чужой/устаревший prepare не трогает очередь и Repeat.
       // Live membership: разобранные во время prepare не возвращаются expand'ом.
       if (isCurrent(generation)) {
@@ -523,13 +639,18 @@ export async function playUserCatalog(
           liveStart = index >= 0 ? index : 0
         }
         if (liveTracks.length > 0) {
-          await replaceQueue({
+          await expand({
             tracks: liveTracks,
             startIndex: liveStart,
             context,
           })
           applyCatalogLoopRepeatIfOwned(input.catalog.id)
         }
+        // Снять gate и выполнить отложенный Next/Previous без второго catalog intent.
+        await completeCatalogExpandGate(
+          generation,
+          await resolveExpandNavFlushDeps(),
+        )
         return {
           status: 'played',
           tracks: liveTracks.length > 0 ? liveTracks : tracks,
@@ -538,6 +659,7 @@ export async function playUserCatalog(
           needsUserPlayGesture,
         }
       }
+      cancelCatalogExpandGate()
       return {
         status: 'played',
         tracks,

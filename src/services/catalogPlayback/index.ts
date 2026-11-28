@@ -33,3 +33,18 @@ export {
   CATALOG_PREPARE_CONCURRENCY,
   mapPool,
 } from './mapPool.ts'
+export {
+  beginCatalogExpandGate,
+  cancelCatalogExpandGate,
+  completeCatalogExpandGate,
+  flushDeferredCatalogNav,
+  getDeferredCatalogNav,
+  isCatalogExpandGateActive,
+  resetCatalogExpandNavigationForTests,
+  tryDeferCatalogNav,
+  type CatalogExpandNavCommand,
+  type CatalogExpandNavFlushDeps,
+} from './catalogExpandNavigation.ts'
+export {
+  prepareCatalogNeighborWindow,
+} from './prepareCatalogNeighborWindow.ts'

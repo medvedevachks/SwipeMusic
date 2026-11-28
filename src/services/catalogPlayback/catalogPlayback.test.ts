@@ -1977,9 +1977,14 @@ test('FAV-02: rapid Next during early stub does not loop before expand completes
   const acceptedGate = new Promise<void>((resolve) => {
     resolveAccepted = resolve
   })
+  let resolveNeighborPartial!: () => void
+  const neighborPartialGate = new Promise<void>((resolve) => {
+    resolveNeighborPartial = resolve
+  })
   const queue = getPlaybackQueue()
   queue.clear()
   queue.setRepeatMode('ALL')
+  const expands: number[] = []
 
   const pending = playUserCatalog(
     {
@@ -1997,7 +2002,8 @@ test('FAV-02: rapid Next during early stub does not loop before expand completes
           supportsStreaming: true,
           isAvailable: () => true,
           async checkTrackAvailability(track) {
-            if (track.externalId !== 'n3.mp3') {
+            // Early + immediate neighbors (n2/n3/n4) без hold; хвост ждёт.
+            if (!['n2.mp3', 'n3.mp3', 'n4.mp3'].includes(track.externalId)) {
               await holdRest
             }
             return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
@@ -2009,10 +2015,15 @@ test('FAV-02: rapid Next during early stub does not loop before expand completes
         queue.setQueue(options.tracks, options.startIndex, options.context)
       },
       replaceQueue: async (options) => {
-        return queue.replacePlaylistItemsPreservingPlayback(options.tracks, {
+        expands.push(options.tracks.length)
+        const ok = queue.replacePlaylistItemsPreservingPlayback(options.tracks, {
           type: 'playlist',
           id: options.context.id,
         })
+        if (options.tracks.length > 1 && options.tracks.length < 12) {
+          resolveNeighborPartial()
+        }
+        return ok
       },
       onPlaybackAccepted: () => {
         resolveAccepted()
@@ -2027,20 +2038,139 @@ test('FAV-02: rapid Next during early stub does not loop before expand completes
   await acceptedGate
   assert.equal(queue.getItems().length, 1)
   assert.notEqual(queue.getRepeatMode(), 'ALL')
-  // Быстрые Next/Previous до expand: без зацикливания stub.
-  assert.equal(queue.next()?.id ?? null, null)
-  assert.equal(queue.next()?.id ?? null, null)
-  assert.equal(queue.previous()?.id, queue.current()?.id)
+
+  // Соседнее окно расширяет stub до ≥3 до полного prepare.
+  await neighborPartialGate
+  assert.ok(queue.getItems().length >= 3)
+  const midId = queue.current()?.id
+  const stepped = queue.next()
+  assert.ok(stepped)
+  assert.notEqual(stepped.id, midId)
 
   releaseRest()
   const result = await pending
   assert.equal(result.status, 'played')
   if (result.status !== 'played') return
   assert.equal(queue.getItems().length, 12)
-  assert.equal(queue.getRepeatMode(), 'ALL')
-  const afterNext = queue.next()
-  assert.ok(afterNext)
-  assert.notEqual(afterNext.id, result.tracks[result.startIndex]?.id)
+  assert.ok(expands.some((length) => length >= 3 && length < 12))
+  assert.ok(expands.includes(12))
+})
+
+test('FAV-02: deferred Next during 345-prep flushes after neighbors without second intent', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  installMemoryLocalStorage()
+  resetCatalogRepeatPolicyForTests()
+  const FAVORITES = { id: 'sys_favorites', name: 'Избранное' }
+  const items = Array.from({ length: 345 }, (_, index) => {
+    const id = `can_big_${index}`
+    const copy = copyOf(id, 'local-folder', `b${index}.mp3`, `Big ${index}`)
+    return itemOf(id, [copy], `Big ${index}`)
+  })
+  const tracks = items.flatMap((item) => item.copies.map((copy) => trackFor(copy)))
+  let releaseNeighbors!: () => void
+  const holdNeighbors = new Promise<void>((resolve) => {
+    releaseNeighbors = resolve
+  })
+  let releaseRest!: () => void
+  const holdRest = new Promise<void>((resolve) => {
+    releaseRest = resolve
+  })
+  let resolveAccepted!: () => void
+  const acceptedGate = new Promise<void>((resolve) => {
+    resolveAccepted = resolve
+  })
+  const queue = getPlaybackQueue()
+  queue.clear()
+  let playSelectionCount = 0
+  const {
+    tryDeferCatalogNav,
+    getDeferredCatalogNav,
+    isCatalogExpandGateActive,
+  } = await import('./catalogExpandNavigation.ts')
+
+  const pending = playUserCatalog(
+    {
+      catalog: FAVORITES,
+      items,
+      startCanonicalTrackId: 'can_big_100',
+    },
+    {
+      now: 95_000,
+      concurrency: 4,
+      port: portFor({
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(track) {
+            if (track.externalId === 'b100.mp3') {
+              return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+            }
+            if (['b99.mp3', 'b101.mp3'].includes(track.externalId)) {
+              await holdNeighbors
+              return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+            }
+            await holdRest
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap(tracks),
+      playSelection: async (options) => {
+        playSelectionCount += 1
+        queue.setQueue(options.tracks, options.startIndex, options.context)
+      },
+      replaceQueue: async (options) =>
+        queue.replacePlaylistItemsPreservingPlayback(options.tracks, {
+          type: 'playlist',
+          id: options.context.id,
+        }),
+      onPlaybackAccepted: () => {
+        resolveAccepted()
+      },
+      getPlayerState: () => ({
+        pendingTrack: queue.current(),
+        currentTrack: queue.current(),
+      }),
+    },
+  )
+
+  await acceptedGate
+  assert.equal(queue.getItems().length, 1)
+  // Дождаться gate (ставится сразу после early accept).
+  const gateDeadline = Date.now() + 3_000
+  while (!isCatalogExpandGateActive() && Date.now() < gateDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  assert.equal(isCatalogExpandGateActive(), true)
+  assert.equal(tryDeferCatalogNav('next'), true)
+  assert.equal(getDeferredCatalogNav(), 'next')
+  assert.equal(playSelectionCount, 1)
+
+  // Соседи появляются → flush отложенного Next без второго catalog intent.
+  releaseNeighbors()
+  const flushDeadline = Date.now() + 5_000
+  while (
+    (getDeferredCatalogNav() !== null || queue.getItems().length < 3) &&
+    Date.now() < flushDeadline
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 16))
+  }
+  assert.equal(getDeferredCatalogNav(), null)
+  assert.ok(queue.getItems().length >= 3)
+  assert.equal(playSelectionCount, 1)
+  // После flush очередь сдвинута на соседа.
+  assert.notEqual(queue.current()?.id, 'local-folder:b100.mp3')
+
+  releaseRest()
+  const result = await pending
+  assert.equal(result.status, 'played')
+  if (result.status !== 'played') return
+  assert.equal(playSelectionCount, 1)
+  assert.equal(queue.getItems().length, 345)
+  assert.equal(isCatalogExpandGateActive(), false)
 })
 
 test('FAV-02: mid-start favorites accepts early then expands full 345 without second play', async () => {
