@@ -32,6 +32,13 @@ import { beginSearchFlowCommand, noteSearchFlowEvent } from '../services/continu
 import { continuationPlaybackCaption } from '../services/continuation/searchSeedPlayback.ts'
 import { getPlaybackQueue } from '../services/playbackQueue'
 import { getSourceDisplayName } from '../utils/sourceDisplay'
+import { SwipeHeartBurst } from './SwipeHeartBurst'
+import {
+  SWIPE_HEART_DISMISS_MS,
+  prefersReducedMotion,
+  resolveSwipeHeartPhase,
+  shouldShowSwipeHeart,
+} from './swipeHeartVisual'
 import SwipeCard from './SwipeCard'
 import { SwipeDirectionHints } from './SwipeDirectionHints'
 
@@ -617,23 +624,23 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
                 return
               }
               // Logout / смена аккаунта: не показывать успех/ошибку чужой сессии.
-              if (!isAuthSessionCurrent(likeSession)) {
+              if (
+                !shouldShowSwipeHeart({
+                  savedOk: ok,
+                  authCurrent: isAuthSessionCurrent(likeSession),
+                })
+              ) {
                 setHeart(null)
+                if (!ok && isAuthSessionCurrent(likeSession)) {
+                  showNotice(SAVE_FAILED_MESSAGE, 3200)
+                }
                 return
               }
-              if (!ok) {
-                setHeart(null)
-                showNotice(SAVE_FAILED_MESSAGE, 3200)
-                return
-              }
-              const reduceMotion = window.matchMedia?.(
-                '(prefers-reduced-motion: reduce)',
-              ).matches
-              const phase = reduceMotion ? 'rest' : 'fly'
+              const phase = resolveSwipeHeartPhase(prefersReducedMotion())
               setHeart({ phase, token })
               showNotice('В избранном')
               if (phase === 'fly') {
-                dismissHeart(token, 1100)
+                dismissHeart(token, SWIPE_HEART_DISMISS_MS)
               }
             }
             if (!saved) {
@@ -814,37 +821,20 @@ const SwipeDeck = forwardRef<SwipeDeckHandle, SwipeDeckProps>(
             />
           </div>
           {heart ? (
-            <div
+            <SwipeHeartBurst
               key={heart.token}
-              className={`swipe-heart absolute left-1/2 top-[18%] z-30 ${
-                heart.phase === 'fly' ? 'swipe-heart-fly' : 'swipe-heart-rest'
-              }`}
-              data-heart={heart.phase}
-              data-heart-size="152"
-              onAnimationEnd={(event) => {
-                if (
-                  event.target !== event.currentTarget ||
-                  event.animationName !== 'swipe-heart-fly'
-                ) {
-                  return
-                }
-                const token = heart.token
+              phase={heart.phase}
+              token={heart.token}
+              className="top-[18%]"
+              onFlyEnd={(endedToken) => {
                 setHeart((currentHeart) =>
-                  currentHeart?.token === token && currentHeart.phase === 'fly'
+                  currentHeart?.token === endedToken &&
+                  currentHeart.phase === 'fly'
                     ? null
                     : currentHeart,
                 )
               }}
-            >
-              <svg viewBox="0 0 120 120" aria-hidden="true" className="h-full w-full">
-                <path
-                  d="M60 96.5S28.2 76 16.4 56.6C8.6 43.8 12.8 27 28.2 21.4c9.8-3.6 19.2-1 25.4 7.2 1.8 2.4 6.2 2.4 8 0 6.2-8.2 15.6-10.8 25.4-7.2C103.2 27 107.4 43.8 99.6 56.6 87.8 76 60 96.5 60 96.5z"
-                  fill="#e11d48"
-                  stroke="#e11d48"
-                  strokeWidth="6"
-                />
-              </svg>
-            </div>
+            />
           ) : null}
         </div>
       </div>

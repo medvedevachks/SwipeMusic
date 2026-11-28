@@ -46,6 +46,15 @@ import { useGlobalPlayerStore } from '../../store/playerStore'
 import type { SwipeDirection } from '../../types/gesture'
 import type { Track } from '../../types/track'
 import { getSourceDisplayName } from '../../utils/sourceDisplay'
+import { SwipeHeartBurst } from '../SwipeHeartBurst'
+import {
+  createTrackLikeInFlightGate,
+  prefersReducedMotion,
+  resolveFullscreenLikeAsyncError,
+  resolveFullscreenLikeAsyncUi,
+  type FullscreenLikeAsyncUi,
+  type SwipeHeartPhase,
+} from '../swipeHeartVisual'
 import CategoryPickerSheet from '../CategoryPickerSheet'
 import {
   CloseIcon,
@@ -127,8 +136,19 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
   const [catalogOpen, setCatalogOpen] = useState(false)
   const [catalogTrack, setCatalogTrack] = useState<Track | null>(null)
   const [catalogBusy, setCatalogBusy] = useState(false)
-  const [likeBusy, setLikeBusy] = useState(false)
+  const [likeInFlightTrackId, setLikeInFlightTrackId] = useState<string | null>(
+    null,
+  )
   const [notice, setNotice] = useState<string | null>(null)
+  const [heart, setHeart] = useState<{
+    phase: SwipeHeartPhase
+    token: number
+    trackId: string
+  } | null>(null)
+  const heartTokenRef = useRef(0)
+  const heartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const displayTrackIdRef = useRef<string | null>(null)
+  const likeInFlightGateRef = useRef(createTrackLikeInFlightGate())
 
   const displayTrack = pendingTrack ?? currentTrack
   const switching = Boolean(pendingTrack)
@@ -176,10 +196,13 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
     : null
   const allowInboxEnsure =
     favoritesMode && needsSwipeInboxEnsure(actionCanonicalItem)
+  const likeBusyForActionTrack = Boolean(
+    actionTrack && likeInFlightTrackId === actionTrack.id,
+  )
   const likeEnabled = canFullscreenLike({
     actionTrack,
     liked,
-    likeBusy,
+    likeBusy: likeBusyForActionTrack,
     allowInboxEnsure,
   })
   const alternativeCount = displayTrack
@@ -249,35 +272,117 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
     void resume()
   }
 
+  const dismissHeart = useCallback((token: number, holdMs: number) => {
+    if (heartTimerRef.current) {
+      clearTimeout(heartTimerRef.current)
+    }
+    heartTimerRef.current = setTimeout(() => {
+      heartTimerRef.current = null
+      setHeart((current) => (current?.token === token ? null : current))
+    }, holdMs)
+  }, [])
+
+  useEffect(() => {
+    displayTrackIdRef.current = displayTrack?.id ?? null
+  }, [displayTrack?.id])
+
+  useEffect(() => {
+    return () => {
+      if (heartTimerRef.current) {
+        clearTimeout(heartTimerRef.current)
+      }
+    }
+  }, [])
+
+  // Смена трека / выход из Избранного: не рисовать устаревшее сердечко.
+  const visibleHeart =
+    favoritesMode && heart && heart.trackId === displayTrack?.id ? heart : null
+
+  const applyFullscreenLikeUi = useCallback(
+    (
+      ui: FullscreenLikeAsyncUi,
+      token: number,
+      trackId: string,
+    ) => {
+      if (ui.kind === 'ignore') {
+        return
+      }
+      if (ui.kind === 'error') {
+        setHeart(null)
+        setNotice(ui.notice)
+        return
+      }
+      setNotice(ui.notice)
+      setHeart({ phase: ui.heartPhase, token, trackId })
+      dismissHeart(token, ui.dismissMs)
+    },
+    [dismissHeart],
+  )
+
   const onLike = useCallback(() => {
     if (!likeEnabled || !actionTrack) {
       return
     }
-    setLikeBusy(true)
+    const trackIdAtStart = actionTrack.id
+    // Per-track: повторный save того же трека блокируем; другие треки — нет.
+    if (!likeInFlightGateRef.current.tryBegin(trackIdAtStart)) {
+      return
+    }
+    setLikeInFlightTrackId(trackIdAtStart)
     setNotice(null)
+    const likeSession = captureAuthSession()
+    const token = heartTokenRef.current + 1
+    heartTokenRef.current = token
+    if (heartTimerRef.current) {
+      clearTimeout(heartTimerRef.current)
+      heartTimerRef.current = null
+    }
+    const releaseInFlight = () => {
+      likeInFlightGateRef.current.end(trackIdAtStart)
+      setLikeInFlightTrackId((current) =>
+        current === trackIdAtStart ? null : current,
+      )
+    }
     const result = classifySwipeTrack(actionTrack, 'like')
     if (result.kind === 'applied' && result.saved) {
       void result.saved
         .then((savedOk) => {
-          if (!favoritesMode) {
-            return
-          }
-          const notice = resolveFavoritesLikeNotice({
+          const successNotice = resolveFavoritesLikeNotice({
+            savedOk: true,
+            saveFailedMessage: SAVE_FAILED_MESSAGE,
+          }).message
+          const ui = resolveFullscreenLikeAsyncUi({
             savedOk,
+            authCurrent: isAuthSessionCurrent(likeSession),
+            trackStillCurrent: displayTrackIdRef.current === trackIdAtStart,
+            tokenCurrent: heartTokenRef.current === token,
+            favoritesMode,
+            reduceMotion: prefersReducedMotion(),
+            successNotice,
             saveFailedMessage: SAVE_FAILED_MESSAGE,
           })
-          setNotice(notice.message)
+          applyFullscreenLikeUi(ui, token, trackIdAtStart)
         })
         .catch(() => {
-          if (favoritesMode) {
-            setNotice(SAVE_FAILED_MESSAGE)
-          }
+          const ui = resolveFullscreenLikeAsyncError({
+            authCurrent: isAuthSessionCurrent(likeSession),
+            trackStillCurrent: displayTrackIdRef.current === trackIdAtStart,
+            tokenCurrent: heartTokenRef.current === token,
+            favoritesMode,
+            saveFailedMessage: SAVE_FAILED_MESSAGE,
+          })
+          applyFullscreenLikeUi(ui, token, trackIdAtStart)
         })
-        .finally(() => setLikeBusy(false))
+        .finally(releaseInFlight)
       return
     }
-    setLikeBusy(false)
-  }, [actionTrack, favoritesMode, likeEnabled])
+    releaseInFlight()
+  }, [
+    actionTrack,
+    applyFullscreenLikeUi,
+    favoritesMode,
+    likeEnabled,
+  ])
 
   const openCatalog = useCallback(() => {
     if (!actionTrack) {
@@ -545,11 +650,31 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
           {...(favoritesMode ? bindFavoritesGesture() : {})}
         >
           <div className="fullscreen-player-art-wrap">
-            <div
-              className="fullscreen-player-art rounded-[1.5rem] bg-cover bg-center"
-              style={coverStyle}
-              aria-hidden
-            />
+            <div className="fullscreen-player-art-stage">
+              <div
+                className="fullscreen-player-art rounded-[1.5rem] bg-cover bg-center"
+                style={coverStyle}
+                aria-hidden
+              />
+              {visibleHeart ? (
+                <div data-testid="fullscreen-player-like-heart">
+                  <SwipeHeartBurst
+                    key={visibleHeart.token}
+                    phase={visibleHeart.phase}
+                    token={visibleHeart.token}
+                    className="fullscreen-player-swipe-heart"
+                    onFlyEnd={(endedToken) => {
+                      setHeart((currentHeart) =>
+                        currentHeart?.token === endedToken &&
+                        currentHeart.phase === 'fly'
+                          ? null
+                          : currentHeart,
+                      )
+                    }}
+                  />
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <div className="fullscreen-player-meta">

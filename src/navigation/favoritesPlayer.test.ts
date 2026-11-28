@@ -118,6 +118,25 @@ test('FullscreenPlayer favorites like waits for save confirmation', () => {
   assert.equal(source.includes('new AudioPlayer'), false)
 })
 
+test('FullscreenPlayer like heart reuses SwipeDeck burst after saved===true', () => {
+  const source = readFileSync(
+    new URL('../components/player/FullscreenPlayer.tsx', import.meta.url),
+    'utf8',
+  )
+  assert.match(source, /SwipeHeartBurst/)
+  assert.match(source, /createTrackLikeInFlightGate/)
+  assert.match(source, /resolveFullscreenLikeAsyncUi/)
+  assert.match(source, /resolveFullscreenLikeAsyncError/)
+  assert.match(source, /prefersReducedMotion/)
+  assert.match(source, /data-testid="fullscreen-player-like-heart"/)
+  assert.match(source, /fullscreen-player-art-stage/)
+  // Per-track in-flight — не глобальный likeBusy на весь await.
+  assert.match(source, /likeInFlightGateRef\.current\.tryBegin/)
+  assert.match(source, /likeInFlightTrackId === actionTrack\.id/)
+  assert.match(source, /classifySwipeTrack\(actionTrack, 'like'\)/)
+  assert.equal(source.includes('setLikeBusy(true)'), false)
+})
+
 test('FAV-02 FullscreenPlayer favorites gestures cover touch and mouse paths', () => {
   const source = readFileSync(
     new URL('../components/player/FullscreenPlayer.tsx', import.meta.url),
