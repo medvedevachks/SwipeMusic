@@ -129,6 +129,34 @@ test('single-track catalog with Repeat ALL cycles via next fromEnded', () => {
   assert.equal(queue.getRepeatMode(), 'ALL')
 })
 
+test('early single-track stub does not enable Repeat ALL until expand', () => {
+  installMemoryLocalStorage()
+  resetCatalogRepeatPolicyForTests()
+  const queue = getPlaybackQueue()
+  queue.clear()
+  queue.setRepeatMode('ALL')
+  queue.setQueue([track('stub')], 0, {
+    type: 'playlist',
+    id: 'cat_stub',
+    title: 'Stub',
+  })
+  beginCatalogLoopSession('cat_stub')
+  assert.equal(queue.getRepeatMode(), 'OFF')
+  // Быстрый Next до expand не должен зациклить stub.
+  assert.equal(queue.next()?.id ?? null, null)
+  assert.equal(queue.getSnapshot().currentIndex, 0)
+  assert.equal(queue.current()?.id, 'stub')
+
+  queue.replacePlaylistItemsPreservingPlayback(
+    [track('stub'), track('next'), track('third')],
+    { type: 'playlist', id: 'cat_stub' },
+  )
+  assert.equal(applyCatalogLoopRepeatIfOwned('cat_stub'), true)
+  assert.equal(queue.getRepeatMode(), 'ALL')
+  assert.equal(queue.next()?.id, 'next')
+  assert.equal(queue.previous()?.id, 'stub')
+})
+
 test('late applyCatalogLoopRepeatIfOwned skips when context already left catalog', () => {
   const queue = withCatalog('cat_late', 'OFF')
   queue.setQueue([track('hit')], 0, {

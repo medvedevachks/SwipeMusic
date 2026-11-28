@@ -1955,6 +1955,92 @@ test('onPlaybackAccepted is skipped for superseded generation after early play',
   assert.equal(accepted, 0)
 })
 
+test('FAV-02: rapid Next during early stub does not loop before expand completes', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  installMemoryLocalStorage()
+  resetCatalogRepeatPolicyForTests()
+  const FAVORITES = { id: 'sys_favorites', name: 'Избранное' }
+  const items = Array.from({ length: 12 }, (_, index) => {
+    const id = `can_nav_${index}`
+    const copy = copyOf(id, 'local-folder', `n${index}.mp3`, `Nav ${index}`)
+    return itemOf(id, [copy], `Nav ${index}`)
+  })
+  const tracks = items.flatMap((item) => item.copies.map((copy) => trackFor(copy)))
+  let releaseRest!: () => void
+  const holdRest = new Promise<void>((resolve) => {
+    releaseRest = resolve
+  })
+  let resolveAccepted!: () => void
+  const acceptedGate = new Promise<void>((resolve) => {
+    resolveAccepted = resolve
+  })
+  const queue = getPlaybackQueue()
+  queue.clear()
+  queue.setRepeatMode('ALL')
+
+  const pending = playUserCatalog(
+    {
+      catalog: FAVORITES,
+      items,
+      startCanonicalTrackId: 'can_nav_3',
+    },
+    {
+      now: 91_000,
+      concurrency: 2,
+      port: portFor({
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(track) {
+            if (track.externalId !== 'n3.mp3') {
+              await holdRest
+            }
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap(tracks),
+      playSelection: async (options) => {
+        queue.setQueue(options.tracks, options.startIndex, options.context)
+      },
+      replaceQueue: async (options) => {
+        return queue.replacePlaylistItemsPreservingPlayback(options.tracks, {
+          type: 'playlist',
+          id: options.context.id,
+        })
+      },
+      onPlaybackAccepted: () => {
+        resolveAccepted()
+      },
+      getPlayerState: () => ({
+        pendingTrack: queue.current(),
+        currentTrack: queue.current(),
+      }),
+    },
+  )
+
+  await acceptedGate
+  assert.equal(queue.getItems().length, 1)
+  assert.notEqual(queue.getRepeatMode(), 'ALL')
+  // Быстрые Next/Previous до expand: без зацикливания stub.
+  assert.equal(queue.next()?.id ?? null, null)
+  assert.equal(queue.next()?.id ?? null, null)
+  assert.equal(queue.previous()?.id, queue.current()?.id)
+
+  releaseRest()
+  const result = await pending
+  assert.equal(result.status, 'played')
+  if (result.status !== 'played') return
+  assert.equal(queue.getItems().length, 12)
+  assert.equal(queue.getRepeatMode(), 'ALL')
+  const afterNext = queue.next()
+  assert.ok(afterNext)
+  assert.notEqual(afterNext.id, result.tracks[result.startIndex]?.id)
+})
+
 test('FAV-02: mid-start favorites accepts early then expands full 345 without second play', async () => {
   resetPlaybackAvailability()
   resetCatalogPlaybackGate()

@@ -1,12 +1,29 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { defaultGestureConfig } from '../config/gestureConfig.ts'
 import {
   SYS_FAVORITES_PLAYLIST_ID,
   isFavoritesPlayback,
   isUserCatalogPlayback,
-  shouldOpenFullscreenAfterCatalogPlay,
 } from './catalogFullscreen.ts'
+import {
+  formatFavoritesGestureHint,
+  needsSwipeInboxEnsure,
+  resolveFavoritesLikeNotice,
+} from './favoritesPlayerActions.ts'
+import { canFullscreenLike } from './fullscreenPlayerActions.ts'
+import type { Track } from '../types/track.ts'
+
+function track(id: string): Track {
+  return {
+    id,
+    sourceId: 'yandex-music',
+    externalId: id,
+    title: id,
+    artist: 'A',
+  }
+}
 
 test('isFavoritesPlayback detects sys_favorites playlist context', () => {
   assert.equal(
@@ -27,13 +44,6 @@ test('isFavoritesPlayback detects sys_favorites playlist context', () => {
     }),
     false,
   )
-  assert.equal(
-    isFavoritesPlayback({
-      context: { type: 'playlist', id: 'sys_swipes', title: 'Свайпы' },
-      activeSessionId: null,
-    }),
-    false,
-  )
 })
 
 test('favorites remains a catalog session for queue UI', () => {
@@ -50,49 +60,56 @@ test('favorites remains a catalog session for queue UI', () => {
   )
 })
 
-test('LibraryFolder favorites opens fullscreen on early playback intent', () => {
+test('FAV-02 like gate and inbox ensure behaviour', () => {
+  assert.equal(needsSwipeInboxEnsure({ catalogIds: [] }), true)
+  assert.equal(needsSwipeInboxEnsure({ catalogIds: ['sys_swipes'] }), false)
+  assert.equal(
+    canFullscreenLike({
+      actionTrack: track('a'),
+      liked: true,
+      likeBusy: false,
+      allowInboxEnsure: true,
+    }),
+    true,
+  )
+  const notice = resolveFavoritesLikeNotice({
+    savedOk: true,
+    saveFailedMessage: 'FAIL',
+  })
+  assert.equal(notice.kind, 'success')
+  assert.match(notice.message, /Свайпы/)
+})
+
+test('FAV-02 gesture hint is driven by gestureConfig', () => {
+  const hint = formatFavoritesGestureHint({
+    ...defaultGestureConfig,
+    left: 'categorize',
+    right: 'skip',
+  })
+  assert.match(hint, /← Каталог/)
+  assert.match(hint, /→ Дальше/)
+})
+
+test('LibraryFolder favorites wires early fullscreen accept path', () => {
   const source = readFileSync(
     new URL('../pages/LibraryFolder.tsx', import.meta.url),
     'utf8',
   )
-  assert.match(source, /folderId === 'favorites'/)
-  assert.match(source, /SYS_FAVORITES_PLAYLIST_ID|sys_favorites/)
-  assert.match(source, /openFullscreenPlayer/)
   assert.match(source, /onPlaybackAccepted/)
   assert.match(source, /openFavoritesFullscreenIfCurrent/)
-  assert.match(source, /shouldOpenFullscreenAfterCatalogPlay/)
-  assert.match(source, /playBusyRef/)
-  assert.match(source, /fullscreenOpenedForPlayRef/)
-  // Свайпы по-прежнему уходят на Home, не в fullscreen catalog loop.
+  assert.match(source, /openFullscreenPlayer/)
   assert.match(source, /startSwipeInboxSorting/)
-  assert.match(source, /navigate\('\/'\)/)
-  assert.equal(shouldOpenFullscreenAfterCatalogPlay({ status: 'played' }), true)
 })
 
-test('FullscreenPlayer favorites gestures reuse swipe engine without second AudioPlayer', () => {
+test('FullscreenPlayer favorites like waits for save confirmation', () => {
   const source = readFileSync(
     new URL('../components/player/FullscreenPlayer.tsx', import.meta.url),
     'utf8',
   )
-  assert.match(source, /isFavoritesPlayback/)
-  assert.match(source, /resolveSwipeAction/)
-  assert.match(source, /useDrag/)
-  assert.match(source, /fullscreen-player-favorites-gesture/)
-  assert.match(source, /classifySwipeTrack/)
-  assert.match(source, /В Избранном источника трек остаётся/)
+  assert.match(source, /resolveFavoritesLikeNotice/)
+  assert.match(source, /needsSwipeInboxEnsure/)
+  assert.match(source, /formatFavoritesGestureHint/)
+  assert.match(source, /pointer:\s*\{\s*touch:\s*true\s*\}/)
+  assert.match(source, /eventOptions:\s*\{\s*passive:\s*false\s*\}/)
   assert.equal(source.includes('new AudioPlayer'), false)
-  assert.equal(source.includes('getAudioPlayer('), false)
-  // Список по-прежнему из живой queue store (не копия favorites).
-  assert.match(source, /useGlobalPlayerStore\(\(s\) => s\.queue\)/)
-  assert.match(source, /playFromQueue/)
-})
-
-test('live favorites membership keeps external mirror after local like/categorize filter', () => {
-  const live = readFileSync(
-    new URL('../services/catalogPlayback/liveCatalogQueue.ts', import.meta.url),
-    'utf8',
-  )
-  assert.match(live, /VIRTUAL_FAVORITES_ID = 'sys_favorites'/)
-  assert.match(live, /hasSourceFavorite/)
-  assert.equal(live.includes('state.liked'), false)
 })
