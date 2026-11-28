@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useDrag } from '@use-gesture/react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { getDirectionFromMovement } from '../../config/gestureConfig'
 import { useFullscreenPlayer } from '../../hooks/useFullscreenPlayer'
 import {
+  isFavoritesPlayback,
   isUserCatalogPlayback,
   resolveCatalogPlaybackTitle,
 } from '../../navigation/catalogFullscreen'
@@ -25,10 +28,16 @@ import { openManualSourceAlternatives } from '../../services/runtimeFallback/fal
 import { isSessionSwitchIntegrationEnabled } from '../../services/sessionSwitch/featureFlag'
 import { getSessionSwitchAppRuntime } from '../../services/sessionSwitch/integration/sessionSwitchAppRuntime'
 import { classifySwipeTrack } from '../../services/swipeClassification'
+import {
+  SWIPE_THRESHOLD,
+  SWIPE_VERTICAL_THRESHOLD,
+  resolveSwipeAction,
+} from '../../services/swipeEngine'
 import { useCanonicalLibraryStore } from '../../store/canonicalLibraryStore'
 import { useCollectionStore } from '../../store/collectionStore'
 import { usePlaybackFallbackUxStore } from '../../store/playbackFallbackUxStore'
 import { useGlobalPlayerStore } from '../../store/playerStore'
+import type { SwipeDirection } from '../../types/gesture'
 import type { Track } from '../../types/track'
 import { getSourceDisplayName } from '../../utils/sourceDisplay'
 import CategoryPickerSheet from '../CategoryPickerSheet'
@@ -151,10 +160,17 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
     context: playbackContext,
     activeSessionId,
   })
+  const favoritesMode = isFavoritesPlayback({
+    context: playbackContext,
+    activeSessionId,
+  })
   const catalogTitle = showCatalogQueue
     ? resolveCatalogPlaybackTitle(playbackContext)
     : null
   const activeQueueTrackId = (pendingTrack ?? currentTrack)?.id ?? null
+  const gestureConfig = useCollectionStore((s) => s.gestureConfig)
+  const [dragDirection, setDragDirection] = useState<SwipeDirection | null>(null)
+  const [dragProgress, setDragProgress] = useState(0)
 
   const sourceLabel = displayTrack ? getSourceDisplayName(displayTrack.sourceId) : null
   const coverStyle = displayTrack?.coverUrl
@@ -216,31 +232,113 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
     void resume()
   }
 
-  const onLike = () => {
+  const onLike = useCallback(() => {
     if (!likeEnabled || !actionTrack) {
       return
     }
     setLikeBusy(true)
     const result = classifySwipeTrack(actionTrack, 'like')
     if (result.kind === 'applied' && result.saved) {
+      if (favoritesMode) {
+        // FAV-02: локальный like → «Свайпы»; зеркало Яндекс Избранного не трогаем.
+        setNotice('Добавлено в «Свайпы». В Избранном источника трек остаётся.')
+      }
       void result.saved.finally(() => setLikeBusy(false))
       return
     }
     setLikeBusy(false)
-  }
+  }, [actionTrack, favoritesMode, likeEnabled])
 
-  const openCatalog = () => {
+  const openCatalog = useCallback(() => {
     if (!actionTrack) {
       return
     }
     setCatalogTrack(actionTrack)
     setCatalogOpen(true)
     setNotice(null)
-  }
+  }, [actionTrack])
 
   const openQueue = () => {
     navigate('/queue', { replace: true })
   }
+
+  const applyFavoritesGesture = useCallback(
+    (direction: SwipeDirection) => {
+      if (!favoritesMode || !actionTrack || !canControl) {
+        return
+      }
+      const decision = resolveSwipeAction({
+        track: actionTrack,
+        direction,
+        gestureConfig,
+        canGoPrevious: queueIndex > 0 || queueLength > 1,
+      })
+      if (decision.action === 'like') {
+        onLike()
+        return
+      }
+      if (decision.action === 'categorize') {
+        openCatalog()
+        return
+      }
+      if (decision.action === 'skip') {
+        clearCatalogSheet()
+        beginSearchFlowCommand('FullscreenPlayer.Favorites.Next')
+        void next()
+        return
+      }
+      if (decision.action === 'previous' && decision.canGoPrevious) {
+        clearCatalogSheet()
+        void previous()
+      }
+    },
+    [
+      actionTrack,
+      canControl,
+      favoritesMode,
+      gestureConfig,
+      next,
+      onLike,
+      openCatalog,
+      previous,
+      queueIndex,
+      queueLength,
+    ],
+  )
+
+  // FAV-02: жесты как у SwipeDeck, только на обложке — список треков остаётся скроллируемым.
+  const bindFavoritesGesture = useDrag(
+    ({ active, movement: [mx, my], velocity: [vx, vy], last }) => {
+      if (!favoritesMode || catalogSheetOpen || menuOpen || !canControl) {
+        return
+      }
+      const direction = getDirectionFromMovement(mx, my, 28)
+      const distance = Math.hypot(mx, my)
+      const threshold =
+        direction === 'up' || direction === 'down'
+          ? SWIPE_VERTICAL_THRESHOLD
+          : SWIPE_THRESHOLD
+      const progress = Math.min(1, distance / threshold)
+      if (active) {
+        setDragDirection(direction)
+        setDragProgress(progress)
+        return
+      }
+      if (!last) {
+        return
+      }
+      setDragDirection(null)
+      setDragProgress(0)
+      const flick = Math.hypot(vx, vy) > 0.35
+      const passed =
+        distance >= threshold || (flick && distance > 32 && Boolean(direction))
+      if (!passed || !direction) {
+        return
+      }
+      applyFavoritesGesture(direction)
+    },
+    { filterTaps: true, pointer: { touch: true } },
+  )
 
   return (
     <div
@@ -378,7 +476,18 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
           </div>
         </header>
 
-        <div className="fullscreen-player-art-wrap">
+        <div
+          className={[
+            'fullscreen-player-art-wrap',
+            favoritesMode ? 'fullscreen-player-art-wrap--gestures' : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          data-testid="fullscreen-player-favorites-gesture"
+          data-drag-direction={dragDirection ?? undefined}
+          data-drag-progress={favoritesMode ? String(dragProgress) : undefined}
+          {...(favoritesMode ? bindFavoritesGesture() : {})}
+        >
           <div
             className="fullscreen-player-art rounded-[1.5rem] bg-cover bg-center"
             style={coverStyle}
@@ -393,6 +502,11 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
           <p className="truncate text-base text-[var(--color-muted)]">
             {displayTrack?.artist ?? 'Выберите композицию в любом разделе'}
           </p>
+          {favoritesMode ? (
+            <p className="mt-1 text-xs text-[var(--color-muted)]">
+              Жесты: ← лайк в «Свайпы» · → каталог · ↑ дальше. Зеркало Яндекса не меняется.
+            </p>
+          ) : null}
           {switching || buffering || loading ? (
             <p className="mt-1 text-xs text-[var(--color-accent)]">
               {switching ? 'Переключение…' : 'Загрузка…'}
@@ -612,14 +726,19 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
               )
               return
             }
-            // Успех: убрать из будущих циклов sys_swipes; текущий звук и Next не трогаем.
+            // Успех: снять только с inbox sys_swipes (no-op для очереди sys_favorites).
+            // FAV-02: зеркало внешних favorites и текущий звук/Next не трогаем.
             if (
               result.canonicalTrackId &&
               isAuthSessionCurrent(sessionAtStart)
             ) {
               removeSortedCanonicalFromSwipesQueue(result.canonicalTrackId)
             }
-            setNotice(null)
+            setNotice(
+              favoritesMode
+                ? 'Сохранено в каталог. В Избранном источника трек остаётся.'
+                : null,
+            )
             clearCatalogSheet()
           })
         }}

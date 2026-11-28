@@ -1954,3 +1954,81 @@ test('onPlaybackAccepted is skipped for superseded generation after early play',
   assert.ok(result.status === 'played' || result.status === 'busy')
   assert.equal(accepted, 0)
 })
+
+test('FAV-02: mid-start favorites accepts early then expands full 345 without second play', async () => {
+  resetPlaybackAvailability()
+  resetCatalogPlaybackGate()
+  const FAVORITES = { id: 'sys_favorites', name: 'Избранное' }
+  const items = Array.from({ length: 345 }, (_, index) => {
+    const id = `can_fav_${index}`
+    const copy = copyOf(id, 'local-folder', `f${index}.mp3`, `Fav ${index}`)
+    return itemOf(id, [copy], `Fav ${index}`)
+  })
+  const tracks = items.flatMap((item) => item.copies.map((copy) => trackFor(copy)))
+  const events: string[] = []
+  let releaseRest!: () => void
+  const holdRest = new Promise<void>((resolve) => {
+    releaseRest = resolve
+  })
+  let resolveAccepted!: () => void
+  const acceptedGate = new Promise<void>((resolve) => {
+    resolveAccepted = resolve
+  })
+
+  const pending = playUserCatalog(
+    {
+      catalog: FAVORITES,
+      items,
+      startCanonicalTrackId: 'can_fav_200',
+    },
+    {
+      now: 90_000,
+      concurrency: 8,
+      port: portFor({
+        'local-folder': {
+          id: 'local-folder',
+          capabilities: ['stream'],
+          supportsStreaming: true,
+          isAvailable: () => true,
+          async checkTrackAvailability(track) {
+            if (track.externalId !== 'f200.mp3') {
+              await holdRest
+            }
+            return { status: PLAYBACK_AVAILABILITY_STATUS.PLAYABLE }
+          },
+        },
+      }),
+      findTrack: findTrackMap(tracks),
+      playSelection: async (options) => {
+        events.push(
+          `play:${options.tracks.length}:${options.startIndex}:${options.context.id}`,
+        )
+      },
+      replaceQueue: async (options) => {
+        events.push(
+          `expand:${options.tracks.length}:${options.startIndex}:${options.context.id}`,
+        )
+        return true
+      },
+      onPlaybackAccepted: (info) => {
+        events.push(`accepted:${info.track.externalId}`)
+        resolveAccepted()
+      },
+    },
+  )
+
+  await acceptedGate
+  assert.deepEqual(events, [
+    'play:1:0:sys_favorites',
+    'accepted:f200.mp3',
+  ])
+
+  releaseRest()
+  const result = await pending
+  assert.equal(result.status, 'played')
+  if (result.status !== 'played') return
+  assert.equal(result.tracks.length, 345)
+  assert.equal(result.startIndex, 200)
+  assert.ok(events.includes('expand:345:200:sys_favorites'))
+  assert.equal(events.filter((row) => row.startsWith('play:')).length, 1)
+})

@@ -2,6 +2,9 @@ import { SYS_SWIPES_ID } from '../services/catalogs/systemFolders.ts'
 import type { PlaybackSessionId } from '../services/playbackSession/types.ts'
 import type { PlaybackContext } from '../types/playbackContext.ts'
 
+/** Виртуальный playlist id зеркала внешних source favorites (FAV-01/02). */
+export const SYS_FAVORITES_PLAYLIST_ID = 'sys_favorites'
+
 /**
  * Активное воспроизведение пользовательского каталога (не sys_swipes inbox).
  * SessionSwitch id «catalog» или playlist-context с id каталога.
@@ -17,6 +20,27 @@ export function isUserCatalogPlayback(input: {
     input.context.type === 'playlist' &&
     Boolean(input.context.id) &&
     input.context.id !== SYS_SWIPES_ID
+  )
+}
+
+/**
+ * Зеркало Избранного источников (не inbox «Свайпов»).
+ * Like/категория не должны снимать трек с этой очереди.
+ */
+export function isFavoritesPlayback(input: {
+  context: PlaybackContext
+  activeSessionId?: PlaybackSessionId | null
+}): boolean {
+  if (
+    input.context.type === 'playlist' &&
+    input.context.id === SYS_FAVORITES_PLAYLIST_ID
+  ) {
+    return true
+  }
+  return (
+    input.activeSessionId === 'catalog' &&
+    input.context.type === 'playlist' &&
+    input.context.id === SYS_FAVORITES_PLAYLIST_ID
   )
 }
 
