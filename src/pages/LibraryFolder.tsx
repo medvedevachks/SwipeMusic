@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import CategoryPickerSheet from '../components/CategoryPickerSheet'
 import { PlayIcon } from '../components/icons'
 import { getCategoryGlyph } from '../config/categoryPresets'
+import {
+  SYS_FAVORITES_PLAYLIST_ID,
+  shouldOpenFullscreenAfterCatalogPlay,
+} from '../navigation/catalogFullscreen'
+import { openFullscreenPlayer } from '../navigation/fullscreenPlayer'
 import {
   canonicalTracksInCatalog,
   externalFavoriteCanonicalItems,
@@ -40,6 +45,7 @@ export type LibraryFolderProps = {
 
 export default function LibraryFolder({ folderId }: LibraryFolderProps) {
   const navigate = useNavigate()
+  const location = useLocation()
   const folder = LIBRARY_SYSTEM_FOLDERS.find((row) => row.id === folderId)!
   const itemsById = useCanonicalLibraryStore((state) => state.itemsById)
   const allCategories = useCollectionStore((state) => state.categories)
@@ -74,7 +80,7 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
         folderId === 'swipes'
           ? SYS_SWIPES_ID
           : folderId === 'favorites'
-            ? 'sys_favorites'
+            ? SYS_FAVORITES_PLAYLIST_ID
             : 'sys_my_music',
       name: folder.name,
     }),
@@ -89,10 +95,17 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
   const [sortNotice, setSortNotice] = useState<string | null>(null)
   const [sortBusy, setSortBusy] = useState(false)
   const playGeneration = useRef(0)
+  const playBusyRef = useRef(false)
+  const playMountedRef = useRef(true)
+  const fullscreenOpenedForPlayRef = useRef(false)
 
   useEffect(() => {
+    playMountedRef.current = true
     return () => {
+      playMountedRef.current = false
       playGeneration.current += 1
+      playBusyRef.current = false
+      fullscreenOpenedForPlayRef.current = false
       cancelCatalogPlaybackGate()
     }
   }, [folderId])
@@ -102,15 +115,37 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
     playbackContext.id === catalogRef.id
 
   const runPlay = async (startCanonicalTrackId?: string) => {
-    if (busyKey) {
+    if (busyKey || playBusyRef.current) {
       setPlayError(CATALOG_PLAYBACK_MESSAGE.BUSY)
       return
     }
+    playBusyRef.current = true
     const generation = ++playGeneration.current
+    fullscreenOpenedForPlayRef.current = false
     const key = startCanonicalTrackId ?? 'folder'
     setBusyKey(key)
     setPlayError(null)
     setPlayHint(null)
+
+    const openFavoritesFullscreenIfCurrent = (needsUserPlayGesture?: boolean) => {
+      if (folderId !== 'favorites') {
+        return
+      }
+      if (generation !== playGeneration.current || !playMountedRef.current) {
+        return
+      }
+      if (fullscreenOpenedForPlayRef.current) {
+        return
+      }
+      fullscreenOpenedForPlayRef.current = true
+      setPlayError(null)
+      if (needsUserPlayGesture) {
+        setPlayHint(CATALOG_PLAYBACK_MESSAGE.NEEDS_USER_PLAY)
+      }
+      // FAV-02: сразу после первого intent — не ждать prepare всех ~345 треков.
+      openFullscreenPlayer(navigate, location)
+    }
+
     try {
       // UX-10: «Свайпы» → главная для разбора, не playlist-loop каталога.
       if (folderId === 'swipes') {
@@ -118,7 +153,7 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
           startCanonicalTrackId,
           items: tracks,
         })
-        if (generation !== playGeneration.current) {
+        if (generation !== playGeneration.current || !playMountedRef.current) {
           return
         }
         if (result.status === 'played') {
@@ -130,12 +165,31 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
         return
       }
 
-      const result = await playUserCatalog({
-        catalog: catalogRef,
-        items: tracks,
-        startCanonicalTrackId,
-      })
-      if (generation !== playGeneration.current) {
+      const result = await playUserCatalog(
+        {
+          catalog: catalogRef,
+          items: tracks,
+          startCanonicalTrackId,
+        },
+        folderId === 'favorites'
+          ? {
+              onPlaybackAccepted: (info) => {
+                openFavoritesFullscreenIfCurrent(info.needsUserPlayGesture)
+              },
+            }
+          : undefined,
+      )
+      if (generation !== playGeneration.current || !playMountedRef.current) {
+        return
+      }
+      if (
+        result.status === 'played' &&
+        shouldOpenFullscreenAfterCatalogPlay(result)
+      ) {
+        if (result.needsUserPlayGesture) {
+          setPlayHint(CATALOG_PLAYBACK_MESSAGE.NEEDS_USER_PLAY)
+        }
+        openFavoritesFullscreenIfCurrent(result.needsUserPlayGesture)
         return
       }
       if (result.status === 'played') {
@@ -147,12 +201,13 @@ export default function LibraryFolder({ folderId }: LibraryFolderProps) {
       }
       setPlayError(result.message)
     } catch {
-      if (generation === playGeneration.current) {
+      if (generation === playGeneration.current && playMountedRef.current) {
         setPlayError(CATALOG_PLAYBACK_MESSAGE.FAILED)
       }
     } finally {
       if (generation === playGeneration.current) {
         setBusyKey(null)
+        playBusyRef.current = false
       }
     }
   }

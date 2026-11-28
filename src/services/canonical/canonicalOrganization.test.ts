@@ -386,6 +386,49 @@ test('swipe like writes canonical state and source history, not a second like', 
   }
 })
 
+test('FAV-02: already-liked unsorted track still gets idempotent sys_swipes assign', async () => {
+  resetRuntime()
+  arm()
+  const track = sourceTrack('yandex-music', '101', 'Город')
+  const likedOnly = canonicalItem(
+    'can_x',
+    'Город',
+    [sourceCopy('yandex-music', '101', 'can_x', 'Город')],
+    true,
+    [],
+  )
+  useCanonicalLibraryStore.getState().replaceForUser('user-a', [likedOnly])
+  const calls = installRemote({
+    'yandex-music:101': identityFrom('can_x', [track]),
+  })
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => new Response(null, { status: 204 })) as typeof fetch
+  try {
+    assert.equal(
+      useCanonicalLibraryStore.getState().itemsById.can_x?.state.liked,
+      true,
+    )
+    assert.deepEqual(
+      useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds,
+      [],
+    )
+    const result = classifySwipeTrack(track, 'like')
+    assert.equal(result.kind, 'applied')
+    assert.equal(await result.saved, true)
+    // liked уже был — patch liked не дублируем; inbox assign один раз.
+    assert.equal(calls.liked.length, 0)
+    assert.equal(calls.assign.length, 1)
+    assert.equal(calls.assign[0]?.catalogId, 'sys_swipes')
+    assert.deepEqual(
+      useCanonicalLibraryStore.getState().itemsById.can_x?.catalogIds,
+      ['sys_swipes'],
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+    resetRuntime()
+  }
+})
+
 test('swipe catalog assignment writes canonical membership', async () => {
   resetRuntime()
   arm()

@@ -13,6 +13,11 @@ type ForcedCatalogRepeat = {
    * false — пользователь явно сменил Repeat в этой сессии.
    */
   enforceLoop: boolean
+  /**
+   * Early-start stub: ALL ещё не включён (очередь из 1 трека до expand).
+   * Watcher не должен считать текущий OFF пользовательским override.
+   */
+  deferLoopUntilExpanded: boolean
   /** Отличает новую сессию Play от late expand старой. */
   sessionId: number
 }
@@ -44,19 +49,33 @@ function writeLoopAll(): void {
 
 /**
  * Явный новый запуск каталога (ранний Play).
- * Всегда открывает новую сессию: снова включает ALL даже после ручного
- * ONE/OFF в предыдущей сессии того же catalogId.
+ * Открывает новую сессию enforceLoop; ALL включается сразу только если
+ * в очереди уже >1 трека. На early-start stub (1 трек до late expand)
+ * ALL не ставим — иначе Next зацикливает единственный трек.
+ * Late expand вызывает applyCatalogLoopRepeatIfOwned → writeLoopAll.
  */
 export function beginCatalogLoopSession(catalogId: string): void {
   ensureCatalogRepeatPolicyWatcher()
   const queue = getPlaybackQueue()
+  const previous = queue.getRepeatMode()
+  const deferLoopUntilExpanded = queue.getItems().length <= 1
   forced = {
     catalogId,
-    previous: queue.getRepeatMode(),
+    previous,
     enforceLoop: true,
+    deferLoopUntilExpanded,
     sessionId: ++sessionSeq,
   }
-  writeLoopAll()
+  if (!deferLoopUntilExpanded) {
+    writeLoopAll()
+    return
+  }
+  // Снять унаследованный ALL от прошлой сессии на однотрековом stub.
+  if (queue.getRepeatMode() === 'ALL') {
+    withProgrammaticRepeatWrite(() => {
+      queue.setRepeatMode('OFF')
+    })
+  }
 }
 
 /**
@@ -74,8 +93,11 @@ export function applyCatalogLoopRepeat(catalogId: string): void {
       catalogId,
       previous: queue.getRepeatMode(),
       enforceLoop: true,
+      deferLoopUntilExpanded: false,
       sessionId: ++sessionSeq,
     }
+  } else if (forced.deferLoopUntilExpanded) {
+    forced = { ...forced, deferLoopUntilExpanded: false }
   }
   if (forced.enforceLoop) {
     writeLoopAll()
@@ -137,6 +159,7 @@ export function ensureCatalogRepeatPolicyWatcher(): void {
   getPlaybackQueue().subscribe((snapshot) => {
     if (
       forced?.enforceLoop &&
+      !forced.deferLoopUntilExpanded &&
       !suppressUserRepeatNote &&
       snapshot.repeatMode !== 'ALL'
     ) {

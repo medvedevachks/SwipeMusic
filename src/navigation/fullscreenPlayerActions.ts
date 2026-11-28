@@ -14,13 +14,25 @@ export function resolveFullscreenActionTrack(input: {
   return input.currentTrack ?? null
 }
 
-/** Повторный Like идемпотентен на уровне commit; UI блокирует уже liked. */
+/**
+ * Like в Fullscreen.
+ * По умолчанию UI блокирует уже liked (повторный commit идемпотентен).
+ * allowInboxEnsure: FAV-02 — разрешить like→sys_swipes для уже лайкнутого,
+ * но ещё не разобранного (нет user-catalog / нет inbox).
+ */
 export function canFullscreenLike(input: {
   actionTrack: Track | null
   liked: boolean
   likeBusy: boolean
+  allowInboxEnsure?: boolean
 }): boolean {
-  return Boolean(input.actionTrack) && !input.liked && !input.likeBusy
+  if (!input.actionTrack || input.likeBusy) {
+    return false
+  }
+  if (!input.liked) {
+    return true
+  }
+  return input.allowInboxEnsure === true
 }
 
 /**
