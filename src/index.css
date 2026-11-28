@@ -1198,6 +1198,17 @@ body {
   align-items: center;
 }
 
+/* FAV-02: зона жестов Избранного на обложке (список треков ниже остаётся скроллом). */
+.fullscreen-player-art-wrap--gestures {
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+
+.fullscreen-player-art-wrap--gestures:active {
+  cursor: grabbing;
+}
+
 .fullscreen-player-art {
   width: min(100%, 22rem);
   aspect-ratio: 1;
