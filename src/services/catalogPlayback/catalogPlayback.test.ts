@@ -1179,7 +1179,8 @@ test('late catalog prepare does not force Repeat ALL after leaving to search', a
   await earlyGate
   await Promise.resolve()
   await Promise.resolve()
-  assert.equal(queue.getRepeatMode(), 'ALL')
+  // Early stub: ALL отложен до expand — иначе Next зацикливал бы один трек.
+  assert.equal(queue.getRepeatMode(), 'OFF')
   const searchHit = trackFor(copyOf('can_hit2', 'yandex-music', 'hit2', 'Hit2'))
   queue.setQueue([searchHit], 0, {
     type: 'search-seed',
@@ -1257,7 +1258,8 @@ test('user Repeat change during prepare is kept after late expand', async () => 
   // playEarlyTrack вызывает beginCatalogLoopSession после playSelection.
   await Promise.resolve()
   await Promise.resolve()
-  assert.equal(queue.getRepeatMode(), 'ALL')
+  // Stub ещё без ALL; пользовательский ONE блокирует late enforce после expand.
+  assert.equal(queue.getRepeatMode(), 'OFF')
   noteUserRepeatModeChange('ONE')
   queue.setRepeatMode('ONE')
   releaseRest()
