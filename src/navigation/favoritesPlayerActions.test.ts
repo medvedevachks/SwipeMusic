@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { defaultGestureConfig } from '../config/gestureConfig.ts'
 import type { GestureConfig } from '../types/gesture.ts'
 import {
+  FAVORITES_PLAYER_GESTURE_CONFIG,
   formatFavoritesGestureHint,
   needsSwipeInboxEnsure,
   resolveFavoritesLikeNotice,
@@ -61,7 +61,7 @@ test('canFullscreenLike allows inbox ensure for already liked unsorted', () => {
   )
 })
 
-test('favorites gesture hint follows gestureConfig labels', () => {
+test('favorites gesture hint uses fixed favorites labels', () => {
   const custom: GestureConfig = {
     left: 'skip',
     right: 'like',
@@ -70,14 +70,14 @@ test('favorites gesture hint follows gestureConfig labels', () => {
   }
   const hint = formatFavoritesGestureHint(custom)
   assert.match(hint, /← Дальше/)
-  assert.match(hint, /→ Лайк/)
+  assert.match(hint, /→ Свайпы/)
   assert.match(hint, /↑ Назад/)
-  assert.match(hint, /↓ Каталог/)
+  assert.match(hint, /↓ Категория/)
   assert.match(hint, /Зеркало источника не меняется/)
 
-  const defaults = formatFavoritesGestureHint(defaultGestureConfig)
-  assert.match(defaults, /← Лайк/)
-  assert.match(defaults, /→ Каталог/)
+  const defaults = formatFavoritesGestureHint(FAVORITES_PLAYER_GESTURE_CONFIG)
+  assert.match(defaults, /← Свайпы/)
+  assert.match(defaults, /→ Категория/)
   assert.match(defaults, /↑ Дальше/)
   assert.match(defaults, /↓ Назад/)
 })

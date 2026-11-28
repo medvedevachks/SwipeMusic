@@ -1190,6 +1190,27 @@ body {
   gap: 0.5rem;
 }
 
+/* FAV-02: карточка (обложка + meta) — единая зона жестов; транспорт/queue вне неё. */
+.fullscreen-player-swipe-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.65rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.fullscreen-player-swipe-card--gestures {
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+
+.fullscreen-player-swipe-card--gestures:active {
+  cursor: grabbing;
+}
+
 .fullscreen-player-art-wrap {
   display: flex;
   justify-content: center;
@@ -1198,21 +1219,10 @@ body {
   align-items: center;
 }
 
-/* FAV-02: зона жестов Избранного на обложке (список треков ниже остаётся скроллом). */
-.fullscreen-player-art-wrap--gestures {
-  touch-action: none;
-  cursor: grab;
-  user-select: none;
-}
-
-.fullscreen-player-art-wrap--gestures:active {
-  cursor: grabbing;
-}
-
 .fullscreen-player-art {
-  width: min(100%, 22rem);
+  width: min(100%, 18rem);
   aspect-ratio: 1;
-  max-height: min(48svh, 22rem);
+  max-height: min(42svh, 18rem);
   box-shadow:
     0 18px 40px -24px var(--deck-panel-shadow),
     inset 0 1px 0 var(--deck-spec);
@@ -1307,7 +1317,8 @@ body {
   }
 
   .fullscreen-player-art {
-    max-height: min(34svh, 14rem);
+    max-height: min(34svh, 13rem);
+    width: min(100%, 13rem);
   }
 
   .fullscreen-player-meta h2 {
@@ -1331,13 +1342,12 @@ body {
     min-height: 0;
     display: grid;
     grid-template-columns: minmax(9rem, 0.85fr) minmax(0, 1.25fr);
-    grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto minmax(0, 1fr);
     grid-template-areas:
       'top top'
-      'art meta'
-      'art progress'
-      'art transport'
-      'art actions'
+      'card progress'
+      'card transport'
+      'card actions'
       'list list';
     gap: 0.45rem 0.85rem;
     align-items: center;
@@ -1347,17 +1357,17 @@ body {
     grid-area: top;
   }
 
-  .fullscreen-player-art-wrap {
-    grid-area: art;
+  .fullscreen-player-swipe-card {
+    grid-area: card;
+    gap: 0.4rem;
   }
 
   .fullscreen-player-art {
-    width: min(100%, 12.5rem);
-    max-height: min(42svh, 12.5rem);
+    width: min(100%, 11.5rem);
+    max-height: min(38svh, 11.5rem);
   }
 
   .fullscreen-player-meta {
-    grid-area: meta;
     text-align: left;
   }
 

@@ -1,10 +1,10 @@
-import { gestureActionLabels } from '../config/gestureConfig.ts'
+import type { GestureConfig, SwipeDirection } from '../types/gesture.ts'
+import type { SwipeAction } from '../types/swipe.ts'
 import {
   itemHasUserCatalogMembership,
   itemInSwipeInbox,
 } from '../services/catalogs/systemFolders.ts'
 import type { CanonicalLibraryItem } from '../types/canonical.ts'
-import type { GestureConfig, SwipeDirection } from '../types/gesture.ts'
 
 const DIRECTION_ORDER: readonly SwipeDirection[] = [
   'left',
@@ -18,6 +18,24 @@ const ARROW: Record<SwipeDirection, string> = {
   right: '→',
   up: '↑',
   down: '↓',
+}
+
+/**
+ * Фиксированная раскладка жестов большого плеера Избранного
+ * (не зависит от настроек колоды Свайпов).
+ */
+export const FAVORITES_PLAYER_GESTURE_CONFIG: GestureConfig = {
+  left: 'like',
+  right: 'categorize',
+  up: 'skip',
+  down: 'previous',
+}
+
+const FAVORITES_GESTURE_ACTION_LABELS: Record<SwipeAction, string> = {
+  like: 'Свайпы',
+  categorize: 'Категория',
+  skip: 'Дальше',
+  previous: 'Назад',
 }
 
 /**
@@ -39,11 +57,13 @@ export function needsSwipeInboxEnsure(
   return true
 }
 
-/** Подсказка жестов Избранного строго из gestureConfig. */
-export function formatFavoritesGestureHint(config: GestureConfig): string {
+/** Подсказка жестов Избранного — фиксированная раскладка большого плеера. */
+export function formatFavoritesGestureHint(
+  config: GestureConfig = FAVORITES_PLAYER_GESTURE_CONFIG,
+): string {
   const parts = DIRECTION_ORDER.map((direction) => {
     const action = config[direction]
-    return `${ARROW[direction]} ${gestureActionLabels[action]}`
+    return `${ARROW[direction]} ${FAVORITES_GESTURE_ACTION_LABELS[action]}`
   })
   return `Жесты: ${parts.join(' · ')}. Зеркало источника не меняется.`
 }

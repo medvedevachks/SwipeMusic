@@ -9,6 +9,7 @@ import {
   resolveCatalogPlaybackTitle,
 } from '../../navigation/catalogFullscreen'
 import {
+  FAVORITES_PLAYER_GESTURE_CONFIG,
   formatFavoritesGestureHint,
   needsSwipeInboxEnsure,
   resolveFavoritesLikeNotice,
@@ -162,9 +163,10 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
     ? resolveCatalogPlaybackTitle(playbackContext)
     : null
   const activeQueueTrackId = (pendingTrack ?? currentTrack)?.id ?? null
-  const gestureConfig = useCollectionStore((s) => s.gestureConfig)
   const [dragDirection, setDragDirection] = useState<SwipeDirection | null>(null)
   const [dragProgress, setDragProgress] = useState(0)
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 })
+  const [dragSettling, setDragSettling] = useState(false)
 
   const liked = actionTrack
     ? isSourceCopyLiked(canonicalLookup, sourceTrackKeyOf(actionTrack))
@@ -184,7 +186,7 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
     ? (canonicalItemForTrack(canonicalLookup, displayTrack)?.copies.length ?? 0)
     : 0
   const favoritesGestureHint = favoritesMode
-    ? formatFavoritesGestureHint(gestureConfig)
+    ? formatFavoritesGestureHint(FAVORITES_PLAYER_GESTURE_CONFIG)
     : null
 
   const sourceLabel = displayTrack ? getSourceDisplayName(displayTrack.sourceId) : null
@@ -298,7 +300,7 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
       const decision = resolveSwipeAction({
         track: actionTrack,
         direction,
-        gestureConfig,
+        gestureConfig: FAVORITES_PLAYER_GESTURE_CONFIG,
         canGoPrevious: queueIndex > 0 || queueLength > 1,
       })
       if (decision.action === 'like') {
@@ -324,7 +326,6 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
       actionTrack,
       canControl,
       favoritesMode,
-      gestureConfig,
       next,
       onLike,
       openCatalog,
@@ -334,15 +335,13 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
     ],
   )
 
-  // FAV-02: жесты как у SwipeDeck на обложке (touch + mouse). Список ниже — scroll.
+  // FAV-02 hotfix: жесты на карточке (обложка + meta), как у SwipeDeck.
+  // preventScroll:false — иначе touch отменяет вертикальные ↑/↓.
+  // filterTaps:false — не глушить pointer/mouse commit.
   const bindFavoritesGesture = useDrag(
-    ({ active, movement: [mx, my], velocity: [vx, vy], last, event }) => {
+    ({ active, movement: [mx, my], velocity: [vx, vy], last }) => {
       if (!favoritesMode || catalogSheetOpen || menuOpen || !canControl) {
         return
-      }
-      // Не даём браузеру стартовать scroll/select во время жеста мышью/тачем.
-      if (active && event?.cancelable) {
-        event.preventDefault()
       }
       const direction = getDirectionFromMovement(mx, my, 28)
       const distance = Math.hypot(mx, my)
@@ -352,30 +351,49 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
           : SWIPE_THRESHOLD
       const progress = Math.min(1, distance / threshold)
       if (active) {
+        setDragSettling(false)
         setDragDirection(direction)
         setDragProgress(progress)
+        setDragOffset({ x: mx, y: my })
         return
       }
       if (!last) {
         return
       }
-      setDragDirection(null)
-      setDragProgress(0)
       const flick = Math.hypot(vx, vy) > 0.35
       const passed =
         distance >= threshold || (flick && distance > 32 && Boolean(direction))
+      setDragDirection(null)
+      setDragProgress(0)
+      setDragOffset({ x: 0, y: 0 })
+      setDragSettling(true)
       if (!passed || !direction) {
+        return
+      }
+      const decision = resolveSwipeAction({
+        track: actionTrack!,
+        direction,
+        gestureConfig: FAVORITES_PLAYER_GESTURE_CONFIG,
+        canGoPrevious: queueIndex > 0 || queueLength > 1,
+      })
+      if (decision.action === 'previous' && !decision.canGoPrevious) {
         return
       }
       applyFavoritesGesture(direction)
     },
     {
-      // pointer/touch + mouse (Pointer Events); passive:false — preventDefault на drag.
-      filterTaps: true,
-      pointer: { touch: true },
-      eventOptions: { passive: false },
+      filterTaps: false,
+      preventScroll: false,
     },
   )
+
+  const favoritesCardStyle = favoritesMode
+    ? {
+        transform: `translate3d(${dragOffset.x}px, ${dragOffset.y}px, 0) rotate(${dragOffset.x / 28}deg)`,
+        transition: dragSettling ? 'transform 220ms ease' : 'none',
+        willChange: 'transform' as const,
+      }
+    : undefined
 
   return (
     <div
@@ -515,43 +533,46 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
 
         <div
           className={[
-            'fullscreen-player-art-wrap',
-            favoritesMode ? 'fullscreen-player-art-wrap--gestures' : '',
+            'fullscreen-player-swipe-card',
+            favoritesMode ? 'fullscreen-player-swipe-card--gestures' : '',
           ]
             .filter(Boolean)
             .join(' ')}
           data-testid="fullscreen-player-favorites-gesture"
           data-drag-direction={dragDirection ?? undefined}
           data-drag-progress={favoritesMode ? String(dragProgress) : undefined}
+          style={favoritesCardStyle}
           {...(favoritesMode ? bindFavoritesGesture() : {})}
         >
-          <div
-            className="fullscreen-player-art rounded-[1.5rem] bg-cover bg-center"
-            style={coverStyle}
-            aria-hidden
-          />
-        </div>
+          <div className="fullscreen-player-art-wrap">
+            <div
+              className="fullscreen-player-art rounded-[1.5rem] bg-cover bg-center"
+              style={coverStyle}
+              aria-hidden
+            />
+          </div>
 
-        <div className="fullscreen-player-meta">
-          <h2 className="truncate font-display text-2xl font-semibold tracking-tight text-[var(--color-fg)] sm:text-3xl">
-            {displayTrack?.title ?? 'Ничего не играет'}
-          </h2>
-          <p className="truncate text-base text-[var(--color-muted)]">
-            {displayTrack?.artist ?? 'Выберите композицию в любом разделе'}
-          </p>
-          {favoritesGestureHint ? (
-            <p
-              className="mt-1 text-xs text-[var(--color-muted)]"
-              data-testid="fullscreen-player-favorites-gesture-hint"
-            >
-              {favoritesGestureHint}
+          <div className="fullscreen-player-meta">
+            <h2 className="truncate font-display text-2xl font-semibold tracking-tight text-[var(--color-fg)] sm:text-3xl">
+              {displayTrack?.title ?? 'Ничего не играет'}
+            </h2>
+            <p className="truncate text-base text-[var(--color-muted)]">
+              {displayTrack?.artist ?? 'Выберите композицию в любом разделе'}
             </p>
-          ) : null}
-          {switching || buffering || loading ? (
-            <p className="mt-1 text-xs text-[var(--color-accent)]">
-              {switching ? 'Переключение…' : 'Загрузка…'}
-            </p>
-          ) : null}
+            {favoritesGestureHint ? (
+              <p
+                className="mt-1 text-xs text-[var(--color-muted)]"
+                data-testid="fullscreen-player-favorites-gesture-hint"
+              >
+                {favoritesGestureHint}
+              </p>
+            ) : null}
+            {switching || buffering || loading ? (
+              <p className="mt-1 text-xs text-[var(--color-accent)]">
+                {switching ? 'Переключение…' : 'Загрузка…'}
+              </p>
+            ) : null}
+          </div>
         </div>
 
         <div className="fullscreen-player-progress">
