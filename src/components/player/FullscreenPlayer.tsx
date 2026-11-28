@@ -46,6 +46,14 @@ import { useGlobalPlayerStore } from '../../store/playerStore'
 import type { SwipeDirection } from '../../types/gesture'
 import type { Track } from '../../types/track'
 import { getSourceDisplayName } from '../../utils/sourceDisplay'
+import { SwipeHeartBurst } from '../SwipeHeartBurst'
+import {
+  SWIPE_HEART_DISMISS_MS,
+  prefersReducedMotion,
+  resolveSwipeHeartPhase,
+  shouldShowSwipeHeart,
+  type SwipeHeartPhase,
+} from '../swipeHeartVisual'
 import CategoryPickerSheet from '../CategoryPickerSheet'
 import {
   CloseIcon,
@@ -129,6 +137,14 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
   const [catalogBusy, setCatalogBusy] = useState(false)
   const [likeBusy, setLikeBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [heart, setHeart] = useState<{
+    phase: SwipeHeartPhase
+    token: number
+    trackId: string
+  } | null>(null)
+  const heartTokenRef = useRef(0)
+  const heartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const displayTrackIdRef = useRef<string | null>(null)
 
   const displayTrack = pendingTrack ?? currentTrack
   const switching = Boolean(pendingTrack)
@@ -249,35 +265,96 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
     void resume()
   }
 
+  const dismissHeart = useCallback((token: number, holdMs: number) => {
+    if (heartTimerRef.current) {
+      clearTimeout(heartTimerRef.current)
+    }
+    heartTimerRef.current = setTimeout(() => {
+      heartTimerRef.current = null
+      setHeart((current) => (current?.token === token ? null : current))
+    }, holdMs)
+  }, [])
+
+  useEffect(() => {
+    displayTrackIdRef.current = displayTrack?.id ?? null
+  }, [displayTrack?.id])
+
+  useEffect(() => {
+    return () => {
+      if (heartTimerRef.current) {
+        clearTimeout(heartTimerRef.current)
+      }
+    }
+  }, [])
+
+  // Смена трека / выход из Избранного: не рисовать устаревшее сердечко.
+  const visibleHeart =
+    favoritesMode && heart && heart.trackId === displayTrack?.id ? heart : null
+
   const onLike = useCallback(() => {
     if (!likeEnabled || !actionTrack) {
       return
     }
     setLikeBusy(true)
     setNotice(null)
+    const likeSession = captureAuthSession()
+    const trackIdAtStart = actionTrack.id
+    const token = heartTokenRef.current + 1
+    heartTokenRef.current = token
+    if (heartTimerRef.current) {
+      clearTimeout(heartTimerRef.current)
+      heartTimerRef.current = null
+    }
     const result = classifySwipeTrack(actionTrack, 'like')
+    // Не держать likeBusy до конца save — иначе блокируются следующие свайпы/кнопки.
+    setLikeBusy(false)
     if (result.kind === 'applied' && result.saved) {
       void result.saved
         .then((savedOk) => {
+          if (heartTokenRef.current !== token) {
+            return
+          }
+          if (displayTrackIdRef.current !== trackIdAtStart) {
+            setHeart(null)
+            return
+          }
+          const authCurrent = isAuthSessionCurrent(likeSession)
           if (!favoritesMode) {
             return
           }
-          const notice = resolveFavoritesLikeNotice({
+          const likeNotice = resolveFavoritesLikeNotice({
             savedOk,
             saveFailedMessage: SAVE_FAILED_MESSAGE,
           })
-          setNotice(notice.message)
+          setNotice(likeNotice.message)
+          if (
+            !shouldShowSwipeHeart({
+              savedOk,
+              authCurrent,
+            })
+          ) {
+            setHeart(null)
+            return
+          }
+          const phase = resolveSwipeHeartPhase(prefersReducedMotion())
+          setHeart({ phase, token, trackId: trackIdAtStart })
+          dismissHeart(
+            token,
+            phase === 'fly' ? SWIPE_HEART_DISMISS_MS : 1800,
+          )
         })
         .catch(() => {
-          if (favoritesMode) {
+          if (heartTokenRef.current !== token) {
+            return
+          }
+          setHeart(null)
+          if (favoritesMode && isAuthSessionCurrent(likeSession)) {
             setNotice(SAVE_FAILED_MESSAGE)
           }
         })
-        .finally(() => setLikeBusy(false))
       return
     }
-    setLikeBusy(false)
-  }, [actionTrack, favoritesMode, likeEnabled])
+  }, [actionTrack, dismissHeart, favoritesMode, likeEnabled])
 
   const openCatalog = useCallback(() => {
     if (!actionTrack) {
@@ -545,11 +622,31 @@ function FullscreenPlayerPanel({ onClose }: { onClose: () => void }) {
           {...(favoritesMode ? bindFavoritesGesture() : {})}
         >
           <div className="fullscreen-player-art-wrap">
-            <div
-              className="fullscreen-player-art rounded-[1.5rem] bg-cover bg-center"
-              style={coverStyle}
-              aria-hidden
-            />
+            <div className="fullscreen-player-art-stage">
+              <div
+                className="fullscreen-player-art rounded-[1.5rem] bg-cover bg-center"
+                style={coverStyle}
+                aria-hidden
+              />
+              {visibleHeart ? (
+                <div data-testid="fullscreen-player-like-heart">
+                  <SwipeHeartBurst
+                    key={visibleHeart.token}
+                    phase={visibleHeart.phase}
+                    token={visibleHeart.token}
+                    className="fullscreen-player-swipe-heart"
+                    onFlyEnd={(endedToken) => {
+                      setHeart((currentHeart) =>
+                        currentHeart?.token === endedToken &&
+                        currentHeart.phase === 'fly'
+                          ? null
+                          : currentHeart,
+                      )
+                    }}
+                  />
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <div className="fullscreen-player-meta">
