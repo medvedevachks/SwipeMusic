@@ -124,15 +124,17 @@ test('FullscreenPlayer like heart reuses SwipeDeck burst after saved===true', ()
     'utf8',
   )
   assert.match(source, /SwipeHeartBurst/)
-  assert.match(source, /shouldShowSwipeHeart/)
-  assert.match(source, /resolveSwipeHeartPhase/)
+  assert.match(source, /createTrackLikeInFlightGate/)
+  assert.match(source, /resolveFullscreenLikeAsyncUi/)
+  assert.match(source, /resolveFullscreenLikeAsyncError/)
   assert.match(source, /prefersReducedMotion/)
-  assert.match(source, /SWIPE_HEART_DISMISS_MS/)
   assert.match(source, /data-testid="fullscreen-player-like-heart"/)
   assert.match(source, /fullscreen-player-art-stage/)
-  // Unlock before await — не блокировать следующие свайпы.
-  assert.match(source, /setLikeBusy\(false\)/)
+  // Per-track in-flight — не глобальный likeBusy на весь await.
+  assert.match(source, /likeInFlightGateRef\.current\.tryBegin/)
+  assert.match(source, /likeInFlightTrackId === actionTrack\.id/)
   assert.match(source, /classifySwipeTrack\(actionTrack, 'like'\)/)
+  assert.equal(source.includes('setLikeBusy(true)'), false)
 })
 
 test('FAV-02 FullscreenPlayer favorites gestures cover touch and mouse paths', () => {
