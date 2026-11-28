@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { defaultGestureConfig } from '../config/gestureConfig.ts'
 import {
   SYS_FAVORITES_PLAYLIST_ID,
   isFavoritesPlayback,
   isUserCatalogPlayback,
 } from './catalogFullscreen.ts'
 import {
+  FAVORITES_PLAYER_GESTURE_CONFIG,
   formatFavoritesGestureHint,
   needsSwipeInboxEnsure,
   resolveFavoritesLikeNotice,
@@ -80,14 +80,18 @@ test('FAV-02 like gate and inbox ensure behaviour', () => {
   assert.match(notice.message, /Свайпы/)
 })
 
-test('FAV-02 gesture hint is driven by gestureConfig', () => {
-  const hint = formatFavoritesGestureHint({
-    ...defaultGestureConfig,
-    left: 'categorize',
-    right: 'skip',
+test('FAV-02 favorites player uses fixed swipe mapping', () => {
+  assert.deepEqual(FAVORITES_PLAYER_GESTURE_CONFIG, {
+    left: 'like',
+    right: 'categorize',
+    up: 'skip',
+    down: 'previous',
   })
-  assert.match(hint, /← Каталог/)
-  assert.match(hint, /→ Дальше/)
+  const hint = formatFavoritesGestureHint()
+  assert.match(hint, /← Свайпы/)
+  assert.match(hint, /→ Категория/)
+  assert.match(hint, /↑ Дальше/)
+  assert.match(hint, /↓ Назад/)
 })
 
 test('LibraryFolder favorites wires early fullscreen accept path', () => {
@@ -109,8 +113,8 @@ test('FullscreenPlayer favorites like waits for save confirmation', () => {
   assert.match(source, /resolveFavoritesLikeNotice/)
   assert.match(source, /needsSwipeInboxEnsure/)
   assert.match(source, /formatFavoritesGestureHint/)
-  assert.match(source, /pointer:\s*\{\s*touch:\s*true\s*\}/)
-  assert.match(source, /eventOptions:\s*\{\s*passive:\s*false\s*\}/)
+  assert.match(source, /preventScroll:\s*false/)
+  assert.match(source, /filterTaps:\s*false/)
   assert.equal(source.includes('new AudioPlayer'), false)
 })
 
@@ -120,13 +124,25 @@ test('FAV-02 FullscreenPlayer favorites gestures cover touch and mouse paths', (
     'utf8',
   )
   assert.match(source, /bindFavoritesGesture\s*=\s*useDrag/)
-  assert.match(source, /pointer:\s*\{\s*touch:\s*true\s*\}/)
-  assert.match(source, /pointer\/touch \+ mouse/)
+  assert.match(source, /preventScroll:\s*false/)
+  assert.match(source, /filterTaps:\s*false/)
+  assert.match(source, /FAVORITES_PLAYER_GESTURE_CONFIG/)
   assert.match(source, /applyFavoritesGesture/)
+  assert.match(source, /dragOffset/)
+  assert.match(source, /fullscreen-player-swipe-card/)
   assert.match(source, /void next\(\)/)
   assert.match(source, /void previous\(\)/)
   assert.match(source, /data-testid="fullscreen-player-favorites-gesture"/)
-  // Кнопки Next/Previous остаются доступны мышью рядом с жестами на обложке.
   assert.match(source, /aria-label="Предыдущий"/)
   assert.match(source, /aria-label="Следующий"/)
+})
+
+test('FAV-02 artwork size is reduced for portrait without breaking landscape hooks', () => {
+  const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8')
+  assert.match(css, /width:\s*min\(100%,\s*18rem\)/)
+  assert.match(css, /max-height:\s*min\(42svh,\s*18rem\)/)
+  assert.equal(/22rem/.test(css.match(/\.fullscreen-player-art\s*\{[^}]+\}/)?.[0] ?? ''), false)
+  assert.match(css, /fullscreen-player-swipe-card--gestures/)
+  assert.match(css, /touch-action:\s*none/)
+  assert.match(css, /grid-area:\s*card/)
 })
